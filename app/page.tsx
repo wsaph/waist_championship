@@ -96,6 +96,15 @@ const PET_OPTIONS = [
   { id: 'pig', label: '🐷 น้องหมู' },
 ];
 
+const GROUP_PAIR_ACTIVITIES = [
+  { animType: 'badminton', label: '🏸 ตีแบดด้วยกัน' },
+  { animType: 'picnic_shabu', label: '🍲 ตั้งวงชาบูด้วยกัน' },
+  { animType: 'play_cards', label: '🃏 ตั้งวงเล่นไพ่ด้วยกัน' },
+  { animType: 'boxing', label: '🥊 ซ้อมมวยคู่กัน' },
+  { animType: 'dumbbell', label: '🏋️ ยกดัมเบลด้วยกัน' },
+  { animType: 'pushup', label: '💪 วิดพื้นข้างกัน' },
+];
+
 const FOOD_THOUGHTS = [
   '💭 🥓 ชาบู~',
   '💭 🧋 ชานมไข่มุก',
@@ -153,6 +162,22 @@ export default function Arena3DPage() {
   const [boardMessage, setBoardMessage] = useState('');
   const [sendingBoard, setSendingBoard] = useState(false);
 
+  const [walkingSpectatorId, setWalkingSpectatorId] = useState<number | null>(null);
+  const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
+  const [isPairMenuOpen, setIsPairMenuOpen] = useState(false);
+  const [pairedActivities, setPairedActivities] = useState<Record<number, { animType: string; label: string }>>({});
+
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [signInUsername, setSignInUsername] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState('');
+
+  const walkingSpectatorIdRef = useRef<number | null>(null);
+  const nearbySpectatorIdRef = useRef<number | null>(null);
+  const keysPressedRef = useRef<Record<string, boolean>>({});
+  const walkTargetRef = useRef<THREE.Vector3 | null>(null);
+
   const pendingDeliveryRef = useRef<{
     targetId: number;
     kind: 'cheer' | 'tempt';
@@ -176,6 +201,7 @@ export default function Arena3DPage() {
   const charMeshesRef = useRef<any[]>([]);
   const leaderIdRef = useRef<number | null>(null);
   const loserIdRef = useRef<number | null>(null);
+  const savedSpectatorPosRef = useRef<Record<number, { x: number; y: number; z: number; rotY: number }>>({});
 
   const showToast = (emoji: string, title: string, text: string) => {
     setToast({ show: true, emoji, title, text });
@@ -193,6 +219,13 @@ export default function Arena3DPage() {
       }
       if (data.participants) {
         setPlayers(data.participants);
+        const savedId = localStorage.getItem('waist_user_id');
+        if (savedId && walkingSpectatorIdRef.current === null) {
+          const me = (data.participants as Player[]).find((p) => p.id === Number(savedId));
+          if (me?.role === 'spectator') {
+            setWalkingSpectatorId(me.id);
+          }
+        }
         const competitors = (data.participants as Player[]).filter((p) => p.role !== 'spectator');
         if (competitors.length > 0) {
           setSelectedPlayerId((prev) =>
@@ -213,8 +246,40 @@ export default function Arena3DPage() {
     if (window.innerWidth < 768) {
       setIsDrawerOpen(false);
     }
+    const savedId = localStorage.getItem('waist_user_id');
+    if (savedId && !Number.isNaN(Number(savedId))) {
+      const uid = Number(savedId);
+      setCurrentUserId(uid);
+      setBoardSenderId(String(uid));
+    }
+    setAuthChecked(true);
     fetchArenaData();
   }, [fetchArenaData]);
+
+  useEffect(() => {
+    walkingSpectatorIdRef.current = walkingSpectatorId;
+    if (walkingSpectatorId === null) {
+      setNearbySpectator(null);
+      nearbySpectatorIdRef.current = null;
+      setIsPairMenuOpen(false);
+      walkTargetRef.current = null;
+    }
+  }, [walkingSpectatorId]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      keysPressedRef.current[e.key.toLowerCase()] = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysPressedRef.current[e.key.toLowerCase()] = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
 
   const competitors = React.useMemo(
     () => players.filter((p) => p.role !== 'spectator'),
@@ -276,6 +341,8 @@ export default function Arena3DPage() {
       setJoinRole(p.role === 'spectator' ? 'spectator' : 'competitor');
       setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
       setJoinPet(p.petType || 'none');
+      setJoinStart(p.startWeight > 0 ? String(p.startWeight) : '');
+      setJoinGoal(p.goalWeight > 0 ? String(p.goalWeight) : '');
       setJoinName(p.name);
       setJoinEmoji(p.emoji);
       setJoinColor(p.colorHex || '#38BDF8');
@@ -290,7 +357,7 @@ export default function Arena3DPage() {
 
   const getOverviewCameraPos = () => {
     const isPortrait = typeof window !== 'undefined' && window.innerWidth < window.innerHeight;
-    return isPortrait ? new THREE.Vector3(0, 38, 52) : new THREE.Vector3(0, 26, 38);
+    return isPortrait ? new THREE.Vector3(0, 46, 56) : new THREE.Vector3(0, 34, 44);
   };
 
   const setCameraView = (mode: 'overview' | 'leader' | 'loser') => {
@@ -352,7 +419,7 @@ export default function Arena3DPage() {
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
     const spectatorList = players.filter((pl) => pl.role === 'spectator');
-    const trackWidth = Math.max(8.5, Math.min(15, competitors.length * 0.65 + 4));
+    const trackWidth = Math.max(7.5, Math.min(10.5, competitors.length * 0.35 + 4.5));
 
     dirLight.shadow.camera.near = 5;
     dirLight.shadow.camera.far = 110;
@@ -365,7 +432,7 @@ export default function Arena3DPage() {
     scene.add(dirLight);
 
     const island = new THREE.Mesh(
-      new THREE.BoxGeometry(72, 2.2, 46),
+      new THREE.BoxGeometry(62, 2.2, 56),
       new THREE.MeshStandardMaterial({ color: 0x86EFAC, roughness: 0.7 })
     );
     island.position.set(0, -1.15, 0);
@@ -373,20 +440,27 @@ export default function Arena3DPage() {
     scene.add(island);
 
     const dirt = new THREE.Mesh(
-      new THREE.BoxGeometry(70.5, 1.8, 44.5),
+      new THREE.BoxGeometry(60.5, 1.8, 54.5),
       new THREE.MeshStandardMaterial({ color: 0xFDBA74, roughness: 0.9 })
     );
     dirt.position.set(0, -3.1, 0);
     scene.add(dirt);
 
-    // S-curve track ("เอว S" concept)
-    const trackCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-24, 0.14, 11),
-      new THREE.Vector3(-12, 0.14, -10),
-      new THREE.Vector3(0, 0.14, 0),
-      new THREE.Vector3(12, 0.14, 10),
-      new THREE.Vector3(24, 0.14, -11),
-    ]);
+    // Classic iconic "S" curve ("เอว S" concept)
+    const trackCurve = new THREE.CatmullRomCurve3(
+      [
+        new THREE.Vector3(-14, 0.14, 19),
+        new THREE.Vector3(6, 0.14, 20),
+        new THREE.Vector3(17, 0.14, 11),
+        new THREE.Vector3(0, 0.14, 0),
+        new THREE.Vector3(-17, 0.14, -11),
+        new THREE.Vector3(-6, 0.14, -20),
+        new THREE.Vector3(14, 0.14, -19),
+      ],
+      false,
+      'centripetal',
+      0.5
+    );
 
     const segments = 120;
     const positions: number[] = [];
@@ -415,19 +489,24 @@ export default function Arena3DPage() {
     trackMesh.receiveShadow = true;
     scene.add(trackMesh);
 
-    // White edge & center lines along the S-curve
+    // Raised yellow/white curbs & center line along the S-curve
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-    [-trackWidth / 2 + 0.25, 0, trackWidth / 2 - 0.25].forEach((offset) => {
+    const curbMat = new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.4 });
+    [
+      { offset: -trackWidth / 2, radius: 0.16, mat: curbMat },
+      { offset: 0, radius: 0.08, mat: lineMat },
+      { offset: trackWidth / 2, radius: 0.16, mat: curbMat },
+    ].forEach(({ offset, radius, mat }) => {
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i <= segments; i++) {
         const t = i / segments;
         const pt = trackCurve.getPointAt(t);
         const tan = trackCurve.getTangentAt(t);
         const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-        pts.push(pt.clone().addScaledVector(normal, offset).setY(0.18));
+        pts.push(pt.clone().addScaledVector(normal, offset).setY(0.2));
       }
       const lineCurve = new THREE.CatmullRomCurve3(pts);
-      const lineTube = new THREE.Mesh(new THREE.TubeGeometry(lineCurve, 90, 0.07, 6, false), lineMat);
+      const lineTube = new THREE.Mesh(new THREE.TubeGeometry(lineCurve, 120, radius, 8, false), mat);
       scene.add(lineTube);
     });
 
@@ -493,9 +572,93 @@ export default function Arena3DPage() {
     finishGroup.add(leftPillar, rightPillar, banner, trophyMesh);
     scene.add(finishGroup);
 
+    // Zebra crossing (ทางม้าลาย) at center of S-curve (t = 0.5)
+    const crosswalkPt = trackCurve.getPointAt(0.5);
+    const crosswalkTan = trackCurve.getTangentAt(0.5);
+    const crosswalkNorm = new THREE.Vector3(-crosswalkTan.z, 0, crosswalkTan.x).normalize();
+    const crosswalkAngle = Math.atan2(-crosswalkTan.z, crosswalkTan.x);
+    const crosswalkGroup = new THREE.Group();
+    crosswalkGroup.position.set(crosswalkPt.x, 0.2, crosswalkPt.z);
+    crosswalkGroup.rotation.y = crosswalkAngle;
+    const stripeCount = Math.floor((trackWidth - 0.6) / 0.85);
+    for (let s = 0; s < stripeCount; s++) {
+      const zOff = (s - (stripeCount - 1) / 2) * 0.85;
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.04, 0.45), whiteMat);
+      stripe.position.set(0, 0, zOff);
+      crosswalkGroup.add(stripe);
+    }
+    [-trackWidth / 2 - 0.35, trackWidth / 2 + 0.35].forEach((zSign) => {
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 1.8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x18181B })
+      );
+      post.position.set(0, 0.9, zSign);
+      const signBoard = new THREE.Mesh(
+        new THREE.BoxGeometry(0.15, 0.5, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0xFFE600 })
+      );
+      signBoard.position.set(0, 1.8, zSign);
+      crosswalkGroup.add(post, signBoard);
+    });
+    scene.add(crosswalkGroup);
+
+    // Track samples for spectator trespassing detection
+    const trackSamples = trackCurve.getSpacedPoints(80);
+    const getNearestTrackInfo = (pos: THREE.Vector3) => {
+      let minDist = Infinity;
+      let nearestIdx = 0;
+      for (let i = 0; i < trackSamples.length; i++) {
+        const dx = pos.x - trackSamples[i].x;
+        const dz = pos.z - trackSamples[i].z;
+        const dSq = dx * dx + dz * dz;
+        if (dSq < minDist) {
+          minDist = dSq;
+          nearestIdx = i;
+        }
+      }
+      const dist = Math.sqrt(minDist);
+      const t = nearestIdx / (trackSamples.length - 1);
+      const onTrack = dist < trackWidth / 2 - 0.15;
+      const dxC = pos.x - crosswalkPt.x;
+      const dzC = pos.z - crosswalkPt.z;
+      const alongCrosswalk = Math.abs(dxC * crosswalkTan.x + dzC * crosswalkTan.z);
+      const onCrosswalk = alongCrosswalk < 1.85;
+      return { onTrack, onCrosswalk, t, pt: trackSamples[nearestIdx] };
+    };
+
+    // 3D Security Guard (ยาม) patrolling near the crosswalk
+    const guardPostPos = crosswalkPt.clone().addScaledVector(crosswalkNorm, -(trackWidth / 2 + 2.2));
+    guardPostPos.y = 0.2;
+    const guardParts = buildCharacterMesh({
+      colorHex: '#1E3A8A',
+      accessory: 'cap',
+      bandColor: '#FACC15',
+      bellyScale: 1.05,
+    });
+    const vestMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.68, 0.72, 0.65, 16),
+      new THREE.MeshStandardMaterial({ color: 0xBEF264, roughness: 0.4 })
+    );
+    vestMesh.position.y = 1.05;
+    guardParts.bodyMesh.add(vestMesh);
+    guardParts.rootGroup.position.copy(guardPostPos);
+    guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
+    scene.add(guardParts.rootGroup);
+
+    const guardTagEl = document.createElement('div');
+    guardTagEl.className = 'player-tag';
+    guardTagEl.innerHTML = `
+      <div class="bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap">
+        👮 พี่ยาม (ข้ามเฉพาะทางม้าลาย!)
+      </div>
+    `;
+    labelsContainer.appendChild(guardTagEl);
+    let lastGuardWarnAt = 0;
+
     const treePositions = [
-      [-31, -18], [-18, -19], [0, -19], [16, -19], [31, -18],
-      [-31, 18], [-14, 19], [4, 19], [20, 19], [31, 18],
+      [-26, -23], [-27, 4], [-25, 23],
+      [26, 23], [27, -4], [25, -23],
+      [-5, 6], [5, -6],
     ];
     treePositions.forEach(([tx, tz], idx) => {
       const tree = new THREE.Group();
@@ -577,8 +740,9 @@ export default function Arena3DPage() {
       const isEat = isSpectator && isEatPath(p.workoutType);
       const samePathList = isEat ? eatSpectators : fitSpectators;
       const indexInPath = isSpectator ? samePathList.findIndex((pl) => pl.id === p.id) : 0;
+      const customPair = isSpectator ? pairedActivities[p.id] : undefined;
       const dailyAct = isSpectator
-        ? getDailySpectatorActivity(p.id, p.workoutType, samePathList.length, indexInPath)
+        ? customPair || getDailySpectatorActivity(p.id, p.workoutType, samePathList.length, indexInPath)
         : null;
 
       let targetPos = new THREE.Vector3(0, 0.2, 0);
@@ -622,6 +786,11 @@ export default function Arena3DPage() {
         spectatorProp: dailyAct ? dailyAct.animType : '',
       });
       const { rootGroup, bounceGroup, bodyMesh, legL, legR, armL, armR, normalEyes, happyFace, angryFace } = charParts;
+      const savedPos = isSpectator ? savedSpectatorPosRef.current[p.id] : undefined;
+      if (savedPos) {
+        targetPos.set(savedPos.x, savedPos.y, savedPos.z);
+        facingY = savedPos.rotY;
+      }
       rootGroup.position.copy(targetPos);
       rootGroup.rotation.y = facingY;
       rootGroup.userData.playerId = p.id;
@@ -733,7 +902,139 @@ export default function Arena3DPage() {
       });
 
       const now = performance.now();
+      const activeWalkerId = walkingSpectatorIdRef.current;
+
       meshes.forEach((c, idx) => {
+        if (activeWalkerId === c.id) {
+          const keys = keysPressedRef.current;
+          let dx = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+          let dz = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+          let isWalking = false;
+
+          if (dx !== 0 || dz !== 0) {
+            walkTargetRef.current = null;
+            const len = Math.hypot(dx, dz);
+            dx /= len;
+            dz /= len;
+            isWalking = true;
+          } else if (walkTargetRef.current) {
+            const toTargetX = walkTargetRef.current.x - c.rootGroup.position.x;
+            const toTargetZ = walkTargetRef.current.z - c.rootGroup.position.z;
+            const dist = Math.hypot(toTargetX, toTargetZ);
+            if (dist > 0.25) {
+              dx = toTargetX / dist;
+              dz = toTargetZ / dist;
+              isWalking = true;
+            } else {
+              walkTargetRef.current = null;
+            }
+          }
+
+          if (isWalking) {
+            const speed = 0.16;
+            c.rootGroup.position.x = Math.max(-29, Math.min(29, c.rootGroup.position.x + dx * speed));
+            c.rootGroup.position.z = Math.max(-26, Math.min(26, c.rootGroup.position.z + dz * speed));
+            c.targetPos.copy(c.rootGroup.position);
+            c.rootGroup.rotation.y = Math.atan2(-dz, dx);
+            c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
+            c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
+            c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
+            c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
+            c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
+            c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+          } else {
+            animateCharacterMotion(c, elapsed, idx, c.currentBellyScale);
+          }
+
+          controls.target.lerp(
+            new THREE.Vector3(c.rootGroup.position.x, 1.4, c.rootGroup.position.z),
+            0.08
+          );
+
+          // Find nearest other spectator within 4.2 units
+          let closest: Player | null = null;
+          let minDist = 4.2;
+          meshes.forEach((other) => {
+            if (other.id !== c.id && other.isSpectator) {
+              const dist = c.rootGroup.position.distanceTo(other.rootGroup.position);
+              if (dist < minDist) {
+                minDist = dist;
+                closest = other.player;
+              }
+            }
+          });
+          const nextNearId = closest ? (closest as Player).id : null;
+          if (nextNearId !== nearbySpectatorIdRef.current) {
+            nearbySpectatorIdRef.current = nextNearId;
+            setNearbySpectator(closest);
+            if (!closest) setIsPairMenuOpen(false);
+          }
+
+          // Security Guard (ยาม) chases spectator if they step on the track outside the zebra crossing!
+          const trackInfo = getNearestTrackInfo(c.rootGroup.position);
+          if (trackInfo.onTrack && !trackInfo.onCrosswalk) {
+            setCharacterExpression(guardParts, 'angry');
+            const gPos = guardParts.rootGroup.position;
+            const toWalkerX = c.rootGroup.position.x - gPos.x;
+            const toWalkerZ = c.rootGroup.position.z - gPos.z;
+            const distToWalker = Math.hypot(toWalkerX, toWalkerZ);
+
+            if (now - lastGuardWarnAt > 2500) {
+              lastGuardWarnAt = now;
+              showToast('🚨', 'พี่ยามเป่านกหวีด!', 'ห้ามเดินลงลู่วิ่ง! ให้ไปข้ามตรงทางม้าลายกลางสนาม!');
+            }
+
+            if (distToWalker > 1.7) {
+              const gSpeed = 0.25;
+              gPos.x += (toWalkerX / distToWalker) * gSpeed;
+              gPos.z += (toWalkerZ / distToWalker) * gSpeed;
+              guardParts.rootGroup.rotation.y = Math.atan2(-toWalkerZ, toWalkerX);
+              guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.25;
+              guardParts.legL.rotation.z = Math.sin(elapsed * 14) * 0.75;
+              guardParts.legR.rotation.z = -Math.sin(elapsed * 14) * 0.75;
+              guardParts.armL.position.x = Math.sin(elapsed * 14) * 0.3;
+              guardParts.armR.position.x = -Math.sin(elapsed * 14) * 0.3;
+            } else {
+              // Caught! Push spectator off the track
+              const tan = trackCurve.getTangentAt(trackInfo.t);
+              const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+              const sideSign =
+                (c.rootGroup.position.x - trackInfo.pt.x) * normal.x +
+                  (c.rootGroup.position.z - trackInfo.pt.z) * normal.z >=
+                0
+                  ? 1
+                  : -1;
+              const ejected = trackInfo.pt.clone().addScaledVector(normal, sideSign * (trackWidth / 2 + 2.4));
+              c.rootGroup.position.set(ejected.x, 0.2, ejected.z);
+              c.targetPos.copy(c.rootGroup.position);
+              walkTargetRef.current = null;
+              setShakeScreen(true);
+              setTimeout(() => setShakeScreen(false), 450);
+              showToast('👮', 'โดนพี่ยามไล่ออกจากสนาม!', 'กรุณาข้ามลู่วิ่งตรงทางม้าลายเท่านั้นนะ!');
+            }
+          } else {
+            setCharacterExpression(guardParts, 'normal');
+            const gPos = guardParts.rootGroup.position;
+            const backX = guardPostPos.x - gPos.x;
+            const backZ = guardPostPos.z - gPos.z;
+            const backDist = Math.hypot(backX, backZ);
+            if (backDist > 0.2) {
+              gPos.x += (backX / backDist) * 0.1;
+              gPos.z += (backZ / backDist) * 0.1;
+              guardParts.rootGroup.rotation.y = Math.atan2(-backZ, backX);
+              guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 8)) * 0.15;
+              guardParts.legL.rotation.z = Math.sin(elapsed * 8) * 0.5;
+              guardParts.legR.rotation.z = -Math.sin(elapsed * 8) * 0.5;
+            } else {
+              guardParts.bounceGroup.position.y = 0;
+              guardParts.legL.rotation.z = 0;
+              guardParts.legR.rotation.z = 0;
+              guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
+            }
+          }
+          return;
+        }
+
         c.rootGroup.position.lerp(c.targetPos, 0.06);
         c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
         const isRubbed = now < c.rubbedUntil;
@@ -811,6 +1112,20 @@ export default function Arena3DPage() {
         }
       } else {
         giftMeshGroup.visible = false;
+      }
+
+      const guardHeadPos = new THREE.Vector3(
+        guardParts.rootGroup.position.x,
+        guardParts.rootGroup.position.y + 3.0,
+        guardParts.rootGroup.position.z
+      );
+      guardHeadPos.project(camera);
+      if (guardHeadPos.z < 1) {
+        guardTagEl.style.left = `${(guardHeadPos.x * 0.5 + 0.5) * window.innerWidth}px`;
+        guardTagEl.style.top = `${(-guardHeadPos.y * 0.5 + 0.5) * window.innerHeight}px`;
+        guardTagEl.style.opacity = '1';
+      } else {
+        guardTagEl.style.opacity = '0';
       }
 
       if (cameraTargetPosRef.current) {
@@ -915,6 +1230,18 @@ export default function Arena3DPage() {
         if (obj?.userData.playerId !== undefined) {
           const found = players.find((pl) => pl.id === obj!.userData.playerId);
           if (found) openEditModal(found);
+          return;
+        }
+      }
+      if (walkingSpectatorIdRef.current !== null) {
+        const groundHits = raycaster.intersectObject(island, false);
+        if (groundHits.length > 0) {
+          const pHit = groundHits[0].point;
+          walkTargetRef.current = new THREE.Vector3(
+            Math.max(-29, Math.min(29, pHit.x)),
+            0.2,
+            Math.max(-26, Math.min(26, pHit.z))
+          );
         }
       }
     };
@@ -937,6 +1264,16 @@ export default function Arena3DPage() {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      meshes.forEach((m) => {
+        if (m.isSpectator) {
+          savedSpectatorPosRef.current[m.id] = {
+            x: m.rootGroup.position.x,
+            y: m.rootGroup.position.y,
+            z: m.rootGroup.position.z,
+            rotY: m.rootGroup.rotation.y,
+          };
+        }
+      });
       cancelAnimationFrame(frameId);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -945,7 +1282,7 @@ export default function Arena3DPage() {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [players, competitors, rankedPlayers, openEditModal]);
+  }, [players, competitors, rankedPlayers, openEditModal, pairedActivities]);
 
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -990,6 +1327,56 @@ export default function Arena3DPage() {
     }
   };
 
+  const handleSignInSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignInError('');
+    setSigningIn(true);
+    try {
+      const res = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: signInUsername }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSignInError(data.error || 'เข้าสู่ระบบไม่สำเร็จ');
+      } else if (data.exists && data.user) {
+        localStorage.setItem('waist_user_id', String(data.user.id));
+        setCurrentUserId(data.user.id);
+        setBoardSenderId(String(data.user.id));
+        if (data.user.role === 'spectator') {
+          setWalkingSpectatorId(data.user.id);
+        } else {
+          setSelectedPlayerId(data.user.id);
+        }
+        setSignInUsername('');
+        showToast(
+          '👋',
+          'เข้าสู่ระบบสำเร็จ!',
+          data.user.role === 'spectator'
+            ? `ยินดีต้อนรับ ${data.user.emoji} ${data.user.name} — ใช้ WASD / ลูกศร หรือแตะพื้นเพื่อเดินเล่นได้เลย!`
+            : `ยินดีต้อนรับกลับมา ${data.user.emoji} ${data.user.name}`
+        );
+        setTimeout(() => focusOnCharacter(data.user.id), 250);
+      } else {
+        openCreateModal();
+        setJoinName(data.username || signInUsername.trim());
+      }
+    } catch {
+      setSignInError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem('waist_user_id');
+    setCurrentUserId(null);
+    setWalkingSpectatorId(null);
+    setSignInUsername('');
+    setSignInError('');
+  };
+
   const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setJoinError('');
@@ -997,6 +1384,7 @@ export default function Arena3DPage() {
 
     try {
       const isEdit = joinMode === 'edit' && editingPlayerId !== null;
+      const isSelf = isEdit && editingPlayerId === currentUserId;
       const res = await fetch('/api/users', {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1004,14 +1392,18 @@ export default function Arena3DPage() {
           isEdit
             ? {
                 userId: editingPlayerId,
+                isSelf,
                 pinCode: joinPin,
                 name: joinName,
                 avatarEmoji: joinEmoji,
                 colorHex: joinColor,
                 accessory: joinAccessory,
                 bandColor: joinBandColor,
+                role: joinRole,
                 workoutType: joinWorkout,
                 petType: joinPet,
+                startWeight: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : undefined,
+                goalWeight: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : undefined,
               }
             : {
                 name: joinName,
@@ -1022,7 +1414,7 @@ export default function Arena3DPage() {
                 role: joinRole,
                 workoutType: joinWorkout,
                 petType: joinPet,
-                pinCode: joinPin,
+                pinCode: joinPin || '1234',
                 startWeight: joinRole === 'competitor' ? parseFloat(joinStart) : 0,
                 goalWeight: joinRole === 'competitor' ? parseFloat(joinGoal) : 0,
               }
@@ -1032,12 +1424,24 @@ export default function Arena3DPage() {
       if (!res.ok) {
         setJoinError(data.error || (isEdit ? 'อัปเดตไม่สำเร็จ' : 'สมัครไม่สำเร็จ'));
       } else {
+        const activeId = !isEdit && data.id ? Number(data.id) : editingPlayerId;
+        if (!isEdit && data.id) {
+          localStorage.setItem('waist_user_id', String(data.id));
+          setCurrentUserId(Number(data.id));
+          setBoardSenderId(String(data.id));
+          if (joinRole === 'competitor') setSelectedPlayerId(Number(data.id));
+        }
+        if (joinRole === 'spectator' && activeId) {
+          setWalkingSpectatorId(activeId);
+        } else if (isEdit && editingPlayerId === walkingSpectatorId && joinRole === 'competitor') {
+          setWalkingSpectatorId(null);
+        }
         confetti({ particleCount: isEdit ? 45 : 70, spread: 60, origin: { y: 0.6 } });
         showToast(
           isEdit ? '✨' : '🏁',
-          isEdit ? 'อัปเดตลุคเรียบร้อย!' : 'ลงทะเบียนสำเร็จ!',
+          isEdit ? 'อัปเดตโปรไฟล์เรียบร้อย!' : 'ลงทะเบียนสำเร็จ!',
           isEdit
-            ? `เปลี่ยนลุคให้ ${joinEmoji} ${joinName} เรียบร้อยแล้ว!`
+            ? `บันทึกข้อมูลของ ${joinEmoji} ${joinName} เรียบร้อยแล้ว!`
             : joinRole === 'spectator'
             ? `ยินดีต้อนรับผู้ชม ${joinEmoji} ${joinName} สู่ขอบสนาม!`
             : `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`
@@ -1152,13 +1556,53 @@ export default function Arena3DPage() {
             <span className="hidden sm:inline">อันดับ & แซวสด</span>
           </button>
 
-          <button
-            onClick={openCreateModal}
-            className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4 stroke-[2.5]" />
-            <span>+ สมัคร / เข้าร่วม</span>
-          </button>
+          {(() => {
+            const currentUser = players.find((pl) => pl.id === currentUserId);
+            if (!currentUser) {
+              return (
+                <button
+                  onClick={openCreateModal}
+                  className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4 stroke-[2.5]" />
+                  <span>+ สมัคร / เข้าร่วม</span>
+                </button>
+              );
+            }
+            return (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => openEditModal(currentUser)}
+                  className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                  title="แก้ไขโปรไฟล์ / เปลี่ยนสาย"
+                >
+                  <span>{currentUser.emoji}</span>
+                  <span>{currentUser.name}</span>
+                  <span className="text-[10px] bg-white/80 px-1.5 py-0.5 rounded border border-black">
+                    {currentUser.role === 'spectator' ? 'ผู้ชม' : 'นักแข่ง'}
+                  </span>
+                </button>
+                {currentUser.role === 'spectator' && (
+                  <button
+                    onClick={() => {
+                      setWalkingSpectatorId(currentUser.id);
+                      showToast('🚶', `ควบคุม ${currentUser.emoji} ${currentUser.name}`, 'ใช้ WASD / ลูกศร หรือแตะพื้นเพื่อเดิน!');
+                    }}
+                    className="neo-btn bg-[#FFE600] text-black font-extrabold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
+                  >
+                    🚶 เดินเล่น
+                  </button>
+                )}
+                <button
+                  onClick={handleSignOut}
+                  className="neo-btn bg-white hover:bg-zinc-100 text-black font-bold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
+                  title="สลับบัญชี"
+                >
+                  สลับ
+                </button>
+              </div>
+            );
+          })()}
 
           <button
             onClick={() => {
@@ -1556,7 +2000,21 @@ export default function Arena3DPage() {
               </div>
 
               <form onSubmit={handleJoinSubmit} className="space-y-3.5">
-              {joinMode === 'create' && (
+              {joinMode === 'edit' && joinRole === 'spectator' && editingPlayerId !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWalkingSpectatorId(editingPlayerId);
+                    setIsJoinOpen(false);
+                    showToast('🚶', `ควบคุม ${joinEmoji} ${joinName}`, 'ใช้ปุ่ม WASD / ลูกศร หรือแตะพื้นเพื่อเดินไปหาเพื่อน!');
+                  }}
+                  className="w-full neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer"
+                >
+                  🚶 พาตัวนี้เดินเล่น &amp; ชวนเพื่อนทำกิจกรรม!
+                </button>
+              )}
+
+              {(joinMode === 'create' || (joinMode === 'edit' && editingPlayerId === currentUserId)) && (
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -1716,8 +2174,8 @@ export default function Arena3DPage() {
               )}
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold mb-1">ชื่อเล่น</label>
+                <div className={joinMode === 'edit' && editingPlayerId === currentUserId ? 'col-span-2' : ''}>
+                  <label className="block text-xs font-bold mb-1">ชื่อเล่น (Username)</label>
                   <input
                     type="text"
                     required
@@ -1726,22 +2184,26 @@ export default function Arena3DPage() {
                     className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1">
-                    {joinMode === 'edit' ? 'รหัส PIN 4 หลัก (ยืนยัน)' : 'ตั้งรหัส PIN 4 หลัก'}
-                  </label>
-                  <input
-                    type="password"
-                    maxLength={4}
-                    required
-                    value={joinPin}
-                    onChange={(e) => setJoinPin(e.target.value)}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest"
-                  />
-                </div>
+                {!(joinMode === 'edit' && editingPlayerId === currentUserId) && (
+                  <div>
+                    <label className="block text-xs font-bold mb-1">
+                      {joinMode === 'edit' ? 'รหัส PIN 4 หลัก (ยืนยัน)' : 'รหัส PIN 4 หลัก (ไม่ใส่ก็ได้)'}
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={4}
+                      required={joinMode === 'edit'}
+                      value={joinPin}
+                      onChange={(e) => setJoinPin(e.target.value)}
+                      className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest"
+                    />
+                  </div>
+                )}
               </div>
 
-              {joinMode === 'create' && joinRole === 'competitor' && (
+              {joinRole === 'competitor' &&
+                (joinMode === 'create' ||
+                  (editingPlayerId === currentUserId && (!joinStart || Number(joinStart) <= 0))) && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold mb-1">น้ำหนักเริ่มต้น (กก.)</label>
@@ -1789,6 +2251,118 @@ export default function Arena3DPage() {
               </button>
             </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {authChecked && currentUserId === null && !isJoinOpen && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-sm w-full p-6 relative">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-[#FFE600] border-2 border-black rounded-2xl flex items-center justify-center text-2xl shadow-[2px_2px_0px_#000] shrink-0">
+                🏆
+              </div>
+              <div>
+                <h2 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold leading-tight">
+                  เข้าสู่สนามเอวเอส 3D
+                </h2>
+                <p className="text-xs text-zinc-600 font-medium">
+                  ใส่ชื่อผู้ใช้ (Username) เพื่อเข้าใช้งานได้เลย
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSignInSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold mb-1">ชื่อผู้ใช้ (Username)</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={signInUsername}
+                  onChange={(e) => setSignInUsername(e.target.value)}
+                  className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2.5 font-bold text-base"
+                />
+              </div>
+
+              {signInError && (
+                <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
+                  {signInError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={signingIn}
+                className="w-full neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer"
+              >
+                {signingIn ? 'กำลังตรวจสอบ...' : '🚀 เข้าใช้งาน!'}
+              </button>
+              <p className="text-[11px] text-center text-zinc-500 font-semibold">
+                เข้าครั้งแรกจะให้เลือกเป็น ผู้เข้าแข่งขัน หรือ ผู้ชม (เปลี่ยนทีหลังได้)
+              </p>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {walkingSpectatorId !== null && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[94vw]">
+          {nearbySpectator && (
+            <div className="flex flex-col items-center gap-2">
+              {isPairMenuOpen && (
+                <div className="neo-card bg-white rounded-2xl p-2.5 grid grid-cols-2 sm:grid-cols-3 gap-1.5 shadow-[4px_4px_0px_#18181B]">
+                  {GROUP_PAIR_ACTIVITIES.map((act) => (
+                    <button
+                      key={act.animType}
+                      type="button"
+                      onClick={() => {
+                        const walker = players.find((pl) => pl.id === walkingSpectatorId);
+                        setPairedActivities((prev) => ({
+                          ...prev,
+                          [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                          [nearbySpectator.id]: { animType: act.animType, label: act.label },
+                        }));
+                        setIsPairMenuOpen(false);
+                        confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+                        showToast(
+                          '🤝',
+                          'ตั้งวงทำกิจกรรมคู่!',
+                          `${walker?.name || ''} ชวน ${nearbySpectator.name} มา${act.label}`
+                        );
+                      }}
+                      className="border-2 border-black bg-[#FEF08A] hover:bg-[#FFE600] rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition"
+                    >
+                      {act.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsPairMenuOpen((v) => !v)}
+                className="neo-btn bg-[#FF4D8D] text-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer animate-bounce"
+              >
+                🤝 ชวน {nearbySpectator.emoji} {nearbySpectator.name} ทำกิจกรรมด้วยกัน!
+              </button>
+            </div>
+          )}
+
+          <div className="neo-card bg-[#18181B] text-white rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-center gap-3">
+            <span className="text-xs font-extrabold text-[#BEF264]">
+              🚶 เดินเล่น: {players.find((pl) => pl.id === walkingSpectatorId)?.emoji}{' '}
+              {players.find((pl) => pl.id === walkingSpectatorId)?.name}
+            </span>
+            <span className="text-[11px] text-zinc-300 hidden sm:inline">
+              กด WASD / ลูกศร หรือแตะพื้นเพื่อเดิน
+            </span>
+            <button
+              type="button"
+              onClick={() => setWalkingSpectatorId(null)}
+              className="bg-[#FF4D8D] text-white border-2 border-white rounded-lg px-2.5 py-1 text-xs font-extrabold cursor-pointer"
+            >
+              ✕ ออก
+            </button>
           </div>
         </div>
       )}

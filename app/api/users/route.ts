@@ -47,9 +47,19 @@ export async function POST(req: Request) {
 
     const finalRole = role === 'spectator' ? 'spectator' : 'competitor';
 
-    if (!name || !pinCode || (finalRole === 'competitor' && (!startWeight || !goalWeight))) {
+    if (!name || (finalRole === 'competitor' && (!startWeight || !goalWeight))) {
       return NextResponse.json({ error: 'กรุณากรอกข้อมูลให้ครบถ้วน' }, { status: 400 });
     }
+
+    const existing = await turso.execute({
+      sql: 'SELECT id FROM users WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      args: [name.trim()],
+    });
+    if (existing.rows.length > 0) {
+      return NextResponse.json({ error: 'ชื่อผู้ใช้นี้มีคนใช้แล้ว กรุณาใช้ชื่ออื่นหรือ Sign in ด้วยชื่อนี้' }, { status: 409 });
+    }
+
+    const finalPin = pinCode ? String(pinCode) : '1234';
 
     const style = PALETTE[Math.floor(Math.random() * PALETTE.length)];
     const finalColorHex = isHex(colorHex) ? colorHex : '#' + style.bodyColor.toString(16).padStart(6, '0');
@@ -71,7 +81,7 @@ export async function POST(req: Request) {
         finalRole,
         finalWorkout,
         finalPet,
-        String(pinCode),
+        finalPin,
         safeStart,
         safeGoal,
       ],
@@ -100,9 +110,23 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { userId, pinCode, name, avatarEmoji, colorHex, accessory, bandColor, workoutType, petType } = await req.json();
+    const {
+      userId,
+      pinCode,
+      isSelf,
+      name,
+      avatarEmoji,
+      colorHex,
+      accessory,
+      bandColor,
+      workoutType,
+      petType,
+      role,
+      startWeight,
+      goalWeight,
+    } = await req.json();
 
-    if (!userId || !pinCode) {
+    if (!userId || (!isSelf && !pinCode)) {
       return NextResponse.json({ error: 'กรุณาระบุตัวละครและรหัส PIN' }, { status: 400 });
     }
 
@@ -116,8 +140,22 @@ export async function PATCH(req: Request) {
     }
 
     const user = userCheck.rows[0];
-    if (String(user.pin_code) !== String(pinCode)) {
+    if (!isSelf && String(user.pin_code) !== String(pinCode)) {
       return NextResponse.json({ error: 'รหัส PIN ไม่ถูกต้อง! อย่าแอบเปลี่ยนชุดเพื่อนนะ 👀' }, { status: 401 });
+    }
+
+    const nextRole = role === 'spectator' ? 'spectator' : role === 'competitor' ? 'competitor' : String(user.role || 'competitor');
+    const nextStart =
+      nextRole === 'competitor' && Number(startWeight) > 0
+        ? Number(startWeight)
+        : Number(user.start_weight || 0);
+    const nextGoal =
+      nextRole === 'competitor' && Number(goalWeight) > 0
+        ? Number(goalWeight)
+        : Number(user.goal_weight || 0);
+
+    if (nextRole === 'competitor' && (!nextStart || !nextGoal)) {
+      return NextResponse.json({ error: 'กรุณากรอกน้ำหนักเริ่มต้นและเป้าหมายเพื่อลงแข่งขัน' }, { status: 400 });
     }
 
     const nextName = typeof name === 'string' && name.trim() ? name.trim() : String(user.name);
@@ -131,16 +169,29 @@ export async function PATCH(req: Request) {
     const nextWorkout =
       typeof workoutType === 'string' && ALLOWED_WORKOUTS.has(workoutType)
         ? workoutType
-        : String(user.workout_type || 'jumping_jacks');
+        : String(user.workout_type || 'fit');
     const nextPet =
       typeof petType === 'string' && ALLOWED_PETS.has(petType)
         ? petType
         : String(user.pet_type || 'none');
 
     await turso.execute({
-      sql: 'UPDATE users SET name = ?, avatar_emoji = ?, color_hex = ?, accessory = ?, band_color = ?, workout_type = ?, pet_type = ? WHERE id = ?',
-      args: [nextName, nextEmoji, nextColor, nextAccessory, nextBandColor, nextWorkout, nextPet, userId],
+      sql: 'UPDATE users SET name = ?, avatar_emoji = ?, color_hex = ?, accessory = ?, band_color = ?, role = ?, workout_type = ?, pet_type = ?, start_weight = ?, goal_weight = ? WHERE id = ?',
+      args: [nextName, nextEmoji, nextColor, nextAccessory, nextBandColor, nextRole, nextWorkout, nextPet, nextStart, nextGoal, userId],
     });
+
+    if (nextRole === 'competitor') {
+      const hasLogs = await turso.execute({
+        sql: 'SELECT id FROM weight_logs WHERE user_id = ? LIMIT 1',
+        args: [userId],
+      });
+      if (hasLogs.rows.length === 0) {
+        await turso.execute({
+          sql: 'INSERT INTO weight_logs (user_id, weight, excuse_tag, roast_message) VALUES (?, ?, ?, ?)',
+          args: [userId, nextStart, 'พร้อมชิงบัลลังก์เอวเอส 🚀', '🏁 เปลี่ยนสายมาลงสนามแข่งแล้ว!'],
+        });
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
