@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createClient, type RealtimeChannel } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
 import { Trophy, Scale, UserPlus } from 'lucide-react';
 import {
@@ -231,6 +232,12 @@ export default function Arena3DPage() {
   const loserIdRef = useRef<number | null>(null);
   const savedSpectatorPosRef = useRef<Record<number, { x: number; y: number; z: number; rotY: number }>>({});
   const savedCameraPosRef = useRef<THREE.Vector3 | null>(null);
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const remoteSpectatorStateRef = useRef<
+    Record<number, { x: number; y: number; z: number; rotY: number; isWalking: boolean; updatedAt: number }>
+  >({});
+  const lastMoveBroadcastAtRef = useRef<number>(0);
+  const wasWalkingRef = useRef<boolean>(false);
 
   const showToast = (emoji: string, title: string, text: string) => {
     setToast({ show: true, emoji, title, text });
@@ -322,6 +329,70 @@ export default function Arena3DPage() {
       walkTargetRef.current = null;
     }
   }, [walkingSpectatorId]);
+
+  useEffect(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return;
+
+    const supabase = createClient(url, key, {
+      realtime: { params: { eventsPerSecond: 20 } },
+    });
+
+    const channel = supabase.channel('waist-arena-live', {
+      config: { broadcast: { self: false } },
+    });
+
+    channel
+      .on('broadcast', { event: 'move' }, ({ payload }) => {
+        if (!payload || typeof payload.userId !== 'number') return;
+        if (payload.userId === walkingSpectatorIdRef.current) return;
+        remoteSpectatorStateRef.current[payload.userId] = {
+          x: payload.x,
+          y: payload.y ?? 0.2,
+          z: payload.z,
+          rotY: payload.rotY ?? 0,
+          isWalking: Boolean(payload.isWalking),
+          updatedAt: performance.now(),
+        };
+        savedSpectatorPosRef.current[payload.userId] = {
+          x: payload.x,
+          y: payload.y ?? 0.2,
+          z: payload.z,
+          rotY: payload.rotY ?? 0,
+        };
+      })
+      .on('broadcast', { event: 'status' }, ({ payload }) => {
+        if (!payload || typeof payload.userId !== 'number') return;
+        const text = String(payload.statusText || '').trim();
+        const targetMesh = charMeshesRef.current.find((m) => m.id === payload.userId);
+        const bubbleEl = targetMesh?.tagEl?.querySelector('[data-speech-bubble]') as HTMLElement | null;
+        if (bubbleEl) {
+          if (text) {
+            bubbleEl.textContent = `💬 ${text}`;
+            bubbleEl.classList.remove('hidden');
+          } else {
+            bubbleEl.textContent = '';
+            bubbleEl.classList.add('hidden');
+          }
+        }
+      })
+      .on('broadcast', { event: 'activity' }, ({ payload }) => {
+        if (!payload || typeof payload.userId !== 'number') return;
+        setPairedActivities((prev) => ({
+          ...prev,
+          [payload.userId]: { animType: payload.animType, label: payload.label },
+        }));
+      })
+      .subscribe();
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      realtimeChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -425,6 +496,11 @@ export default function Arena3DPage() {
         return next;
       });
       setRadialMenu(null);
+      realtimeChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'activity',
+        payload: { userId: currentUserId, animType: act.animType, label: act.label },
+      });
       showToast('🎡', 'เปลี่ยนกิจกรรมแล้ว!', act.label);
     },
     [currentUserId]
@@ -1179,6 +1255,25 @@ export default function Arena3DPage() {
             animateCharacterMotion(c, elapsed, idx, c.currentBellyScale);
           }
 
+          if (realtimeChannelRef.current && (isWalking || wasWalkingRef.current)) {
+            if (!isWalking || now - lastMoveBroadcastAtRef.current >= 85) {
+              lastMoveBroadcastAtRef.current = now;
+              realtimeChannelRef.current.send({
+                type: 'broadcast',
+                event: 'move',
+                payload: {
+                  userId: c.id,
+                  x: Number(c.rootGroup.position.x.toFixed(2)),
+                  y: Number(c.rootGroup.position.y.toFixed(2)),
+                  z: Number(c.rootGroup.position.z.toFixed(2)),
+                  rotY: Number(c.rootGroup.rotation.y.toFixed(2)),
+                  isWalking,
+                },
+              });
+            }
+          }
+          wasWalkingRef.current = isWalking;
+
           if (isWalking && !cameraTargetPosRef.current) {
             controls.target.lerp(
               new THREE.Vector3(c.rootGroup.position.x, 1.4, c.rootGroup.position.z),
@@ -1270,13 +1365,36 @@ export default function Arena3DPage() {
           return;
         }
 
-        c.rootGroup.position.lerp(c.targetPos, 0.06);
+        const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
+        if (remoteState) {
+          c.targetPos.set(remoteState.x, remoteState.y, remoteState.z);
+          c.rootGroup.position.lerp(c.targetPos, 0.18);
+          let rotDiff = remoteState.rotY - c.rootGroup.rotation.y;
+          while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+          while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+          c.rootGroup.rotation.y += rotDiff * 0.22;
+        } else {
+          c.rootGroup.position.lerp(c.targetPos, 0.06);
+        }
         c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
         const isRubbed = now < c.rubbedUntil;
         const jiggle = isRubbed ? Math.sin(elapsed * 22) * 0.05 : 0;
         const nextScale = c.currentBellyScale + jiggle;
         setCharacterExpression(c, isRubbed ? (c.isCloseToFinish ? 'angry' : 'happy') : 'normal');
-        animateCharacterMotion(c, elapsed, idx, nextScale);
+        const isRemoteWalking =
+          Boolean(remoteState) &&
+          ((remoteState!.isWalking && now - remoteState!.updatedAt < 450) ||
+            c.rootGroup.position.distanceTo(c.targetPos) > 0.12);
+        if (isRemoteWalking) {
+          c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
+          c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
+          c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
+          c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
+          c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
+          c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+        } else {
+          animateCharacterMotion(c, elapsed, idx, nextScale);
+        }
         if (c.petParts) {
           animatePetMotion(c.petParts, c, c.petType, c.isCloseToFinish, elapsed, idx);
         }
@@ -1843,6 +1961,11 @@ export default function Arena3DPage() {
       }
     }
     if (!currentUserId) return;
+    realtimeChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'status',
+      payload: { userId: currentUserId, statusText: trimmed },
+    });
     if (statusSaveTimerRef.current) clearTimeout(statusSaveTimerRef.current);
     const targetUserId = currentUserId;
     statusSaveTimerRef.current = setTimeout(async () => {
