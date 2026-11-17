@@ -57,6 +57,21 @@ export async function GET() {
       prevByUser[uid] = w;
     }
 
+    const dailyCountsRes = await turso.execute(`
+      SELECT target_user_id, kind, COUNT(*) AS cnt
+      FROM interactions
+      WHERE date(created_at) = date('now')
+      GROUP BY target_user_id, kind
+    `);
+    const cheerByUser: Record<number, number> = {};
+    const temptByUser: Record<number, number> = {};
+    for (const row of dailyCountsRes.rows) {
+      const uid = Number(row.target_user_id);
+      const cnt = Number(row.cnt);
+      if (row.kind === 'tempt') temptByUser[uid] = cnt;
+      else cheerByUser[uid] = cnt;
+    }
+
     const participants = usersRes.rows.map((u) => ({
       id: Number(u.id),
       name: String(u.name),
@@ -71,6 +86,8 @@ export async function GET() {
       currentWeight: Number(u.current_weight),
       goalWeight: Number(u.goal_weight),
       taunt: String(u.latest_taunt),
+      cheerCount: cheerByUser[Number(u.id)] ?? 0,
+      temptCount: temptByUser[Number(u.id)] ?? 0,
     }));
 
     const interactionsRes = await turso.execute(`
@@ -120,7 +137,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId, pinCode, weight, excuseTag } = await req.json();
+    const { userId, pinCode, isSelf, weight, excuseTag } = await req.json();
 
     const userCheck = await turso.execute({
       sql: 'SELECT * FROM users WHERE id = ?',
@@ -132,7 +149,7 @@ export async function POST(req: Request) {
     }
 
     const user = userCheck.rows[0];
-    if (String(user.pin_code) !== String(pinCode)) {
+    if (!isSelf && String(user.pin_code) !== String(pinCode)) {
       return NextResponse.json({ error: 'รหัส PIN ไม่ถูกต้อง! อย่าแอบโกงน้ำหนักเพื่อนนะ 👀' }, { status: 401 });
     }
 

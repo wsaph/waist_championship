@@ -640,3 +640,112 @@ export function animatePetMotion(
     );
   }
 }
+
+const FLOWER_COLORS = [0xFF4D8D, 0xFACC15, 0xC084FC, 0x38BDF8, 0xFB7185];
+
+export function buildFlowerMesh(idx: number): THREE.Group {
+  const g = new THREE.Group();
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 0.28, 6),
+    new THREE.MeshStandardMaterial({ color: 0x22C55E })
+  );
+  stem.position.y = 0.14;
+  const petal = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.11, 0),
+    new THREE.MeshStandardMaterial({ color: FLOWER_COLORS[idx % FLOWER_COLORS.length], roughness: 0.4 })
+  );
+  petal.position.y = 0.28;
+  const center = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xFFE600 })
+  );
+  center.position.y = 0.33;
+  g.add(stem, petal, center);
+  return g;
+}
+
+export function buildFoodPileMesh(idx: number): THREE.Group {
+  const g = new THREE.Group();
+  const variant = idx % 3;
+  if (variant === 0) {
+    // Pizza box / slice
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.07, 0.28),
+      new THREE.MeshStandardMaterial({ color: 0xFDE68A, roughness: 0.6 })
+    );
+    box.position.y = 0.035;
+    const label = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.08, 0.14),
+      new THREE.MeshStandardMaterial({ color: 0xEF4444 })
+    );
+    label.position.y = 0.035;
+    g.add(box, label);
+  } else if (variant === 1) {
+    // Boba cup
+    const cup = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.07, 0.22, 10),
+      new THREE.MeshStandardMaterial({ color: 0xFDBA74, roughness: 0.4 })
+    );
+    cup.position.y = 0.11;
+    const straw = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.015, 0.16, 6),
+      new THREE.MeshStandardMaterial({ color: 0xFF4D8D })
+    );
+    straw.position.y = 0.25;
+    g.add(cup, straw);
+  } else {
+    // Cake / Donut
+    const cake = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.14, 12),
+      new THREE.MeshStandardMaterial({ color: 0xF472B6, roughness: 0.4 })
+    );
+    cake.position.y = 0.07;
+    const cherry = new THREE.Mesh(
+      new THREE.SphereGeometry(0.04, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0xEF4444 })
+    );
+    cherry.position.y = 0.16;
+    g.add(cake, cherry);
+  }
+  return g;
+}
+
+export function buildDeliveryRider(): THREE.Group {
+  const rider = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.95, 0.24, 0.44),
+    new THREE.MeshStandardMaterial({ color: 0x22C55E, roughness: 0.4 })
+  );
+  body.position.y = 0.28;
+  body.castShadow = true;
+
+  const wheelGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.12, 12);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x18181B });
+  const wFront = new THREE.Mesh(wheelGeo, wheelMat);
+  wFront.rotation.x = Math.PI / 2;
+  wFront.position.set(0.36, 0.18, 0);
+  const wBack = wFront.clone();
+  wBack.position.set(-0.36, 0.18, 0);
+
+  const foodBox = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.38, 0.42),
+    new THREE.MeshStandardMaterial({ color: 0xFF4D8D, roughness: 0.35 })
+  );
+  foodBox.position.set(-0.28, 0.58, 0);
+  foodBox.castShadow = true;
+
+  const driver = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x38BDF8, roughness: 0.4 })
+  );
+  driver.position.set(0.18, 0.62, 0);
+
+  const helmet = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xFACC15, roughness: 0.3 })
+  );
+  helmet.position.set(0.2, 0.94, 0);
+
+  rider.add(body, wFront, wBack, foodBox, driver, helmet);
+  return rider;
+}

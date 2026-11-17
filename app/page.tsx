@@ -5,8 +5,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import confetti from 'canvas-confetti';
 import { Trophy, Scale, UserPlus } from 'lucide-react';
-import { buildCharacterMesh, animateCharacterMotion, setCharacterExpression, buildPetMesh, animatePetMotion } from '@/lib/character_3d';
+import {
+  buildCharacterMesh,
+  animateCharacterMotion,
+  setCharacterExpression,
+  buildPetMesh,
+  animatePetMotion,
+  buildFlowerMesh,
+  buildFoodPileMesh,
+  buildDeliveryRider,
+} from '@/lib/character_3d';
 import { getDailySpectatorActivity, isEatPath } from '@/lib/spectator_activities';
+import { startBgm, stopBgm } from '@/lib/bgm';
 import CharacterPreview3D from '@/components/CharacterPreview3D';
 
 interface Player {
@@ -23,6 +33,8 @@ interface Player {
   currentWeight: number;
   goalWeight: number;
   taunt: string;
+  cheerCount?: number;
+  temptCount?: number;
   lostKg?: number;
   pctLost?: number;
   progressRatio?: number;
@@ -129,6 +141,7 @@ export default function Arena3DPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [roastFeed, setRoastFeed] = useState<FeedItem[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  const [isMusicOn, setIsMusicOn] = useState(false);
   const [shakeScreen, setShakeScreen] = useState(false);
 
   const [isLogOpen, setIsLogOpen] = useState(false);
@@ -158,6 +171,8 @@ export default function Arena3DPage() {
 
   const [boardSenderId, setBoardSenderId] = useState<string>('');
   const [boardTargetId, setBoardTargetId] = useState<number>(0);
+  const [boardSearch, setBoardSearch] = useState('');
+  const [isBoardComboOpen, setIsBoardComboOpen] = useState(false);
   const [boardKind, setBoardKind] = useState<'cheer' | 'tempt'>('cheer');
   const [boardMessage, setBoardMessage] = useState('');
   const [sendingBoard, setSendingBoard] = useState(false);
@@ -175,6 +190,7 @@ export default function Arena3DPage() {
 
   const walkingSpectatorIdRef = useRef<number | null>(null);
   const nearbySpectatorIdRef = useRef<number | null>(null);
+  const boardComboRef = useRef<HTMLDivElement | null>(null);
   const keysPressedRef = useRef<Record<string, boolean>>({});
   const walkTargetRef = useRef<THREE.Vector3 | null>(null);
 
@@ -183,6 +199,7 @@ export default function Arena3DPage() {
     kind: 'cheer' | 'tempt';
     label: string;
     startTime: number;
+    addedToPile?: boolean;
   } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; emoji: string; title: string; text: string }>({
@@ -202,6 +219,7 @@ export default function Arena3DPage() {
   const leaderIdRef = useRef<number | null>(null);
   const loserIdRef = useRef<number | null>(null);
   const savedSpectatorPosRef = useRef<Record<number, { x: number; y: number; z: number; rotY: number }>>({});
+  const savedCameraPosRef = useRef<THREE.Vector3 | null>(null);
 
   const showToast = (emoji: string, title: string, text: string) => {
     setToast({ show: true, emoji, title, text });
@@ -219,7 +237,15 @@ export default function Arena3DPage() {
       }
       if (data.participants) {
         setPlayers(data.participants);
-        const savedId = localStorage.getItem('waist_user_id');
+        try {
+      const savedPosStr = localStorage.getItem('waist_spectator_positions');
+      if (savedPosStr) {
+        savedSpectatorPosRef.current = JSON.parse(savedPosStr);
+      }
+    } catch {
+      // ignore invalid storage
+    }
+    const savedId = localStorage.getItem('waist_user_id');
         if (savedId && walkingSpectatorIdRef.current === null) {
           const me = (data.participants as Player[]).find((p) => p.id === Number(savedId));
           if (me?.role === 'spectator') {
@@ -245,6 +271,14 @@ export default function Arena3DPage() {
   useEffect(() => {
     if (window.innerWidth < 768) {
       setIsDrawerOpen(false);
+    }
+    try {
+      const savedPosStr = localStorage.getItem('waist_spectator_positions');
+      if (savedPosStr) {
+        savedSpectatorPosRef.current = JSON.parse(savedPosStr);
+      }
+    } catch {
+      // ignore invalid storage
     }
     const savedId = localStorage.getItem('waist_user_id');
     if (savedId && !Number.isNaN(Number(savedId))) {
@@ -276,10 +310,31 @@ export default function Arena3DPage() {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => {
+      stopBgm();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
   }, []);
+
+  const toggleMusic = () => {
+    setIsMusicOn((prev) => {
+      const next = !prev;
+      if (next) startBgm();
+      else stopBgm();
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!isBoardComboOpen) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (boardComboRef.current && !boardComboRef.current.contains(e.target as Node)) {
+        setIsBoardComboOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDocPointerDown);
+    return () => document.removeEventListener('pointerdown', onDocPointerDown);
+  }, [isBoardComboOpen]);
 
   const competitors = React.useMemo(
     () => players.filter((p) => p.role !== 'spectator'),
@@ -336,6 +391,9 @@ export default function Arena3DPage() {
   const openEditModal = useCallback(
     (p: Player) => {
       focusOnCharacter(p.id);
+      if (p.id !== currentUserId) {
+        return;
+      }
       setJoinMode('edit');
       setEditingPlayerId(p.id);
       setJoinRole(p.role === 'spectator' ? 'spectator' : 'competitor');
@@ -352,12 +410,15 @@ export default function Arena3DPage() {
       setJoinError('');
       setIsJoinOpen(true);
     },
-    [focusOnCharacter]
+    [focusOnCharacter, currentUserId]
   );
 
   const getOverviewCameraPos = () => {
     const isPortrait = typeof window !== 'undefined' && window.innerWidth < window.innerHeight;
-    return isPortrait ? new THREE.Vector3(0, 46, 56) : new THREE.Vector3(0, 34, 44);
+    const extra = Math.max(0, competitors.length - 6) * 0.9;
+    return isPortrait
+      ? new THREE.Vector3(0, 24 + extra, 36 + extra * 1.2)
+      : new THREE.Vector3(0, 17 + extra, 26 + extra);
   };
 
   const setCameraView = (mode: 'overview' | 'leader' | 'loser') => {
@@ -386,7 +447,11 @@ export default function Arena3DPage() {
     scene.fog = new THREE.FogExp2(0xdbeafe, 0.014);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
-    camera.position.copy(getOverviewCameraPos());
+    if (savedCameraPosRef.current) {
+      camera.position.copy(savedCameraPosRef.current);
+    } else {
+      camera.position.copy(getOverviewCameraPos());
+    }
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -400,7 +465,7 @@ export default function Arena3DPage() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.07;
     controls.maxPolarAngle = Math.PI / 2 - 0.06;
-    controls.minDistance = 8;
+    controls.minDistance = 4.5;
     controls.maxDistance = 110;
     controls.target.copy(cameraLookAtRef.current);
     controlsRef.current = controls;
@@ -419,11 +484,14 @@ export default function Arena3DPage() {
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
     const spectatorList = players.filter((pl) => pl.role === 'spectator');
-    const trackWidth = Math.max(7.5, Math.min(10.5, competitors.length * 0.35 + 4.5));
+    const halfLen = competitors.length >= 8 || spectatorList.length >= 10 ? 22 : 15;
+    const trackWidth = Math.max(8.5, competitors.length * 2.1 + 1.5);
+    const islandW = halfLen * 2 + 14;
+    const islandD = Math.max(30, trackWidth + 16);
 
     dirLight.shadow.camera.near = 5;
     dirLight.shadow.camera.far = 110;
-    const d = 44;
+    const d = Math.max(28, Math.max(islandW, islandD) / 2 + 4);
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
@@ -432,7 +500,7 @@ export default function Arena3DPage() {
     scene.add(dirLight);
 
     const island = new THREE.Mesh(
-      new THREE.BoxGeometry(62, 2.2, 56),
+      new THREE.BoxGeometry(islandW, 2.2, islandD),
       new THREE.MeshStandardMaterial({ color: 0x86EFAC, roughness: 0.7 })
     );
     island.position.set(0, -1.15, 0);
@@ -440,27 +508,18 @@ export default function Arena3DPage() {
     scene.add(island);
 
     const dirt = new THREE.Mesh(
-      new THREE.BoxGeometry(60.5, 1.8, 54.5),
+      new THREE.BoxGeometry(islandW - 1.5, 1.8, islandD - 1.5),
       new THREE.MeshStandardMaterial({ color: 0xFDBA74, roughness: 0.9 })
     );
     dirt.position.set(0, -3.1, 0);
     scene.add(dirt);
 
-    // Classic iconic "S" curve ("เอว S" concept)
-    const trackCurve = new THREE.CatmullRomCurve3(
-      [
-        new THREE.Vector3(-14, 0.14, 19),
-        new THREE.Vector3(6, 0.14, 20),
-        new THREE.Vector3(17, 0.14, 11),
-        new THREE.Vector3(0, 0.14, 0),
-        new THREE.Vector3(-17, 0.14, -11),
-        new THREE.Vector3(-6, 0.14, -20),
-        new THREE.Vector3(14, 0.14, -19),
-      ],
-      false,
-      'centripetal',
-      0.5
-    );
+    // Long straight track (stretches automatically when there are more players)
+    const trackCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-halfLen, 0.14, 0),
+      new THREE.Vector3(0, 0.14, 0),
+      new THREE.Vector3(halfLen, 0.14, 0),
+    ]);
 
     const segments = 120;
     const positions: number[] = [];
@@ -655,10 +714,11 @@ export default function Arena3DPage() {
     labelsContainer.appendChild(guardTagEl);
     let lastGuardWarnAt = 0;
 
+    const treeX = islandW / 2 - 4;
+    const treeZ = islandD / 2 - 3.5;
     const treePositions = [
-      [-26, -23], [-27, 4], [-25, 23],
-      [26, 23], [27, -4], [25, -23],
-      [-5, 6], [5, -6],
+      [-treeX, -treeZ], [0, -treeZ], [treeX, -treeZ],
+      [-treeX, treeZ], [0, treeZ], [treeX, treeZ],
     ];
     treePositions.forEach(([tx, tz], idx) => {
       const tree = new THREE.Group();
@@ -802,6 +862,36 @@ export default function Arena3DPage() {
         if (petParts.leashMesh) rootGroup.add(petParts.leashMesh);
       }
 
+      if (!isSpectator) {
+        const flowerCount = Math.min(20, p.cheerCount ?? 0);
+        for (let fi = 0; fi < flowerCount; fi++) {
+          const fl = buildFlowerMesh(fi);
+          fl.scale.setScalar(1.45);
+          const ring = Math.floor(fi / 5);
+          const angle = (fi % 5) * 0.55 - 1.1;
+          fl.position.set(
+            -0.35 + Math.cos(angle) * (0.55 + ring * 0.34),
+            ring * 0.12,
+            -0.95 - Math.sin(angle) * 0.3 - ring * 0.25
+          );
+          rootGroup.add(fl);
+        }
+
+        const foodCount = Math.min(20, p.temptCount ?? 0);
+        for (let di = 0; di < foodCount; di++) {
+          const fd = buildFoodPileMesh(di);
+          fd.scale.setScalar(1.45);
+          const layer = Math.floor(di / 4);
+          const slot = di % 4;
+          fd.position.set(
+            -0.35 + (slot - 1.5) * 0.36,
+            layer * 0.2,
+            0.95 + (slot % 2) * 0.32
+          );
+          rootGroup.add(fd);
+        }
+      }
+
       scene.add(rootGroup);
 
       const tagEl = document.createElement('div');
@@ -829,12 +919,17 @@ export default function Arena3DPage() {
         const sign = pctVal > 0 ? '-' : pctVal < 0 ? '+' : '';
         const pctColor = pctVal >= 0 ? 'text-emerald-600' : 'text-rose-600';
 
+        const cheerBadge = (p.cheerCount ?? 0) > 0 ? `<span class="text-emerald-600">🌸${p.cheerCount}</span>` : '';
+        const temptBadge = (p.temptCount ?? 0) > 0 ? `<span class="text-rose-600">😈${p.temptCount}</span>` : '';
+
         tagEl.innerHTML = `
           <div class="bg-white border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
             <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
               <span>${rankLabel}</span>
               <span>${p.emoji} ${p.name}</span>
               <span class="${pctColor}">${sign}${Math.abs(pctVal)}%</span>
+              ${cheerBadge}
+              ${temptBadge}
             </div>
             <div class="text-[10px] font-semibold text-zinc-600 max-w-[145px] truncate">
               ${p.taunt}
@@ -849,6 +944,8 @@ export default function Arena3DPage() {
         id: p.id,
         player: p,
         isSpectator,
+        cheerCount: p.cheerCount ?? 0,
+        temptCount: p.temptCount ?? 0,
         isCloseToFinish: !isSpectator && (rankedInfo?.progressRatio ?? 0) >= 0.6,
         workoutType: dailyAct ? dailyAct.animType : 'cheer',
         petType,
@@ -874,18 +971,19 @@ export default function Arena3DPage() {
 
     charMeshesRef.current = meshes;
 
-    const giftMeshGroup = new THREE.Group();
-    giftMeshGroup.visible = false;
-    const giftBox = new THREE.Mesh(
-      new THREE.BoxGeometry(0.48, 0.48, 0.48),
-      new THREE.MeshStandardMaterial({ color: 0xFF4D8D, roughness: 0.3 })
-    );
-    const giftRibbon = new THREE.Mesh(
-      new THREE.BoxGeometry(0.52, 0.14, 0.52),
-      new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.3 })
-    );
-    giftMeshGroup.add(giftBox, giftRibbon);
-    scene.add(giftMeshGroup);
+    const flowerThrowGroup = new THREE.Group();
+    flowerThrowGroup.visible = false;
+    for (let i = 0; i < 3; i++) {
+      const fl = buildFlowerMesh(i);
+      fl.position.set((i - 1) * 0.22, 0, 0);
+      fl.scale.setScalar(1.5);
+      flowerThrowGroup.add(fl);
+    }
+    scene.add(flowerThrowGroup);
+
+    const deliveryRiderGroup = buildDeliveryRider();
+    deliveryRiderGroup.visible = false;
+    scene.add(deliveryRiderGroup);
 
     let frameId: number;
     const clock = new THREE.Clock();
@@ -936,6 +1034,19 @@ export default function Arena3DPage() {
             c.rootGroup.position.z = Math.max(-26, Math.min(26, c.rootGroup.position.z + dz * speed));
             c.targetPos.copy(c.rootGroup.position);
             c.rootGroup.rotation.y = Math.atan2(-dz, dx);
+            savedSpectatorPosRef.current[c.id] = {
+              x: c.rootGroup.position.x,
+              y: c.rootGroup.position.y,
+              z: c.rootGroup.position.z,
+              rotY: c.rootGroup.rotation.y,
+            };
+            if (Math.floor(elapsed * 2) !== Math.floor((elapsed - 0.016) * 2)) {
+              try {
+                localStorage.setItem('waist_spectator_positions', JSON.stringify(savedSpectatorPosRef.current));
+              } catch {
+                // ignore quota errors
+              }
+            }
             c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
             c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
             c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
@@ -946,10 +1057,12 @@ export default function Arena3DPage() {
             animateCharacterMotion(c, elapsed, idx, c.currentBellyScale);
           }
 
-          controls.target.lerp(
-            new THREE.Vector3(c.rootGroup.position.x, 1.4, c.rootGroup.position.z),
-            0.08
-          );
+          if (isWalking && !cameraTargetPosRef.current) {
+            controls.target.lerp(
+              new THREE.Vector3(c.rootGroup.position.x, 1.4, c.rootGroup.position.z),
+              0.08
+            );
+          }
 
           // Find nearest other spectator within 4.2 units
           let closest: Player | null = null;
@@ -1091,27 +1204,74 @@ export default function Arena3DPage() {
       if (delivery) {
         const dt = (now - delivery.startTime) / 1000;
         const targetChar = meshes.find((m) => m.id === delivery.targetId);
-        if (dt < 2.2 && targetChar) {
-          const tNorm = Math.min(1, dt / 1.1);
-          const startPos = new THREE.Vector3(targetChar.rootGroup.position.x, 1.2, targetChar.rootGroup.position.z + 4.5);
-          const endPos = new THREE.Vector3(
-            targetChar.rootGroup.position.x,
-            targetChar.rootGroup.position.y + 2.4,
-            targetChar.rootGroup.position.z
-          );
-          giftMeshGroup.visible = true;
-          giftMeshGroup.position.lerpVectors(startPos, endPos, tNorm);
-          giftMeshGroup.position.y += Math.sin(tNorm * Math.PI) * 2.2;
-          giftMeshGroup.rotation.y = elapsed * 5;
-          (giftBox.material as THREE.MeshStandardMaterial).color.setHex(
-            delivery.kind === 'cheer' ? 0xA3E635 : 0xFF4D8D
-          );
+        if (dt < 2.4 && targetChar) {
+          if (delivery.kind === 'cheer') {
+            deliveryRiderGroup.visible = false;
+            const tNorm = Math.min(1, dt / 1.1);
+            const endPos = targetChar.rootGroup.localToWorld(new THREE.Vector3(-0.35, 0.25, -0.95));
+            const startPos = endPos.clone().add(new THREE.Vector3(0, 1.2, -7.5));
+            flowerThrowGroup.visible = true;
+            flowerThrowGroup.position.lerpVectors(startPos, endPos, tNorm);
+            flowerThrowGroup.position.y += Math.sin(tNorm * Math.PI) * 3.0;
+            flowerThrowGroup.rotation.y = elapsed * 6;
+          } else {
+            flowerThrowGroup.visible = false;
+            deliveryRiderGroup.visible = true;
+            const dropPos = targetChar.rootGroup.localToWorld(new THREE.Vector3(-0.35, 0.0, 1.15));
+            const edgePos = dropPos.clone().add(new THREE.Vector3(-9, 0, 5.5));
+            if (dt < 1.1) {
+              const tIn = dt / 1.1;
+              deliveryRiderGroup.position.lerpVectors(edgePos, dropPos, tIn);
+              deliveryRiderGroup.rotation.y = Math.atan2(-(dropPos.z - edgePos.z), dropPos.x - edgePos.x);
+            } else {
+              const tOut = Math.min(1, (dt - 1.1) / 1.1);
+              const exitPos = dropPos.clone().add(new THREE.Vector3(10, 0, 5.5));
+              deliveryRiderGroup.position.lerpVectors(dropPos, exitPos, tOut);
+              deliveryRiderGroup.rotation.y = Math.atan2(-(exitPos.z - dropPos.z), exitPos.x - dropPos.x);
+            }
+          }
+          if (dt >= 1.1 && !delivery.addedToPile) {
+            delivery.addedToPile = true;
+            if (delivery.kind === 'cheer') {
+              const fi = Math.min(19, targetChar.cheerCount ?? 0);
+              targetChar.cheerCount = (targetChar.cheerCount ?? 0) + 1;
+              if (fi < 20) {
+                const fl = buildFlowerMesh(fi);
+                fl.scale.setScalar(1.45);
+                const ring = Math.floor(fi / 5);
+                const angle = (fi % 5) * 0.55 - 1.1;
+                fl.position.set(
+                  -0.35 + Math.cos(angle) * (0.55 + ring * 0.34),
+                  ring * 0.12,
+                  -0.95 - Math.sin(angle) * 0.3 - ring * 0.25
+                );
+                targetChar.rootGroup.add(fl);
+              }
+            } else {
+              const di = Math.min(19, targetChar.temptCount ?? 0);
+              targetChar.temptCount = (targetChar.temptCount ?? 0) + 1;
+              if (di < 20) {
+                const fd = buildFoodPileMesh(di);
+                fd.scale.setScalar(1.45);
+                const layer = Math.floor(di / 4);
+                const slot = di % 4;
+                fd.position.set(
+                  -0.35 + (slot - 1.5) * 0.36,
+                  layer * 0.2,
+                  0.95 + (slot % 2) * 0.32
+                );
+                targetChar.rootGroup.add(fd);
+              }
+            }
+          }
         } else {
-          giftMeshGroup.visible = false;
+          flowerThrowGroup.visible = false;
+          deliveryRiderGroup.visible = false;
           pendingDeliveryRef.current = null;
         }
       } else {
-        giftMeshGroup.visible = false;
+        flowerThrowGroup.visible = false;
+        deliveryRiderGroup.visible = false;
       }
 
       const guardHeadPos = new THREE.Vector3(
@@ -1264,6 +1424,7 @@ export default function Arena3DPage() {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      savedCameraPosRef.current = camera.position.clone();
       meshes.forEach((m) => {
         if (m.isSpectator) {
           savedSpectatorPosRef.current[m.id] = {
@@ -1274,6 +1435,11 @@ export default function Arena3DPage() {
           };
         }
       });
+      try {
+        localStorage.setItem('waist_spectator_positions', JSON.stringify(savedSpectatorPosRef.current));
+      } catch {
+        // ignore
+      }
       cancelAnimationFrame(frameId);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -1289,13 +1455,14 @@ export default function Arena3DPage() {
     setModalError('');
     setSubmitting(true);
 
+    const activeUserId = currentUserId || selectedPlayerId;
     try {
       const res = await fetch('/api/weights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: selectedPlayerId,
-          pinCode: pinInput,
+          userId: activeUserId,
+          isSelf: true,
           weight: parseFloat(newWeightInput),
           excuseTag: selectedExcuse,
         }),
@@ -1479,6 +1646,20 @@ export default function Arena3DPage() {
       if (res.ok && data.interaction) {
         const inter = data.interaction;
         setBoardMessage('');
+        setRoastFeed((prev) => [
+          {
+            id: `i-${inter.id}`,
+            type: inter.kind,
+            user: inter.senderName,
+            emoji: inter.senderEmoji,
+            targetName: inter.targetName,
+            targetEmoji: inter.targetEmoji,
+            giftItem: inter.giftItem,
+            roast: inter.message || '',
+            time: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
         pendingDeliveryRef.current = {
           targetId: inter.targetUserId,
           kind: inter.kind,
@@ -1492,7 +1673,6 @@ export default function Arena3DPage() {
           showToast('😈', `ส่งมารผจญไปยั่ว ${inter.targetName}!`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
         }
         focusOnCharacter(inter.targetUserId);
-        await fetchArenaData();
       }
     } catch {
       showToast('❌', 'ส่งไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
@@ -1547,6 +1727,17 @@ export default function Arena3DPage() {
               🔥 <span className="hidden md:inline">ส่องคนบ๊วย</span>
             </button>
           </div>
+
+          <button
+            onClick={toggleMusic}
+            className={`neo-btn font-bold text-xs sm:text-sm px-3 py-2.5 rounded-xl flex items-center gap-1 cursor-pointer ${
+              isMusicOn ? 'bg-[#FFE600] text-black' : 'bg-white text-zinc-700'
+            }`}
+            title="เปิด/ปิดเพลงประกอบ"
+          >
+            <span>{isMusicOn ? '🔊' : '🔇'}</span>
+            <span className="hidden md:inline">{isMusicOn ? 'เพลง' : 'ปิดเสียง'}</span>
+          </button>
 
           <button
             onClick={() => setIsDrawerOpen((v) => !v)}
@@ -1604,17 +1795,24 @@ export default function Arena3DPage() {
             );
           })()}
 
-          <button
-            onClick={() => {
-              if (selectedPlayerObj) setNewWeightInput(String(selectedPlayerObj.currentWeight));
-              setModalError('');
-              setIsLogOpen(true);
-            }}
-            className="neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
-          >
-            <Scale className="w-4 h-4 stroke-[2.5]" />
-            <span>+ อัปเดตน้ำหนักวันนี้</span>
-          </button>
+          {(() => {
+            const currentUser = players.find((pl) => pl.id === currentUserId);
+            if (!currentUser || currentUser.role === 'spectator') return null;
+            return (
+              <button
+                onClick={() => {
+                  setSelectedPlayerId(currentUser.id);
+                  setNewWeightInput(String(currentUser.currentWeight));
+                  setModalError('');
+                  setIsLogOpen(true);
+                }}
+                className="neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+              >
+                <Scale className="w-4 h-4 stroke-[2.5]" />
+                <span>+ อัปเดตน้ำหนักวันนี้</span>
+              </button>
+            );
+          })()}
         </div>
       </header>
 
@@ -1698,30 +1896,64 @@ export default function Arena3DPage() {
 
           {competitors.length > 0 && (
             <form onSubmit={handleBoardSubmit} className="bg-white border-2 border-black rounded-xl p-2.5 mb-2.5 space-y-2 shrink-0 shadow-[2px_2px_0px_#18181B]">
-              <div className="grid grid-cols-2 gap-1.5">
-                <select
-                  value={boardSenderId}
-                  onChange={(e) => setBoardSenderId(e.target.value)}
-                  className="bg-[#FFFDF7] border-2 border-black rounded-lg px-2 py-1 text-[11px] font-bold truncate"
-                >
-                  <option value="">📣 ผู้หวังดีทางบ้าน</option>
-                  {players.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={boardTargetId}
-                  onChange={(e) => setBoardTargetId(Number(e.target.value))}
-                  className="bg-[#FFFDF7] border-2 border-black rounded-lg px-2 py-1 text-[11px] font-bold truncate"
-                >
-                  {competitors.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      ส่งให้ {p.emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 gap-1.5 relative">
+                <div className="flex items-center justify-between text-[11px] font-bold text-zinc-600 px-1">
+                  <span>
+                    ส่งจาก: {players.find((p) => p.id === currentUserId)?.emoji}{' '}
+                    {players.find((p) => p.id === currentUserId)?.name || 'คุณ'}
+                  </span>
+                </div>
+                <div className="relative" ref={boardComboRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBoardSearch('');
+                      setIsBoardComboOpen((v) => !v);
+                    }}
+                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-lg px-2.5 py-1.5 text-xs font-bold flex items-center justify-between cursor-pointer"
+                  >
+                    <span className="truncate">
+                      {(() => {
+                        const t = competitors.find((c) => c.id === boardTargetId);
+                        return t ? `ส่งให้ ${t.emoji} ${t.name}` : 'เลือกผู้เข้าแข่งขัน...';
+                      })()}
+                    </span>
+                    <span className="text-[10px] ml-1">▼</span>
+                  </button>
+                  {isBoardComboOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-black rounded-xl shadow-[3px_3px_0px_#18181B] z-30 p-1.5 space-y-1">
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="🔍 ค้นหาชื่อ..."
+                        value={boardSearch}
+                        onChange={(e) => setBoardSearch(e.target.value)}
+                        className="w-full bg-[#FFFDF7] border border-black rounded-lg px-2 py-1 text-xs font-semibold"
+                      />
+                      <div className="max-h-36 overflow-y-auto space-y-0.5">
+                        {competitors
+                          .filter((c) => c.name.toLowerCase().includes(boardSearch.trim().toLowerCase()))
+                          .map((c) => (
+                            <button
+                              type="button"
+                              key={c.id}
+                              onClick={() => {
+                                setBoardTargetId(c.id);
+                                setIsBoardComboOpen(false);
+                                setBoardSearch('');
+                              }}
+                              className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                                c.id === boardTargetId ? 'bg-[#FFE600]' : 'hover:bg-zinc-100'
+                              }`}
+                            >
+                              <span>{c.emoji}</span>
+                              <span className="truncate">{c.name}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <button
@@ -1860,56 +2092,29 @@ export default function Arena3DPage() {
             </div>
 
             <form onSubmit={handleWeightSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold mb-1">1. เลือกตัวละครของคุณ</label>
-                <select
-                  value={selectedPlayerId}
-                  onChange={(e) => {
-                    const id = Number(e.target.value);
-                    setSelectedPlayerId(id);
-                    const found = players.find((p) => p.id === id);
-                    if (found) setNewWeightInput(String(found.currentWeight));
-                  }}
-                  className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
-                >
-                  {competitors.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.emoji} {p.name} (ล่าสุด {p.currentWeight} กก.)
-                    </option>
-                  ))}
-                </select>
-                {selectedPlayerObj && (
-                  <p className="text-[11px] text-zinc-500 font-semibold mt-1">
-                    เริ่มต้น {selectedPlayerObj.startWeight} กก. • ปัจจุบัน {selectedPlayerObj.currentWeight} กก. • เป้าหมาย {selectedPlayerObj.goalWeight} กก.
-                  </p>
-                )}
-              </div>
+              {selectedPlayerObj && (
+                <div className="bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 flex items-center justify-between">
+                  <span className="font-extrabold text-sm">
+                    {selectedPlayerObj.emoji} {selectedPlayerObj.name}
+                  </span>
+                  <span className="text-xs font-bold text-zinc-600">
+                    ล่าสุด {selectedPlayerObj.currentWeight} กก. • เป้า {selectedPlayerObj.goalWeight} กก.
+                  </span>
+                </div>
+              )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold mb-1">2. รหัส PIN 4 หลัก</label>
-                  <input
-                    type="password"
-                    maxLength={4}
-                    required
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest text-base"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1">3. น้ำหนักวันนี้ (กก.)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="30"
-                    max="250"
-                    required
-                    value={newWeightInput}
-                    onChange={(e) => setNewWeightInput(e.target.value)}
-                    className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">น้ำหนักวันนี้ (กก.)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="30"
+                  max="250"
+                  required
+                  value={newWeightInput}
+                  onChange={(e) => setNewWeightInput(e.target.value)}
+                  className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
+                />
               </div>
 
               <div>
@@ -2174,7 +2379,7 @@ export default function Arena3DPage() {
               )}
 
               <div className="grid grid-cols-2 gap-3">
-                <div className={joinMode === 'edit' && editingPlayerId === currentUserId ? 'col-span-2' : ''}>
+                <div className={joinMode === 'create' || (joinMode === 'edit' && editingPlayerId === currentUserId) ? 'col-span-2' : ''}>
                   <label className="block text-xs font-bold mb-1">ชื่อเล่น (Username)</label>
                   <input
                     type="text"
@@ -2184,15 +2389,13 @@ export default function Arena3DPage() {
                     className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
                   />
                 </div>
-                {!(joinMode === 'edit' && editingPlayerId === currentUserId) && (
+                {joinMode === 'edit' && editingPlayerId !== currentUserId && (
                   <div>
-                    <label className="block text-xs font-bold mb-1">
-                      {joinMode === 'edit' ? 'รหัส PIN 4 หลัก (ยืนยัน)' : 'รหัส PIN 4 หลัก (ไม่ใส่ก็ได้)'}
-                    </label>
+                    <label className="block text-xs font-bold mb-1">รหัส PIN 4 หลัก (ยืนยัน)</label>
                     <input
                       type="password"
                       maxLength={4}
-                      required={joinMode === 'edit'}
+                      required
                       value={joinPin}
                       onChange={(e) => setJoinPin(e.target.value)}
                       className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest"
