@@ -212,6 +212,21 @@ export default function Arena3DPage() {
     addedToPile?: boolean;
   } | null>(null);
 
+  const [bkkWeather, setBkkWeather] = useState<{
+    temp: number;
+    isDay: boolean;
+    condition: 'clear' | 'cloudy' | 'rain' | 'storm';
+    label: string;
+    emoji: string;
+  } | null>(null);
+  const bkkWeatherRef = useRef<{
+    temp: number;
+    isDay: boolean;
+    condition: 'clear' | 'cloudy' | 'rain' | 'storm';
+    label: string;
+    emoji: string;
+  } | null>(null);
+
   const [toast, setToast] = useState<{ show: boolean; emoji: string; title: string; text: string }>({
     show: false,
     emoji: '🎉',
@@ -444,6 +459,54 @@ export default function Arena3DPage() {
   }, []);
 
   useEffect(() => {
+    const mapWmoWeather = (code: number, isDay: boolean) => {
+      if (code === 95 || code === 96 || code === 99) {
+        return { condition: 'storm' as const, label: 'พายุฝนฟ้าคะนอง', emoji: '⛈️' };
+      }
+      if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
+        return { condition: 'rain' as const, label: 'ฝนตก', emoji: '🌧️' };
+      }
+      if (code === 0 || code === 1) {
+        return {
+          condition: 'clear' as const,
+          label: isDay ? 'แดดจ้า' : 'ฟ้าโปร่ง',
+          emoji: isDay ? '☀️' : '🌙',
+        };
+      }
+      return {
+        condition: 'cloudy' as const,
+        label: isDay ? 'มีเมฆมาก' : 'มีเมฆครึ้ม',
+        emoji: isDay ? '⛅' : '☁️',
+      };
+    };
+
+    const fetchBangkokWeather = async () => {
+      try {
+        const res = await fetch(
+          'https://api.open-meteo.com/v1/forecast?latitude=13.7563&longitude=100.5018&current=temperature_2m,weather_code,is_day&timezone=Asia%2FBangkok'
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const cur = data?.current;
+        if (!cur) return;
+        const isDay = Number(cur.is_day) === 1;
+        const code = Number(cur.weather_code ?? 0);
+        const temp = Math.round(Number(cur.temperature_2m ?? 30));
+        const mapped = mapWmoWeather(code, isDay);
+        const nextWeather = { temp, isDay, ...mapped };
+        bkkWeatherRef.current = nextWeather;
+        setBkkWeather(nextWeather);
+      } catch {
+        // ignore network errors
+      }
+    };
+
+    fetchBangkokWeather();
+    const timer = setInterval(fetchBangkokWeather, 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -637,7 +700,51 @@ export default function Arena3DPage() {
     loserIdRef.current = rankedPlayers.length > 1 ? rankedPlayers[rankedPlayers.length - 1].id : null;
 
     const scene = new THREE.Scene();
+    const skyColor = new THREE.Color(0xdbeafe);
+    scene.background = skyColor;
     scene.fog = new THREE.FogExp2(0xdbeafe, 0.014);
+
+    // 3D Rain particles (synced with Bangkok weather)
+    const rainCount = 360;
+    const rainPositions = new Float32Array(rainCount * 3);
+    for (let i = 0; i < rainCount; i++) {
+      rainPositions[i * 3] = (Math.random() - 0.5) * 60;
+      rainPositions[i * 3 + 1] = Math.random() * 24;
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 52;
+    }
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    const rainMat = new THREE.PointsMaterial({
+      color: 0x93c5fd,
+      size: 0.22,
+      transparent: true,
+      opacity: 0.78,
+    });
+    const rainPoints = new THREE.Points(rainGeo, rainMat);
+    rainPoints.visible = false;
+    scene.add(rainPoints);
+
+    // Night moon + stars (synced with Bangkok is_day)
+    const nightGroup = new THREE.Group();
+    const moonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1.6, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    );
+    moonMesh.position.set(-18, 22, -26);
+    nightGroup.add(moonMesh);
+    const starCount = 140;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      starPos[i * 3] = (Math.random() - 0.5) * 90;
+      starPos[i * 3 + 1] = 16 + Math.random() * 22;
+      starPos[i * 3 + 2] = -18 - Math.random() * 32;
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.28, transparent: true, opacity: 0.85 });
+    nightGroup.add(new THREE.Points(starGeo, starMat));
+    nightGroup.visible = false;
+    scene.add(nightGroup);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
     if (savedCameraPosRef.current) {
@@ -1219,6 +1326,57 @@ export default function Arena3DPage() {
         c.position.x += 0.012;
         if (c.position.x > 22) c.position.x = -22;
       });
+
+      const bkkW = bkkWeatherRef.current;
+      if (bkkW) {
+        let targetHex = 0xbae6fd;
+        let targetHemi = 0.78;
+        let targetDir = 0.95;
+        if (!bkkW.isDay) {
+          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
+            targetHex = 0x090d16;
+            targetHemi = 0.38;
+            targetDir = 0.35;
+          } else {
+            targetHex = 0x0f172a;
+            targetHemi = 0.45;
+            targetDir = 0.48;
+          }
+        } else if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
+          targetHex = 0x64748b;
+          targetHemi = 0.52;
+          targetDir = 0.45;
+        } else if (bkkW.condition === 'cloudy') {
+          targetHex = 0xcbd5e1;
+          targetHemi = 0.65;
+          targetDir = 0.68;
+        }
+
+        const targetCol = new THREE.Color(targetHex);
+        skyColor.lerp(targetCol, 0.03);
+        scene.background = skyColor;
+        if (scene.fog instanceof THREE.FogExp2) {
+          scene.fog.color.lerp(targetCol, 0.03);
+        }
+        hemiLight.intensity += (targetHemi - hemiLight.intensity) * 0.04;
+        const lightningFlash =
+          bkkW.condition === 'storm' && Math.sin(elapsed * 7.3) > 0.97 && Math.sin(elapsed * 19.1) > 0.6 ? 1.5 : 0;
+        dirLight.intensity += (targetDir + lightningFlash - dirLight.intensity) * 0.12;
+
+        const isRaining = bkkW.condition === 'rain' || bkkW.condition === 'storm';
+        rainPoints.visible = isRaining;
+        if (isRaining) {
+          const dropSpeed = bkkW.condition === 'storm' ? 0.65 : 0.42;
+          const posAttr = rainGeo.getAttribute('position') as THREE.BufferAttribute;
+          for (let i = 0; i < rainCount; i++) {
+            let py = posAttr.getY(i) - dropSpeed;
+            if (py < 0) py = 24;
+            posAttr.setY(i, py);
+          }
+          posAttr.needsUpdate = true;
+        }
+        nightGroup.visible = !bkkW.isDay && !isRaining;
+      }
 
       const now = performance.now();
       const activeWalkerId = walkingSpectatorIdRef.current;
@@ -2059,6 +2217,16 @@ export default function Arena3DPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
+          {bkkWeather && (
+            <div
+              className="neo-card rounded-xl px-2.5 py-1.5 bg-white text-black text-xs font-extrabold flex items-center gap-1.5"
+              title={`สภาพอากาศกรุงเทพฯ ล่าสุด: ${bkkWeather.label} ${bkkWeather.temp}°C`}
+            >
+              <span>{bkkWeather.emoji}</span>
+              <span>กทม. {bkkWeather.temp}°C</span>
+              <span className="hidden lg:inline text-zinc-500 font-bold">· {bkkWeather.label}</span>
+            </div>
+          )}
           <div className="neo-card rounded-xl p-1 flex items-center gap-1 bg-white">
             <button
               onClick={() => setCameraView('overview')}
