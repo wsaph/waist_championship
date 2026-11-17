@@ -2881,6 +2881,15 @@ export default function Arena3DPage() {
                             return next;
                           });
                           setIsPairMenuOpen(false);
+                          realtimeChannelRef.current?.send({
+                            type: 'broadcast',
+                            event: 'activity',
+                            payload: {
+                              userId: walkingSpectatorId,
+                              animType: nearMesh.workoutType,
+                              label: nearMesh.activityLabel,
+                            },
+                          });
                           confetti({ particleCount: 40, spread: 55, origin: { y: 0.7 } });
                           showToast(
                             '👯',
@@ -2918,6 +2927,16 @@ export default function Arena3DPage() {
                           return next;
                         });
                         setIsPairMenuOpen(false);
+                        realtimeChannelRef.current?.send({
+                          type: 'broadcast',
+                          event: 'activity',
+                          payload: { userId: walkingSpectatorId, animType: act.animType, label: act.label },
+                        });
+                        realtimeChannelRef.current?.send({
+                          type: 'broadcast',
+                          event: 'activity',
+                          payload: { userId: nearbySpectator.id, animType: act.animType, label: act.label },
+                        });
                         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
                         showToast(
                           '🤝',
