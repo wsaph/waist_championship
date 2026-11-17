@@ -215,6 +215,7 @@ export default function Arena3DPage() {
   const [bkkWeather, setBkkWeather] = useState<{
     temp: number;
     isDay: boolean;
+    dayPhase: 'dawn' | 'day' | 'dusk' | 'night';
     condition: 'clear' | 'cloudy' | 'rain' | 'storm';
     label: string;
     emoji: string;
@@ -222,6 +223,7 @@ export default function Arena3DPage() {
   const bkkWeatherRef = useRef<{
     temp: number;
     isDay: boolean;
+    dayPhase: 'dawn' | 'day' | 'dusk' | 'night';
     condition: 'clear' | 'cloudy' | 'rain' | 'storm';
     label: string;
     emoji: string;
@@ -459,7 +461,17 @@ export default function Arena3DPage() {
   }, []);
 
   useEffect(() => {
-    const mapWmoWeather = (code: number, isDay: boolean) => {
+    const getBangkokDayPhase = (): 'dawn' | 'day' | 'dusk' | 'night' => {
+      const bkkNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+      const bkkHour = bkkNow.getUTCHours() + bkkNow.getUTCMinutes() / 60;
+      if (bkkHour >= 5.5 && bkkHour < 8) return 'dawn';
+      if (bkkHour >= 8 && bkkHour < 17) return 'day';
+      if (bkkHour >= 17 && bkkHour < 19) return 'dusk';
+      return 'night';
+    };
+
+    const mapWmoWeather = (code: number, dayPhase: 'dawn' | 'day' | 'dusk' | 'night') => {
+      const isDay = dayPhase !== 'night';
       if (code === 95 || code === 96 || code === 99) {
         return { condition: 'storm' as const, label: 'พายุฝนฟ้าคะนอง', emoji: '⛈️' };
       }
@@ -467,12 +479,16 @@ export default function Arena3DPage() {
         return { condition: 'rain' as const, label: 'ฝนตก', emoji: '🌧️' };
       }
       if (code === 0 || code === 1) {
+        if (dayPhase === 'dawn') return { condition: 'clear' as const, label: 'หัวเช้าสดใส', emoji: '🌅' };
+        if (dayPhase === 'dusk') return { condition: 'clear' as const, label: 'ยามเย็น', emoji: '🌇' };
         return {
           condition: 'clear' as const,
           label: isDay ? 'แดดจ้า' : 'ฟ้าโปร่ง',
           emoji: isDay ? '☀️' : '🌙',
         };
       }
+      if (dayPhase === 'dawn') return { condition: 'cloudy' as const, label: 'หัวเช้ามีเมฆ', emoji: '🌅' };
+      if (dayPhase === 'dusk') return { condition: 'cloudy' as const, label: 'ยามเย็นครึ้มๆ', emoji: '🌇' };
       return {
         condition: 'cloudy' as const,
         label: isDay ? 'มีเมฆมาก' : 'มีเมฆครึ้ม',
@@ -489,11 +505,12 @@ export default function Arena3DPage() {
         const data = await res.json();
         const cur = data?.current;
         if (!cur) return;
-        const isDay = Number(cur.is_day) === 1;
+        const dayPhase = getBangkokDayPhase();
+        const isDay = dayPhase !== 'night' && Number(cur.is_day) === 1 ? true : dayPhase !== 'night';
         const code = Number(cur.weather_code ?? 0);
         const temp = Math.round(Number(cur.temperature_2m ?? 30));
-        const mapped = mapWmoWeather(code, isDay);
-        const nextWeather = { temp, isDay, ...mapped };
+        const mapped = mapWmoWeather(code, dayPhase);
+        const nextWeather = { temp, isDay, dayPhase, ...mapped };
         bkkWeatherRef.current = nextWeather;
         setBkkWeather(nextWeather);
       } catch {
@@ -1330,9 +1347,11 @@ export default function Arena3DPage() {
       const bkkW = bkkWeatherRef.current;
       if (bkkW) {
         let targetHex = 0xbae6fd;
+        let targetLightHex = 0xffffff;
         let targetHemi = 0.78;
         let targetDir = 0.95;
-        if (!bkkW.isDay) {
+        if (bkkW.dayPhase === 'night') {
+          targetLightHex = 0xcbd5e1;
           if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
             targetHex = 0x090d16;
             targetHemi = 0.38;
@@ -1341,6 +1360,36 @@ export default function Arena3DPage() {
             targetHex = 0x0f172a;
             targetHemi = 0.45;
             targetDir = 0.48;
+          }
+        } else if (bkkW.dayPhase === 'dawn') {
+          targetLightHex = 0xffedd5;
+          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
+            targetHex = 0x6b7280;
+            targetHemi = 0.52;
+            targetDir = 0.45;
+          } else if (bkkW.condition === 'cloudy') {
+            targetHex = 0xfbcfe8;
+            targetHemi = 0.68;
+            targetDir = 0.65;
+          } else {
+            targetHex = 0xfde68a;
+            targetHemi = 0.74;
+            targetDir = 0.8;
+          }
+        } else if (bkkW.dayPhase === 'dusk') {
+          targetLightHex = 0xfdba74;
+          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
+            targetHex = 0x57534e;
+            targetHemi = 0.48;
+            targetDir = 0.42;
+          } else if (bkkW.condition === 'cloudy') {
+            targetHex = 0xfdba74;
+            targetHemi = 0.62;
+            targetDir = 0.62;
+          } else {
+            targetHex = 0xfb923c;
+            targetHemi = 0.68;
+            targetDir = 0.78;
           }
         } else if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
           targetHex = 0x64748b;
@@ -1358,6 +1407,7 @@ export default function Arena3DPage() {
         if (scene.fog instanceof THREE.FogExp2) {
           scene.fog.color.lerp(targetCol, 0.03);
         }
+        dirLight.color.lerp(new THREE.Color(targetLightHex), 0.04);
         hemiLight.intensity += (targetHemi - hemiLight.intensity) * 0.04;
         const lightningFlash =
           bkkW.condition === 'storm' && Math.sin(elapsed * 7.3) > 0.97 && Math.sin(elapsed * 19.1) > 0.6 ? 1.5 : 0;
