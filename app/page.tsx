@@ -2835,46 +2835,30 @@ export default function Arena3DPage() {
                 />
               </div>
 
-              {players.length > 0 && (() => {
-                const q = signInUsername.trim().toLowerCase();
-                const matched = q
-                  ? players.filter((pl) => pl.name.toLowerCase().includes(q))
-                  : players;
-                if (matched.length === 0) return null;
-                return (
-                  <div className="bg-[#FFFDF7] border-2 border-black rounded-xl p-2.5">
-                    <div className="text-[11px] font-bold text-zinc-600 mb-1.5">
-                      ผู้เล่นที่สร้างไว้แล้ว (คลิกเพื่อเลือก):
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                      {matched.map((pl) => {
-                        const isSelected = signInUsername.trim().toLowerCase() === pl.name.toLowerCase();
-                        return (
-                          <button
-                            key={pl.id}
-                            type="button"
-                            onClick={() => {
-                              setSignInUsername(pl.name);
-                              setSignInError('');
-                            }}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border-2 border-black text-xs font-extrabold cursor-pointer transition ${
-                              isSelected
-                                ? 'bg-[#FFE600] text-black'
-                                : 'bg-white hover:bg-[#FEF08A] text-black'
-                            }`}
-                          >
-                            <span>{pl.emoji}</span>
-                            <span>{pl.name}</span>
-                            <span className="text-[10px] opacity-70">
-                              {pl.role === 'spectator' ? '👀' : '🔥'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
+              {players.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-600 mb-1">
+                    หรือเลือกจากผู้เล่นที่สร้างไว้แล้ว:
+                  </label>
+                  <select
+                    value={players.some((pl) => pl.name === signInUsername) ? signInUsername : ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSignInUsername(e.target.value);
+                        setSignInError('');
+                      }
+                    }}
+                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm cursor-pointer"
+                  >
+                    <option value="">-- เลือกชื่อผู้เล่น ({players.length} คน) --</option>
+                    {players.map((pl) => (
+                      <option key={pl.id} value={pl.name}>
+                        {pl.emoji} {pl.name} ({pl.role === 'spectator' ? 'ผู้ชม' : 'นักแข่ง'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {signInError && (
                 <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
@@ -3031,13 +3015,6 @@ export default function Arena3DPage() {
               title="สุ่มเปลี่ยนกิจกรรม"
             >
               🎡 กิจกรรม
-            </button>
-            <button
-              type="button"
-              onClick={() => setWalkingSpectatorId(null)}
-              className="bg-[#FF4D8D] text-white border-2 border-white rounded-lg px-2.5 py-1 text-xs font-extrabold cursor-pointer"
-            >
-              ✕ ออก
             </button>
           </div>
         </div>
