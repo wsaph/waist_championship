@@ -59,3 +59,24 @@ body, html {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #18181B; border-radius: 3px; }
+
+@keyframes floatThought {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -14px) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -72px) scale(0.95);
+  }
+}
+.thought-bubble {
+  position: absolute;
+  pointer-events: none;
+  animation: floatThought 1.35s ease-out forwards;
+  z-index: 40;
+}

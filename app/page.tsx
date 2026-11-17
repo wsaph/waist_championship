@@ -5,12 +5,20 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import confetti from 'canvas-confetti';
 import { Trophy, Scale, UserPlus } from 'lucide-react';
+import { buildCharacterMesh, animateCharacterMotion, setCharacterExpression, buildPetMesh, animatePetMotion } from '@/lib/character_3d';
+import { getDailySpectatorActivity, isEatPath } from '@/lib/spectator_activities';
+import CharacterPreview3D from '@/components/CharacterPreview3D';
 
 interface Player {
   id: number;
   name: string;
   emoji: string;
   colorHex: string;
+  accessory?: string;
+  bandColor?: string;
+  role?: 'competitor' | 'spectator';
+  workoutType?: string;
+  petType?: string;
   startWeight: number;
   currentWeight: number;
   goalWeight: number;
@@ -22,13 +30,17 @@ interface Player {
 }
 
 interface FeedItem {
-  id: number;
+  id: string | number;
+  type?: 'weight' | 'cheer' | 'tempt';
   user: string;
   emoji: string;
-  weight: number;
-  diff: number;
+  weight?: number;
+  diff?: number;
   roast: string;
-  excuse: string;
+  excuse?: string;
+  targetName?: string;
+  targetEmoji?: string;
+  giftItem?: string;
   time: string;
 }
 
@@ -52,6 +64,55 @@ const EXCUSES = [
 
 const AVATARS = ['🦊', '🐰', '🐸', '🐱', '🐷', '🐼', '🐶', '🦁', '🐨', '🦄'];
 
+const BODY_COLORS = ['#38BDF8', '#A3E635', '#FACC15', '#F472B6', '#FB923C', '#C084FC', '#EF4444', '#2DD4BF'];
+const BAND_COLORS = ['#FFE600', '#FF4D8D', '#18181B', '#FFFFFF', '#38BDF8', '#A3E635', '#EF4444'];
+const ACCESSORY_OPTIONS = [
+  { id: 'headband', label: '🥋 ผ้าคาดหัว' },
+  { id: 'ears', label: '🐰 หูกระต่าย' },
+  { id: 'cat', label: '🐱 หูแมว' },
+  { id: 'shades', label: '😎 แว่นกันแดด' },
+  { id: 'cap', label: '🧢 หมวกแก๊ป' },
+  { id: 'none', label: '✨ ไม่ใส่' },
+];
+
+const WORKOUT_OPTIONS = [
+  { id: 'dumbbell', label: '🏋️ ยกดัมเบล', group: 'fit' },
+  { id: 'squat', label: '🦵 สควอท', group: 'fit' },
+  { id: 'pullup', label: '🤸‍♂️ ดึงข้อบาร์', group: 'fit' },
+  { id: 'pushup', label: '💪 วิดพื้น', group: 'fit' },
+  { id: 'situp', label: '🧘‍♂️ ซิทอัพ', group: 'fit' },
+  { id: 'cheer', label: '📣 เชียร์สุดใจ', group: 'fit' },
+  { id: 'picnic_shabu', label: '🍲 ปิกนิกชาบู', group: 'eat' },
+  { id: 'eat_pizza', label: '🍕 กินพิซซ่า', group: 'eat' },
+  { id: 'boba_tea', label: '🧋 ยืนกินชานม', group: 'eat' },
+  { id: 'food_roll', label: '😴 นอนกลิ้ง', group: 'eat' },
+];
+
+const PET_OPTIONS = [
+  { id: 'none', label: '✨ ไม่มี' },
+  { id: 'dog', label: '🐶 น้องหมา' },
+  { id: 'cat', label: '🐱 น้องแมว' },
+  { id: 'rabbit', label: '🐰 กระต่าย' },
+  { id: 'pig', label: '🐷 น้องหมู' },
+];
+
+const FOOD_THOUGHTS = [
+  '💭 🥓 ชาบู~',
+  '💭 🧋 ชานมไข่มุก',
+  '💭 🍕 พิซซ่า',
+  '💭 🍗 ไก่ทอด',
+  '💭 🍰 เค้กหวานๆ',
+  '💭 🍜 หมูกระทะ',
+];
+
+const FIERCE_THOUGHTS = [
+  '😤 ไม่กินเว้ย!',
+  '🔥 จะถึงเส้นชัยแล้ว!',
+  '💪 ฮึดสู้โว้ย!',
+  '⚡ อย่ามาล่อ!',
+  '🏆 เอวเอสอยู่แค่เอื้อม!',
+];
+
 const TRACK_START_X = -13;
 const TRACK_END_X = 13;
 
@@ -70,13 +131,34 @@ export default function Arena3DPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [isJoinOpen, setIsJoinOpen] = useState(false);
+  const [joinMode, setJoinMode] = useState<'create' | 'edit'>('create');
+  const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
+  const [joinRole, setJoinRole] = useState<'competitor' | 'spectator'>('competitor');
+  const [joinWorkout, setJoinWorkout] = useState('fit');
+  const [joinPet, setJoinPet] = useState('none');
   const [joinName, setJoinName] = useState('');
   const [joinEmoji, setJoinEmoji] = useState('🦊');
+  const [joinColor, setJoinColor] = useState('#38BDF8');
+  const [joinAccessory, setJoinAccessory] = useState('headband');
+  const [joinBandColor, setJoinBandColor] = useState('#FFE600');
   const [joinPin, setJoinPin] = useState('');
   const [joinStart, setJoinStart] = useState('');
   const [joinGoal, setJoinGoal] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
+
+  const [boardSenderId, setBoardSenderId] = useState<string>('');
+  const [boardTargetId, setBoardTargetId] = useState<number>(0);
+  const [boardKind, setBoardKind] = useState<'cheer' | 'tempt'>('cheer');
+  const [boardMessage, setBoardMessage] = useState('');
+  const [sendingBoard, setSendingBoard] = useState(false);
+
+  const pendingDeliveryRef = useRef<{
+    targetId: number;
+    kind: 'cheer' | 'tempt';
+    label: string;
+    startTime: number;
+  } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; emoji: string; title: string; text: string }>({
     show: false,
@@ -103,12 +185,21 @@ export default function Arena3DPage() {
   const fetchArenaData = useCallback(async () => {
     try {
       const res = await fetch('/api/weights');
-      const data = await res.json();
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!res.ok) {
+        console.error('Failed to fetch /api/weights:', data?.error || res.statusText);
+        return;
+      }
       if (data.participants) {
         setPlayers(data.participants);
-        if (data.participants.length > 0) {
+        const competitors = (data.participants as Player[]).filter((p) => p.role !== 'spectator');
+        if (competitors.length > 0) {
           setSelectedPlayerId((prev) =>
-            data.participants.some((p: Player) => p.id === prev) ? prev : data.participants[0].id
+            competitors.some((p) => p.id === prev) ? prev : competitors[0].id
+          );
+          setBoardTargetId((prev) =>
+            competitors.some((p) => p.id === prev) ? prev : competitors[0].id
           );
         }
       }
@@ -119,11 +210,19 @@ export default function Arena3DPage() {
   }, []);
 
   useEffect(() => {
+    if (window.innerWidth < 768) {
+      setIsDrawerOpen(false);
+    }
     fetchArenaData();
   }, [fetchArenaData]);
 
+  const competitors = React.useMemo(
+    () => players.filter((p) => p.role !== 'spectator'),
+    [players]
+  );
+
   const rankedPlayers = React.useMemo(() => {
-    return players
+    return competitors
       .map((p) => {
         const lostKg = p.startWeight - p.currentWeight;
         const pctLost = p.startWeight > 0 ? (lostKg / p.startWeight) * 100 : 0;
@@ -151,9 +250,52 @@ export default function Arena3DPage() {
     cameraTargetPosRef.current = new THREE.Vector3(pos.x + 2.5, 5.2, pos.z + 7.5);
   }, []);
 
+  const openCreateModal = useCallback(() => {
+    setJoinMode('create');
+    setEditingPlayerId(null);
+    setJoinRole('competitor');
+    setJoinWorkout('fit');
+    setJoinPet('none');
+    setJoinName('');
+    setJoinEmoji('🦊');
+    setJoinColor('#38BDF8');
+    setJoinAccessory('headband');
+    setJoinBandColor('#FFE600');
+    setJoinPin('');
+    setJoinStart('');
+    setJoinGoal('');
+    setJoinError('');
+    setIsJoinOpen(true);
+  }, []);
+
+  const openEditModal = useCallback(
+    (p: Player) => {
+      focusOnCharacter(p.id);
+      setJoinMode('edit');
+      setEditingPlayerId(p.id);
+      setJoinRole(p.role === 'spectator' ? 'spectator' : 'competitor');
+      setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
+      setJoinPet(p.petType || 'none');
+      setJoinName(p.name);
+      setJoinEmoji(p.emoji);
+      setJoinColor(p.colorHex || '#38BDF8');
+      setJoinAccessory(p.accessory || 'headband');
+      setJoinBandColor(p.bandColor || '#FFE600');
+      setJoinPin('');
+      setJoinError('');
+      setIsJoinOpen(true);
+    },
+    [focusOnCharacter]
+  );
+
+  const getOverviewCameraPos = () => {
+    const isPortrait = typeof window !== 'undefined' && window.innerWidth < window.innerHeight;
+    return isPortrait ? new THREE.Vector3(0, 38, 52) : new THREE.Vector3(0, 26, 38);
+  };
+
   const setCameraView = (mode: 'overview' | 'leader' | 'loser') => {
     if (mode === 'overview') {
-      cameraTargetPosRef.current = new THREE.Vector3(0, 15, 22);
+      cameraTargetPosRef.current = getOverviewCameraPos();
       cameraLookAtRef.current.set(0, 1.2, 0);
     } else if (mode === 'leader' && leaderIdRef.current !== null) {
       focusOnCharacter(leaderIdRef.current);
@@ -163,21 +305,21 @@ export default function Arena3DPage() {
   };
 
   useEffect(() => {
-    if (!canvasRef.current || !labelsRef.current || rankedPlayers.length === 0) return;
+    if (!canvasRef.current || !labelsRef.current) return;
 
     const container = canvasRef.current;
     const labelsContainer = labelsRef.current;
     container.innerHTML = '';
     labelsContainer.innerHTML = '';
 
-    leaderIdRef.current = rankedPlayers[0].id;
-    loserIdRef.current = rankedPlayers[rankedPlayers.length - 1].id;
+    leaderIdRef.current = rankedPlayers[0]?.id ?? null;
+    loserIdRef.current = rankedPlayers.length > 1 ? rankedPlayers[rankedPlayers.length - 1].id : null;
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0xdbeafe, 0.014);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
-    camera.position.set(0, 15, 22);
+    camera.position.copy(getOverviewCameraPos());
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -192,7 +334,7 @@ export default function Arena3DPage() {
     controls.dampingFactor = 0.07;
     controls.maxPolarAngle = Math.PI / 2 - 0.06;
     controls.minDistance = 8;
-    controls.maxDistance = 42;
+    controls.maxDistance = 110;
     controls.target.copy(cameraLookAtRef.current);
     controlsRef.current = controls;
 
@@ -209,9 +351,12 @@ export default function Arena3DPage() {
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
+    const spectatorList = players.filter((pl) => pl.role === 'spectator');
+    const trackWidth = Math.max(8.5, Math.min(15, competitors.length * 0.65 + 4));
+
     dirLight.shadow.camera.near = 5;
-    dirLight.shadow.camera.far = 65;
-    const d = 22;
+    dirLight.shadow.camera.far = 110;
+    const d = 44;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
@@ -219,12 +364,8 @@ export default function Arena3DPage() {
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
-    const laneCount = Math.max(5, players.length);
-    const trackDepth = laneCount * 2.4 + 0.6;
-    const islandDepth = trackDepth + 4.4;
-
     const island = new THREE.Mesh(
-      new THREE.BoxGeometry(34, 2.2, islandDepth),
+      new THREE.BoxGeometry(72, 2.2, 46),
       new THREE.MeshStandardMaterial({ color: 0x86EFAC, roughness: 0.7 })
     );
     island.position.set(0, -1.15, 0);
@@ -232,36 +373,81 @@ export default function Arena3DPage() {
     scene.add(island);
 
     const dirt = new THREE.Mesh(
-      new THREE.BoxGeometry(33.2, 1.8, islandDepth - 0.8),
+      new THREE.BoxGeometry(70.5, 1.8, 44.5),
       new THREE.MeshStandardMaterial({ color: 0xFDBA74, roughness: 0.9 })
     );
     dirt.position.set(0, -3.1, 0);
     scene.add(dirt);
 
-    const track = new THREE.Mesh(
-      new THREE.BoxGeometry(29, 0.25, trackDepth),
-      new THREE.MeshStandardMaterial({ color: 0xFB7185, roughness: 0.6 })
-    );
-    track.position.set(0, 0.05, 0);
-    track.receiveShadow = true;
-    scene.add(track);
+    // S-curve track ("เอว S" concept)
+    const trackCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-24, 0.14, 11),
+      new THREE.Vector3(-12, 0.14, -10),
+      new THREE.Vector3(0, 0.14, 0),
+      new THREE.Vector3(12, 0.14, 10),
+      new THREE.Vector3(24, 0.14, -11),
+    ]);
 
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-    const halfTrackZ = (laneCount * 2.4) / 2;
-    for (let i = 0; i <= laneCount; i++) {
-      const zPos = -halfTrackZ + i * 2.4;
-      const line = new THREE.Mesh(new THREE.BoxGeometry(28.5, 0.04, 0.12), lineMat);
-      line.position.set(0, 0.19, zPos);
-      scene.add(line);
+    const segments = 120;
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const pt = trackCurve.getPointAt(t);
+      const tan = trackCurve.getTangentAt(t);
+      const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+      const left = pt.clone().addScaledVector(normal, -trackWidth / 2);
+      const right = pt.clone().addScaledVector(normal, trackWidth / 2);
+      positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
+      if (i < segments) {
+        const base = i * 2;
+        indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      }
     }
+    const trackGeo = new THREE.BufferGeometry();
+    trackGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trackGeo.setIndex(indices);
+    trackGeo.computeVertexNormals();
+    const trackMesh = new THREE.Mesh(
+      trackGeo,
+      new THREE.MeshStandardMaterial({ color: 0xFB7185, roughness: 0.6, side: THREE.DoubleSide })
+    );
+    trackMesh.receiveShadow = true;
+    scene.add(trackMesh);
 
-    const startLine = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.05, trackDepth - 0.2), lineMat);
-    startLine.position.set(TRACK_START_X, 0.2, 0);
+    // White edge & center lines along the S-curve
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+    [-trackWidth / 2 + 0.25, 0, trackWidth / 2 - 0.25].forEach((offset) => {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const pt = trackCurve.getPointAt(t);
+        const tan = trackCurve.getTangentAt(t);
+        const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+        pts.push(pt.clone().addScaledVector(normal, offset).setY(0.18));
+      }
+      const lineCurve = new THREE.CatmullRomCurve3(pts);
+      const lineTube = new THREE.Mesh(new THREE.TubeGeometry(lineCurve, 90, 0.07, 6, false), lineMat);
+      scene.add(lineTube);
+    });
+
+    const startPt = trackCurve.getPointAt(0.01);
+    const startTan = trackCurve.getTangentAt(0.01);
+    const startAngle = Math.atan2(-startTan.z, startTan.x);
+    const startLine = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.05, trackWidth - 0.2), lineMat);
+    startLine.position.set(startPt.x, 0.19, startPt.z);
+    startLine.rotation.y = startAngle;
     scene.add(startLine);
 
-    const checkerGroup = new THREE.Group();
+    const endPt = trackCurve.getPointAt(0.98);
+    const endTan = trackCurve.getTangentAt(0.98);
+    const endAngle = Math.atan2(-endTan.z, endTan.x);
+    const finishGroup = new THREE.Group();
+    finishGroup.position.set(endPt.x, 0, endPt.z);
+    finishGroup.rotation.y = endAngle;
+
     const sqSize = 0.6;
-    const rows = Math.floor((trackDepth - 0.4) / sqSize);
+    const rows = Math.floor((trackWidth - 0.4) / sqSize);
     const blackMat = new THREE.MeshBasicMaterial({ color: 0x18181B });
     const whiteMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
     for (let r = 0; r < rows; r++) {
@@ -270,28 +456,26 @@ export default function Arena3DPage() {
           new THREE.BoxGeometry(sqSize, 0.06, sqSize),
           (r + c) % 2 === 0 ? blackMat : whiteMat
         );
-        sq.position.set(TRACK_END_X - 0.6 + c * sqSize, 0.2, -(rows * sqSize) / 2 + r * sqSize + sqSize / 2);
-        checkerGroup.add(sq);
+        sq.position.set(-0.6 + c * sqSize, 0.2, -(rows * sqSize) / 2 + r * sqSize + sqSize / 2);
+        finishGroup.add(sq);
       }
     }
-    scene.add(checkerGroup);
 
-    const archGroup = new THREE.Group();
     const pillarGeo = new THREE.CylinderGeometry(0.35, 0.4, 5.2, 16);
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.3 });
 
     const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
-    leftPillar.position.set(TRACK_END_X, 2.6, -halfTrackZ - 0.3);
+    leftPillar.position.set(0, 2.6, -trackWidth / 2 - 0.3);
     leftPillar.castShadow = true;
     const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
-    rightPillar.position.set(TRACK_END_X, 2.6, halfTrackZ + 0.3);
+    rightPillar.position.set(0, 2.6, trackWidth / 2 + 0.3);
     rightPillar.castShadow = true;
 
     const banner = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8, 1.2, trackDepth + 0.8),
+      new THREE.BoxGeometry(0.8, 1.2, trackWidth + 0.8),
       new THREE.MeshStandardMaterial({ color: 0x18181B, roughness: 0.4 })
     );
-    banner.position.set(TRACK_END_X, 5.2, 0);
+    banner.position.set(0, 5.2, 0);
     banner.castShadow = true;
 
     const trophyMesh = new THREE.Group();
@@ -304,15 +488,14 @@ export default function Arena3DPage() {
     );
     cupBase.position.y = 0.15;
     trophyMesh.add(cupBody, cupBase);
-    trophyMesh.position.set(TRACK_END_X, 5.8, 0);
+    trophyMesh.position.set(0, 5.8, 0);
 
-    archGroup.add(leftPillar, rightPillar, banner, trophyMesh);
-    scene.add(archGroup);
+    finishGroup.add(leftPillar, rightPillar, banner, trophyMesh);
+    scene.add(finishGroup);
 
-    const treeZ = halfTrackZ + 1.5;
     const treePositions = [
-      [-14, -treeZ], [-6, -treeZ - 0.1], [4, -treeZ], [14.5, -treeZ + 0.1],
-      [-13.5, treeZ], [-3, treeZ + 0.1], [7, treeZ], [14.5, treeZ - 0.1],
+      [-31, -18], [-18, -19], [0, -19], [16, -19], [31, -18],
+      [-31, 18], [-14, 19], [4, 19], [20, 19], [31, 18],
     ];
     treePositions.forEach(([tx, tz], idx) => {
       const tree = new THREE.Group();
@@ -342,7 +525,7 @@ export default function Arena3DPage() {
         puff.position.set((j - 1) * 0.9, Math.random() * 0.3, 0);
         cloud.add(puff);
       }
-      cloud.position.set(-18 + i * 7, 8 + (i % 3) * 1.8, -treeZ - 3 - (i % 2) * 4);
+      cloud.position.set(-22 + i * 9, 10 + (i % 3) * 1.8, -22 - (i % 2) * 4);
       scene.add(cloud);
       clouds.push(cloud);
     }
@@ -362,6 +545,7 @@ export default function Arena3DPage() {
       spike.position.set(Math.cos(angle) * 0.26, 0.22, Math.sin(angle) * 0.26);
       crownMesh.add(spike);
     }
+    if (leaderIdRef.current === null) crownMesh.visible = false;
     scene.add(crownMesh);
 
     const flameParticles: { mesh: THREE.Mesh; offset: number; speed: number }[] = [];
@@ -373,129 +557,133 @@ export default function Arena3DPage() {
         opacity: 0.85,
       });
       const pMesh = new THREE.Mesh(fireGeo, fireMat);
+      if (loserIdRef.current === null) pMesh.visible = false;
       scene.add(pMesh);
       flameParticles.push({ mesh: pMesh, offset: Math.random() * Math.PI * 2, speed: 1.5 + Math.random() * 1.5 });
     }
 
     const meshes: any[] = [];
+    const fitSpectators = spectatorList.filter((pl) => !isEatPath(pl.workoutType));
+    const eatSpectators = spectatorList.filter((pl) => isEatPath(pl.workoutType));
+    let compIdx = 0;
+    let specIdx = 0;
+
     players.forEach((p, idx) => {
-      const rankedInfo = rankedPlayers.find((r) => r.id === p.id)!;
-      const rankIndex = rankedPlayers.findIndex((r) => r.id === p.id);
+      const isSpectator = p.role === 'spectator';
+      const rankedInfo = !isSpectator ? rankedPlayers.find((r) => r.id === p.id) : undefined;
+      const rankIndex = !isSpectator ? rankedPlayers.findIndex((r) => r.id === p.id) : -1;
       const style = STYLES[idx % STYLES.length];
-      const laneZ = (idx - (players.length - 1) / 2) * 2.4;
 
-      const targetX = TRACK_START_X + (rankedInfo.progressRatio ?? 0) * (TRACK_END_X - TRACK_START_X - 0.8);
-      const rootGroup = new THREE.Group();
-      rootGroup.position.set(targetX, 0.2, laneZ);
+      const isEat = isSpectator && isEatPath(p.workoutType);
+      const samePathList = isEat ? eatSpectators : fitSpectators;
+      const indexInPath = isSpectator ? samePathList.findIndex((pl) => pl.id === p.id) : 0;
+      const dailyAct = isSpectator
+        ? getDailySpectatorActivity(p.id, p.workoutType, samePathList.length, indexInPath)
+        : null;
 
-      const bounceGroup = new THREE.Group();
-      rootGroup.add(bounceGroup);
+      let targetPos = new THREE.Vector3(0, 0.2, 0);
+      let facingY = 0;
 
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: p.colorHex || style.bodyColor,
-        roughness: 0.35,
-        metalness: 0.05,
-      });
-      const bodyMesh = new THREE.Mesh(new THREE.SphereGeometry(0.75, 24, 24), bodyMat);
-      bodyMesh.position.y = 1.05;
-      bodyMesh.scale.set(rankedInfo.bellyScale ?? 1, 1.0, rankedInfo.bellyScale ?? 1);
-      bodyMesh.castShadow = true;
-      bodyMesh.receiveShadow = true;
-      bounceGroup.add(bodyMesh);
-
-      const bellyMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.55, 20, 20),
-        new THREE.MeshStandardMaterial({ color: 0xFFFBEB, roughness: 0.5 })
-      );
-      bellyMesh.position.set(0.32, 0.0, 0);
-      bodyMesh.add(bellyMesh);
-
-      const headGroup = new THREE.Group();
-      headGroup.position.set(0.05, 2.05, 0);
-      bounceGroup.add(headGroup);
-
-      const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.58, 24, 24), bodyMat);
-      headMesh.castShadow = true;
-      headGroup.add(headMesh);
-
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x18181B });
-      const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), eyeMat);
-      eyeL.position.set(0.48, 0.08, -0.22);
-      const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), eyeMat);
-      eyeR.position.set(0.48, 0.08, 0.22);
-      headGroup.add(eyeL, eyeR);
-
-      const cheekMat = new THREE.MeshBasicMaterial({ color: 0xFB7185 });
-      const cheekL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), cheekMat);
-      cheekL.position.set(0.46, -0.06, -0.32);
-      const cheekR = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), cheekMat);
-      cheekR.position.set(0.46, -0.06, 0.32);
-      headGroup.add(cheekL, cheekR);
-
-      const accMat = new THREE.MeshStandardMaterial({ color: style.bandColor, roughness: 0.3 });
-      if (style.accessory === 'headband' || style.accessory === 'chubby') {
-        const band = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.07, 10, 24), accMat);
-        band.rotation.x = Math.PI / 2;
-        band.position.y = 0.2;
-        headGroup.add(band);
-      } else if (style.accessory === 'ears' || style.accessory === 'cat') {
-        const earGeo =
-          style.accessory === 'ears'
-            ? new THREE.CylinderGeometry(0.08, 0.1, 0.65, 12)
-            : new THREE.ConeGeometry(0.16, 0.38, 12);
-        const earL = new THREE.Mesh(earGeo, bodyMat);
-        earL.position.set(0, 0.65, -0.22);
-        const earR = new THREE.Mesh(earGeo, bodyMat);
-        earR.position.set(0, 0.65, 0.22);
-        headGroup.add(earL, earR);
-      } else if (style.accessory === 'shades') {
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, 0.65), accMat);
-        glass.position.set(0.52, 0.08, 0);
-        headGroup.add(glass);
+      if (isSpectator) {
+        const currentSpec = specIdx++;
+        const side = currentSpec % 2 === 0 ? 1 : -1;
+        const sideIdx = Math.floor(currentSpec / 2);
+        const perSide = Math.max(1, Math.ceil(spectatorList.length / 2));
+        const row = perSide > 14 ? Math.floor(sideIdx / Math.ceil(perSide / 2)) : 0;
+        const idxInRow = perSide > 14 ? sideIdx % Math.ceil(perSide / 2) : sideIdx;
+        const rowTotal = perSide > 14 ? Math.ceil(perSide / 2) : perSide;
+        const t = 0.05 + (rowTotal > 1 ? idxInRow / (rowTotal - 1) : 0.5) * 0.9;
+        const pt = trackCurve.getPointAt(t);
+        const tan = trackCurve.getTangentAt(t);
+        const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+        const dist = trackWidth / 2 + 1.85 + row * 2.1;
+        targetPos = pt.clone().addScaledVector(normal, side * dist);
+        targetPos.y = 0.2;
+        const inward = normal.clone().multiplyScalar(-side);
+        facingY = Math.atan2(-inward.z, inward.x);
+      } else {
+        const currentComp = compIdx++;
+        const t = Math.max(0.03, Math.min(0.95, 0.04 + (rankedInfo?.progressRatio ?? 0) * 0.9));
+        const pt = trackCurve.getPointAt(t);
+        const tan = trackCurve.getTangentAt(t);
+        const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+        const laneSpread = competitors.length > 1 ? (currentComp / (competitors.length - 1) - 0.5) * (trackWidth - 1.6) : 0;
+        targetPos = pt.clone().addScaledVector(normal, laneSpread);
+        targetPos.y = 0.2;
+        facingY = Math.atan2(-tan.z, tan.x);
       }
 
-      const legGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.45, 12);
-      const legMat = new THREE.MeshStandardMaterial({ color: 0x18181B });
-      const legL = new THREE.Mesh(legGeo, legMat);
-      legL.position.set(0, 0.25, -0.25);
-      const legR = new THREE.Mesh(legGeo, legMat);
-      legR.position.set(0, 0.25, 0.25);
+      const initialBellyScale = rankedInfo?.bellyScale ?? 1;
+      const charParts = buildCharacterMesh({
+        colorHex: p.colorHex || style.bodyColor,
+        accessory: p.accessory || style.accessory,
+        bandColor: p.bandColor || style.bandColor,
+        bellyScale: initialBellyScale,
+        spectatorProp: dailyAct ? dailyAct.animType : '',
+      });
+      const { rootGroup, bounceGroup, bodyMesh, legL, legR, armL, armR, normalEyes, happyFace, angryFace } = charParts;
+      rootGroup.position.copy(targetPos);
+      rootGroup.rotation.y = facingY;
+      rootGroup.userData.playerId = p.id;
 
-      const armGeo = new THREE.SphereGeometry(0.18, 12, 12);
-      const armL = new THREE.Mesh(armGeo, bodyMat);
-      armL.position.set(0, 1.15, -0.78);
-      const armR = new THREE.Mesh(armGeo, bodyMat);
-      armR.position.set(0, 1.15, 0.78);
-      bounceGroup.add(legL, legR, armL, armR);
+      const petType = !isSpectator ? p.petType || 'none' : 'none';
+      const petParts = buildPetMesh(petType);
+      if (petParts) {
+        rootGroup.add(petParts.petGroup);
+        if (petParts.leashMesh) rootGroup.add(petParts.leashMesh);
+      }
 
       scene.add(rootGroup);
 
       const tagEl = document.createElement('div');
       tagEl.className = 'player-tag';
-      tagEl.onclick = () => focusOnCharacter(p.id);
-      const rankLabel =
-        rankIndex === 0 ? '👑 #1' : rankIndex === rankedPlayers.length - 1 && rankedPlayers.length > 1 ? '🔥 บ๊วย' : `#${rankIndex + 1}`;
-      const pctVal = rankedInfo.pctLost ?? 0;
-      const sign = pctVal > 0 ? '-' : pctVal < 0 ? '+' : '';
-      const pctColor = pctVal >= 0 ? 'text-emerald-600' : 'text-rose-600';
+      tagEl.onclick = () => openEditModal(p);
 
-      tagEl.innerHTML = `
-        <div class="bg-white border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
-          <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
-            <span>${rankLabel}</span>
-            <span>${p.emoji} ${p.name}</span>
-            <span class="${pctColor}">${sign}${Math.abs(pctVal)}%</span>
+      if (isSpectator) {
+        const workoutLabel = dailyAct?.label || '📣 เชียร์สุดใจ';
+        tagEl.innerHTML = `
+          <div class="bg-[#FEF08A] border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
+            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
+              <span>👀</span>
+              <span>${p.emoji} ${p.name}</span>
+            </div>
+            <div class="text-[10px] font-bold text-zinc-700 max-w-[145px] truncate">
+              ${workoutLabel}
+            </div>
           </div>
-          <div class="text-[10px] font-semibold text-zinc-600 max-w-[145px] truncate">
-            ${p.taunt}
+          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black mx-auto"></div>
+        `;
+      } else {
+        const rankLabel =
+          rankIndex === 0 ? '👑 #1' : rankIndex === rankedPlayers.length - 1 && rankedPlayers.length > 1 ? '🔥 บ๊วย' : `#${rankIndex + 1}`;
+        const pctVal = rankedInfo?.pctLost ?? 0;
+        const sign = pctVal > 0 ? '-' : pctVal < 0 ? '+' : '';
+        const pctColor = pctVal >= 0 ? 'text-emerald-600' : 'text-rose-600';
+
+        tagEl.innerHTML = `
+          <div class="bg-white border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
+            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
+              <span>${rankLabel}</span>
+              <span>${p.emoji} ${p.name}</span>
+              <span class="${pctColor}">${sign}${Math.abs(pctVal)}%</span>
+            </div>
+            <div class="text-[10px] font-semibold text-zinc-600 max-w-[145px] truncate">
+              ${p.taunt}
+            </div>
           </div>
-        </div>
-        <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black mx-auto"></div>
-      `;
+          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black mx-auto"></div>
+        `;
+      }
       labelsContainer.appendChild(tagEl);
 
       meshes.push({
         id: p.id,
+        player: p,
+        isSpectator,
+        isCloseToFinish: !isSpectator && (rankedInfo?.progressRatio ?? 0) >= 0.6,
+        workoutType: dailyAct ? dailyAct.animType : 'cheer',
+        petType,
+        petParts,
         rootGroup,
         bounceGroup,
         bodyMesh,
@@ -503,13 +691,32 @@ export default function Arena3DPage() {
         legR,
         armL,
         armR,
+        normalEyes,
+        happyFace,
+        angryFace,
         tagEl,
-        targetX,
-        targetBellyScale: rankedInfo.bellyScale ?? 1,
+        targetPos,
+        currentBellyScale: initialBellyScale,
+        targetBellyScale: initialBellyScale,
+        rubbedUntil: 0,
+        lastBubbleAt: 0,
       });
     });
 
     charMeshesRef.current = meshes;
+
+    const giftMeshGroup = new THREE.Group();
+    giftMeshGroup.visible = false;
+    const giftBox = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 0.48, 0.48),
+      new THREE.MeshStandardMaterial({ color: 0xFF4D8D, roughness: 0.3 })
+    );
+    const giftRibbon = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52, 0.14, 0.52),
+      new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.3 })
+    );
+    giftMeshGroup.add(giftBox, giftRibbon);
+    scene.add(giftMeshGroup);
 
     let frameId: number;
     const clock = new THREE.Clock();
@@ -525,21 +732,18 @@ export default function Arena3DPage() {
         if (c.position.x > 22) c.position.x = -22;
       });
 
+      const now = performance.now();
       meshes.forEach((c, idx) => {
-        c.rootGroup.position.x += (c.targetX - c.rootGroup.position.x) * 0.06;
-        const curScale = c.bodyMesh.scale.x;
-        const nextScale = curScale + (c.targetBellyScale - curScale) * 0.08;
-        c.bodyMesh.scale.set(nextScale, 1.0, nextScale);
-
-        const speed = 7.5 + idx * 0.4;
-        const bounce = Math.abs(Math.sin(elapsed * speed));
-        c.bounceGroup.position.y = bounce * 0.22;
-        c.bounceGroup.rotation.z = Math.sin(elapsed * speed) * 0.06;
-
-        c.legL.rotation.z = Math.sin(elapsed * speed) * 0.65;
-        c.legR.rotation.z = -Math.sin(elapsed * speed) * 0.65;
-        c.armL.position.x = Math.sin(elapsed * speed) * 0.25;
-        c.armR.position.x = -Math.sin(elapsed * speed) * 0.25;
+        c.rootGroup.position.lerp(c.targetPos, 0.06);
+        c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
+        const isRubbed = now < c.rubbedUntil;
+        const jiggle = isRubbed ? Math.sin(elapsed * 22) * 0.05 : 0;
+        const nextScale = c.currentBellyScale + jiggle;
+        setCharacterExpression(c, isRubbed ? (c.isCloseToFinish ? 'angry' : 'happy') : 'normal');
+        animateCharacterMotion(c, elapsed, idx, nextScale);
+        if (c.petParts) {
+          animatePetMotion(c.petParts, c, c.petType, c.isCloseToFinish, elapsed, idx);
+        }
 
         if (c.id === leaderIdRef.current) {
           crownMesh.position.set(
@@ -582,6 +786,33 @@ export default function Arena3DPage() {
         }
       });
 
+      const delivery = pendingDeliveryRef.current;
+      if (delivery) {
+        const dt = (now - delivery.startTime) / 1000;
+        const targetChar = meshes.find((m) => m.id === delivery.targetId);
+        if (dt < 2.2 && targetChar) {
+          const tNorm = Math.min(1, dt / 1.1);
+          const startPos = new THREE.Vector3(targetChar.rootGroup.position.x, 1.2, targetChar.rootGroup.position.z + 4.5);
+          const endPos = new THREE.Vector3(
+            targetChar.rootGroup.position.x,
+            targetChar.rootGroup.position.y + 2.4,
+            targetChar.rootGroup.position.z
+          );
+          giftMeshGroup.visible = true;
+          giftMeshGroup.position.lerpVectors(startPos, endPos, tNorm);
+          giftMeshGroup.position.y += Math.sin(tNorm * Math.PI) * 2.2;
+          giftMeshGroup.rotation.y = elapsed * 5;
+          (giftBox.material as THREE.MeshStandardMaterial).color.setHex(
+            delivery.kind === 'cheer' ? 0xA3E635 : 0xFF4D8D
+          );
+        } else {
+          giftMeshGroup.visible = false;
+          pendingDeliveryRef.current = null;
+        }
+      } else {
+        giftMeshGroup.visible = false;
+      }
+
       if (cameraTargetPosRef.current) {
         camera.position.lerp(cameraTargetPosRef.current, 0.06);
         controls.target.lerp(cameraLookAtRef.current, 0.08);
@@ -595,6 +826,109 @@ export default function Arena3DPage() {
     };
     animate();
 
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let downX = 0;
+    let downY = 0;
+    let isRubbingTouch = false;
+
+    const spawnThoughtBubble = (charObj: any) => {
+      const worldPos = new THREE.Vector3(
+        charObj.rootGroup.position.x,
+        charObj.rootGroup.position.y + 3.0,
+        charObj.rootGroup.position.z
+      );
+      worldPos.project(camera);
+      if (worldPos.z >= 1) return;
+      const sx = (worldPos.x * 0.5 + 0.5) * window.innerWidth + (Math.random() * 44 - 22);
+      const sy = (-worldPos.y * 0.5 + 0.5) * window.innerHeight;
+      const list = charObj.isCloseToFinish ? FIERCE_THOUGHTS : FOOD_THOUGHTS;
+      const text = list[Math.floor(Math.random() * list.length)];
+      const el = document.createElement('div');
+      el.className = `thought-bubble border-2 border-black rounded-full px-2.5 py-1 text-xs font-extrabold shadow-[2px_2px_0px_#18181B] whitespace-nowrap ${
+        charObj.isCloseToFinish ? 'bg-[#FF4D8D] text-white' : 'bg-[#FFFDF7] text-black'
+      }`;
+      el.style.left = `${sx}px`;
+      el.style.top = `${sy}px`;
+      el.textContent = text;
+      labelsContainer.appendChild(el);
+      setTimeout(() => el.remove(), 1400);
+    };
+
+    const getPointerHitBelly = (e: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(meshes.map((m) => m.bodyMesh), true);
+      if (hits.length === 0) return null;
+      let obj: THREE.Object3D | null = hits[0].object;
+      while (obj && obj.userData.playerId === undefined) {
+        obj = obj.parent;
+      }
+      if (obj?.userData.playerId === undefined) return null;
+      const found = meshes.find((m) => m.id === obj!.userData.playerId) || null;
+      return found && !found.isSpectator ? found : null;
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      downX = e.clientX;
+      downY = e.clientY;
+      if (e.pointerType === 'touch') {
+        const hitChar = getPointerHitBelly(e);
+        if (hitChar) {
+          isRubbingTouch = true;
+          controls.enabled = false;
+        }
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const canRubMouse = e.pointerType === 'mouse' && e.buttons === 0;
+      if (!canRubMouse && !isRubbingTouch) return;
+      const hitChar = getPointerHitBelly(e);
+      if (!hitChar) return;
+      const now = performance.now();
+      hitChar.rubbedUntil = now + 750;
+      if (now - hitChar.lastBubbleAt > 340) {
+        hitChar.lastBubbleAt = now;
+        spawnThoughtBubble(hitChar);
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (isRubbingTouch) {
+        isRubbingTouch = false;
+        controls.enabled = true;
+      }
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(meshes.map((m) => m.rootGroup), true);
+      if (hits.length > 0) {
+        let obj: THREE.Object3D | null = hits[0].object;
+        while (obj && obj.userData.playerId === undefined) {
+          obj = obj.parent;
+        }
+        if (obj?.userData.playerId !== undefined) {
+          const found = players.find((pl) => pl.id === obj!.userData.playerId);
+          if (found) openEditModal(found);
+        }
+      }
+    };
+
+    const onPointerCancel = () => {
+      isRubbingTouch = false;
+      controls.enabled = true;
+    };
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    renderer.domElement.addEventListener('pointercancel', onPointerCancel);
+
     const handleResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -604,10 +938,14 @@ export default function Arena3DPage() {
 
     return () => {
       cancelAnimationFrame(frameId);
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
+      renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      renderer.domElement.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [players, rankedPlayers, focusOnCharacter]);
+  }, [players, competitors, rankedPlayers, openEditModal]);
 
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -658,23 +996,52 @@ export default function Arena3DPage() {
     setJoining(true);
 
     try {
+      const isEdit = joinMode === 'edit' && editingPlayerId !== null;
       const res = await fetch('/api/users', {
-        method: 'POST',
+        method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: joinName,
-          avatarEmoji: joinEmoji,
-          pinCode: joinPin,
-          startWeight: parseFloat(joinStart),
-          goalWeight: parseFloat(joinGoal),
-        }),
+        body: JSON.stringify(
+          isEdit
+            ? {
+                userId: editingPlayerId,
+                pinCode: joinPin,
+                name: joinName,
+                avatarEmoji: joinEmoji,
+                colorHex: joinColor,
+                accessory: joinAccessory,
+                bandColor: joinBandColor,
+                workoutType: joinWorkout,
+                petType: joinPet,
+              }
+            : {
+                name: joinName,
+                avatarEmoji: joinEmoji,
+                colorHex: joinColor,
+                accessory: joinAccessory,
+                bandColor: joinBandColor,
+                role: joinRole,
+                workoutType: joinWorkout,
+                petType: joinPet,
+                pinCode: joinPin,
+                startWeight: joinRole === 'competitor' ? parseFloat(joinStart) : 0,
+                goalWeight: joinRole === 'competitor' ? parseFloat(joinGoal) : 0,
+              }
+        ),
       });
       const data = await res.json();
       if (!res.ok) {
-        setJoinError(data.error || 'สมัครไม่สำเร็จ');
+        setJoinError(data.error || (isEdit ? 'อัปเดตไม่สำเร็จ' : 'สมัครไม่สำเร็จ'));
       } else {
-        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-        showToast('🏁', 'ลงทะเบียนสำเร็จ!', `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`);
+        confetti({ particleCount: isEdit ? 45 : 70, spread: 60, origin: { y: 0.6 } });
+        showToast(
+          isEdit ? '✨' : '🏁',
+          isEdit ? 'อัปเดตลุคเรียบร้อย!' : 'ลงทะเบียนสำเร็จ!',
+          isEdit
+            ? `เปลี่ยนลุคให้ ${joinEmoji} ${joinName} เรียบร้อยแล้ว!`
+            : joinRole === 'spectator'
+            ? `ยินดีต้อนรับผู้ชม ${joinEmoji} ${joinName} สู่ขอบสนาม!`
+            : `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`
+        );
         setIsJoinOpen(false);
         setJoinName('');
         setJoinPin('');
@@ -689,11 +1056,52 @@ export default function Arena3DPage() {
     }
   };
 
+  const handleBoardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!boardTargetId) return;
+    setSendingBoard(true);
+    try {
+      const res = await fetch('/api/interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: boardSenderId ? Number(boardSenderId) : null,
+          targetUserId: boardTargetId,
+          kind: boardKind,
+          message: boardMessage,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.interaction) {
+        const inter = data.interaction;
+        setBoardMessage('');
+        pendingDeliveryRef.current = {
+          targetId: inter.targetUserId,
+          kind: inter.kind,
+          label: `${inter.kind === 'cheer' ? '💐' : '😈'} ${inter.giftItem}`,
+          startTime: performance.now(),
+        };
+        if (inter.kind === 'cheer') {
+          confetti({ particleCount: 50, spread: 55, origin: { y: 0.65 } });
+          showToast('🌸', `ส่งกำลังใจให้ ${inter.targetName}!`, `${inter.senderName} มอบ ${inter.giftItem}`);
+        } else {
+          showToast('😈', `ส่งมารผจญไปยั่ว ${inter.targetName}!`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
+        }
+        focusOnCharacter(inter.targetUserId);
+        await fetchArenaData();
+      }
+    } catch {
+      showToast('❌', 'ส่งไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setSendingBoard(false);
+    }
+  };
+
   const selectedPlayerObj = players.find((p) => p.id === selectedPlayerId);
 
   return (
-    <div className={`w-full h-screen overflow-hidden relative ${shakeScreen ? 'shake-active' : ''}`}>
-      <div ref={canvasRef} className="fixed inset-0 w-full h-full z-[1] cursor-grab active:cursor-grabbing" />
+    <div className={`w-full h-dvh overflow-hidden relative ${shakeScreen ? 'shake-active' : ''}`}>
+      <div ref={canvasRef} className="fixed inset-0 w-full h-full z-[1] touch-none cursor-grab active:cursor-grabbing" />
       <div ref={labelsRef} className="fixed inset-0 pointer-events-none z-10 overflow-hidden" />
 
       <header className="fixed top-3 left-3 right-3 z-20 pointer-events-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
@@ -745,14 +1153,11 @@ export default function Arena3DPage() {
           </button>
 
           <button
-            onClick={() => {
-              setJoinError('');
-              setIsJoinOpen(true);
-            }}
+            onClick={openCreateModal}
             className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
           >
             <UserPlus className="w-4 h-4 stroke-[2.5]" />
-            <span>+ สมัครลงแข่ง</span>
+            <span>+ สมัคร / เข้าร่วม</span>
           </button>
 
           <button
@@ -770,7 +1175,7 @@ export default function Arena3DPage() {
       </header>
 
       <aside
-        className={`fixed top-20 right-3 bottom-3 w-[340px] max-w-[calc(100vw-24px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
+        className={`fixed top-32 sm:top-20 right-3 bottom-3 w-[340px] max-w-[calc(100vw-24px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
           isDrawerOpen ? 'translate-x-0' : 'translate-x-[120%]'
         }`}
       >
@@ -799,7 +1204,10 @@ export default function Arena3DPage() {
                 return (
                   <div
                     key={p.id}
-                    onClick={() => focusOnCharacter(p.id)}
+                    onClick={() => {
+                      focusOnCharacter(p.id);
+                      if (window.innerWidth < 768) setIsDrawerOpen(false);
+                    }}
                     className={`${cardBg} border-2 border-black rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
@@ -840,12 +1248,114 @@ export default function Arena3DPage() {
               <span>📢 กระดานแซวสด</span>
             </h2>
             <span className="bg-[#FF4D8D] text-white text-[10px] font-bold px-2 py-0.5 rounded-full border border-black animate-pulse">
-              ROAST
+              PUBLIC
             </span>
           </div>
+
+          {competitors.length > 0 && (
+            <form onSubmit={handleBoardSubmit} className="bg-white border-2 border-black rounded-xl p-2.5 mb-2.5 space-y-2 shrink-0 shadow-[2px_2px_0px_#18181B]">
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  value={boardSenderId}
+                  onChange={(e) => setBoardSenderId(e.target.value)}
+                  className="bg-[#FFFDF7] border-2 border-black rounded-lg px-2 py-1 text-[11px] font-bold truncate"
+                >
+                  <option value="">📣 ผู้หวังดีทางบ้าน</option>
+                  {players.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.emoji} {p.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={boardTargetId}
+                  onChange={(e) => setBoardTargetId(Number(e.target.value))}
+                  className="bg-[#FFFDF7] border-2 border-black rounded-lg px-2 py-1 text-[11px] font-bold truncate"
+                >
+                  {competitors.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      ส่งให้ {p.emoji} {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setBoardKind('cheer')}
+                  className={`border-2 border-black rounded-lg py-1 text-[11px] font-extrabold cursor-pointer transition ${
+                    boardKind === 'cheer' ? 'bg-[#A3E635] shadow-[1px_1px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                  }`}
+                >
+                  🌸 ให้กำลังใจ/ดอกไม้
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBoardKind('tempt')}
+                  className={`border-2 border-black rounded-lg py-1 text-[11px] font-extrabold cursor-pointer transition ${
+                    boardKind === 'tempt' ? 'bg-[#FF4D8D] text-white shadow-[1px_1px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                  }`}
+                >
+                  😈 มารผจญ/ส่งของกิน
+                </button>
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  maxLength={120}
+                  placeholder="พิมพ์ข้อความ (ไม่พิมพ์ก็ได้)"
+                  value={boardMessage}
+                  onChange={(e) => setBoardMessage(e.target.value)}
+                  className="flex-1 min-w-0 bg-[#FFFDF7] border-2 border-black rounded-lg px-2.5 py-1 text-xs font-semibold"
+                />
+                <button
+                  type="submit"
+                  disabled={sendingBoard}
+                  className="neo-btn bg-[#FFE600] text-black font-extrabold text-xs px-3 py-1 rounded-lg cursor-pointer shrink-0"
+                >
+                  {sendingBoard ? '...' : 'ส่ง!'}
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="overflow-y-auto space-y-2 pr-1 flex-1">
             {roastFeed.map((item) => {
-              const isUp = item.diff > 0;
+              if (item.type === 'cheer' || item.type === 'tempt') {
+                const isTempt = item.type === 'tempt';
+                return (
+                  <div
+                    key={item.id}
+                    className={`border-2 border-black rounded-xl p-2.5 shadow-[2px_2px_0px_#18181B] ${
+                      isTempt ? 'bg-[#FFF1F2]' : 'bg-[#ECFCCB]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="font-extrabold text-xs truncate">
+                        {item.emoji} {item.user} ➔ {item.targetEmoji} {item.targetName}
+                      </span>
+                      <span
+                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black shrink-0 ${
+                          isTempt ? 'bg-[#FF4D8D] text-white' : 'bg-[#A3E635] text-black'
+                        }`}
+                      >
+                        {isTempt ? '😈 มารผจญ' : '🌸 กำลังใจ'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-bold text-zinc-900">
+                      ส่ง {item.giftItem}
+                    </div>
+                    {item.roast && (
+                      <p className="text-[11px] font-semibold text-zinc-700 bg-white/80 px-2 py-1 rounded border border-zinc-300 mt-1">
+                        💬 &quot;{item.roast}&quot;
+                      </p>
+                    )}
+                  </div>
+                );
+              }
+
+              const diffVal = item.diff ?? 0;
+              const isUp = diffVal > 0;
               return (
                 <div key={item.id} className="bg-white border-2 border-black rounded-xl p-2.5 shadow-[2px_2px_0px_#18181B]">
                   <div className="flex items-center justify-between mb-1">
@@ -854,11 +1364,11 @@ export default function Arena3DPage() {
                     </span>
                     {isUp ? (
                       <span className="bg-[#FF4D8D] text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black">
-                        +{item.diff.toFixed(1)} กก.
+                        +{diffVal.toFixed(1)} กก.
                       </span>
                     ) : (
                       <span className="bg-[#A3E635] text-black text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black">
-                        {item.diff.toFixed(1)} กก.
+                        {diffVal.toFixed(1)} กก.
                       </span>
                     )}
                   </div>
@@ -881,13 +1391,15 @@ export default function Arena3DPage() {
           <span>•</span>
           <span>🔍 สกรอลล์เพื่อซูม</span>
           <span>•</span>
-          <span>👆 คลิกป้ายชื่อเพื่อส่องตัวละคร</span>
+          <span>👆 คลิกตัวละครเพื่อแต่งตัว</span>
+          <span>•</span>
+          <span>🤚 ลูบพุงตัวละครดูอาการ!</span>
         </div>
       </div>
 
       {isLogOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-md w-full p-5 relative">
+          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-5 relative">
             <button
               onClick={() => setIsLogOpen(false)}
               className="absolute top-3.5 right-3.5 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
@@ -916,7 +1428,7 @@ export default function Arena3DPage() {
                   }}
                   className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
                 >
-                  {players.map((p) => (
+                  {competitors.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.emoji} {p.name} (ล่าสุด {p.currentWeight} กก.)
                     </option>
@@ -936,7 +1448,6 @@ export default function Arena3DPage() {
                     type="password"
                     maxLength={4}
                     required
-                    placeholder="1234"
                     value={pinInput}
                     onChange={(e) => setPinInput(e.target.value)}
                     className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest text-base"
@@ -995,7 +1506,7 @@ export default function Arena3DPage() {
 
       {isJoinOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-md w-full p-5 relative">
+          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-4xl w-full max-h-[90dvh] overflow-y-auto p-5 relative">
             <button
               onClick={() => setIsJoinOpen(false)}
               className="absolute top-3.5 right-3.5 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
@@ -1004,14 +1515,74 @@ export default function Arena3DPage() {
             </button>
 
             <div className="flex items-center gap-2.5 mb-4">
-              <span className="text-3xl">🔥</span>
+              <span className="text-3xl">{joinMode === 'edit' ? '🎨' : joinRole === 'spectator' ? '👀' : '🔥'}</span>
               <div>
-                <h3 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold">ลงทะเบียนเข้าศึก 3D</h3>
-                <p className="text-xs text-zinc-600 font-medium">สร้างตัวละครใหม่ลงสนามแข่งทันที</p>
+                <h3 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold">
+                  {joinMode === 'edit' ? 'แต่งตัว & แก้ไขตัวละคร 3D' : 'ลงทะเบียนเข้าศึก 3D'}
+                </h3>
+                <p className="text-xs text-zinc-600 font-medium">
+                  {joinMode === 'edit'
+                    ? 'ปรับสี เครื่องประดับ หรือท่าออกกำลังกายแล้วใส่ PIN เพื่อบันทึก'
+                    : 'เลือกลงแข่งลดน้ำหนัก หรือเป็นผู้ชมออกกำลังกายข้างสนาม'}
+                </p>
               </div>
             </div>
 
-            <form onSubmit={handleJoinSubmit} className="space-y-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-5 items-stretch">
+              <div className="flex flex-col gap-2">
+                <CharacterPreview3D
+                  colorHex={joinColor}
+                  accessory={joinAccessory}
+                  bandColor={joinBandColor}
+                  isSpectator={joinRole === 'spectator'}
+                  workoutType={joinWorkout}
+                  petType={joinPet}
+                />
+                <div className="bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 flex items-center gap-2 shadow-[2px_2px_0px_#18181B]">
+                  <span className="text-xl">{joinEmoji}</span>
+                  <div className="min-w-0">
+                    <div className="font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black truncate">
+                      {joinName.trim() || (joinRole === 'spectator' ? 'ผู้ชมสายฟิต' : 'นักสู้เอวเอสคนใหม่')}
+                    </div>
+                    <div className="text-[10px] font-semibold text-zinc-600 truncate">
+                      {joinRole === 'spectator'
+                        ? isEatPath(joinWorkout)
+                          ? '🍔 สายกิน (สุ่มกิจกรรมใหม่ทุกวัน 07:00 น.)'
+                          : '💪 สายออกกำลัง (สุ่มกิจกรรมใหม่ทุกวัน 07:00 น.)'
+                        : ACCESSORY_OPTIONS.find((a) => a.id === joinAccessory)?.label}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleJoinSubmit} className="space-y-3.5">
+              {joinMode === 'create' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setJoinRole('competitor')}
+                    className={`border-2 border-black rounded-xl py-2 px-3 text-xs font-extrabold cursor-pointer transition ${
+                      joinRole === 'competitor'
+                        ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]'
+                        : 'bg-zinc-100 text-zinc-600'
+                    }`}
+                  >
+                    🏃 ลงแข่งลดน้ำหนัก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoinRole('spectator')}
+                    className={`border-2 border-black rounded-xl py-2 px-3 text-xs font-extrabold cursor-pointer transition ${
+                      joinRole === 'spectator'
+                        ? 'bg-[#FFE600] shadow-[2px_2px_0px_#000]'
+                        : 'bg-zinc-100 text-zinc-600'
+                    }`}
+                  >
+                    👀 ผู้ชมข้างสนาม
+                  </button>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold mb-1">1. เลือกตัวละครประจำตัว</label>
                 <div className="flex flex-wrap gap-1.5">
@@ -1030,25 +1601,139 @@ export default function Arena3DPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold mb-1">2. สีตัวละคร 3D</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {BODY_COLORS.map((hex) => (
+                    <button
+                      type="button"
+                      key={hex}
+                      onClick={() => setJoinColor(hex)}
+                      aria-label={`เลือกสี ${hex}`}
+                      className={`w-7 h-7 rounded-full border-2 border-black cursor-pointer transition ${
+                        joinColor.toLowerCase() === hex.toLowerCase() ? 'ring-2 ring-black ring-offset-2 scale-110' : ''
+                      }`}
+                      style={{ backgroundColor: hex }}
+                    />
+                  ))}
+                  <label className="flex items-center gap-1 text-[11px] font-bold bg-zinc-100 border-2 border-black rounded-lg px-2 py-1 cursor-pointer">
+                    <span>🎨</span>
+                    <input
+                      type="color"
+                      value={joinColor}
+                      onChange={(e) => setJoinColor(e.target.value)}
+                      className="w-5 h-5 border-0 bg-transparent p-0 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1">3. แต่งตัว / เครื่องประดับ</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {ACCESSORY_OPTIONS.map((opt) => (
+                    <button
+                      type="button"
+                      key={opt.id}
+                      onClick={() => setJoinAccessory(opt.id)}
+                      className={`border-2 border-black rounded-xl px-2 py-1.5 text-xs font-bold cursor-pointer transition ${
+                        joinAccessory === opt.id ? 'bg-[#FFE600] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {joinAccessory !== 'none' && joinAccessory !== 'ears' && joinAccessory !== 'cat' && (
+                <div>
+                  <label className="block text-xs font-bold mb-1">สีเครื่องประดับ</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {BAND_COLORS.map((hex) => (
+                      <button
+                        type="button"
+                        key={hex}
+                        onClick={() => setJoinBandColor(hex)}
+                        aria-label={`เลือกสีเครื่องประดับ ${hex}`}
+                        className={`w-6 h-6 rounded-full border-2 border-black cursor-pointer transition ${
+                          joinBandColor.toLowerCase() === hex.toLowerCase() ? 'ring-2 ring-black ring-offset-2 scale-110' : ''
+                        }`}
+                        style={{ backgroundColor: hex }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {joinRole === 'competitor' && (
+                <div>
+                  <label className="block text-xs font-bold mb-1">4. สัตว์คู่กาย (นิสัยเปลี่ยนตามระยะเส้นชัย!)</label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                    {PET_OPTIONS.map((pet) => (
+                      <button
+                        type="button"
+                        key={pet.id}
+                        onClick={() => setJoinPet(pet.id)}
+                        className={`border-2 border-black rounded-xl px-2 py-1.5 text-xs font-bold cursor-pointer transition ${
+                          joinPet === pet.id ? 'bg-[#38BDF8] text-black shadow-[2px_2px_0px_#000]' : 'bg-zinc-100'
+                        }`}
+                      >
+                        {pet.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {joinRole === 'spectator' && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold">4. เลือกสายของผู้ชม</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setJoinWorkout('fit')}
+                      className={`border-2 border-black rounded-xl py-2.5 px-3 text-xs font-extrabold cursor-pointer transition ${
+                        !isEatPath(joinWorkout) ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-700'
+                      }`}
+                    >
+                      💪 สายออกกำลังกาย
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setJoinWorkout('eat')}
+                      className={`border-2 border-black rounded-xl py-2.5 px-3 text-xs font-extrabold cursor-pointer transition ${
+                        isEatPath(joinWorkout) ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-700'
+                      }`}
+                    >
+                      🍔 สายกินยั่วเพื่อน
+                    </button>
+                  </div>
+                  <p className="text-[11px] font-semibold text-zinc-600 bg-[#FEF08A]/70 border border-black rounded-xl px-3 py-2">
+                    ✨ ระบบจะสุ่มกิจกรรมเซอร์ไพรส์ให้ใหม่ทุกวันตอน 7:00 น. (สายละ 30 กิจกรรม + กิจกรรมกลุ่มเมื่อมีเพื่อนสายเดียวกัน!)
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1">2. ชื่อเล่น</label>
+                  <label className="block text-xs font-bold mb-1">ชื่อเล่น</label>
                   <input
                     type="text"
                     required
-                    placeholder="เช่น ปอม"
                     value={joinName}
                     onChange={(e) => setJoinName(e.target.value)}
                     className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold mb-1">3. ตั้งรหัส PIN 4 หลัก</label>
+                  <label className="block text-xs font-bold mb-1">
+                    {joinMode === 'edit' ? 'รหัส PIN 4 หลัก (ยืนยัน)' : 'ตั้งรหัส PIN 4 หลัก'}
+                  </label>
                   <input
                     type="password"
                     maxLength={4}
                     required
-                    placeholder="1234"
                     value={joinPin}
                     onChange={(e) => setJoinPin(e.target.value)}
                     className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest"
@@ -1056,32 +1741,32 @@ export default function Arena3DPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold mb-1">4. น้ำหนักเริ่มต้น (กก.)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    required
-                    placeholder="78.0"
-                    value={joinStart}
-                    onChange={(e) => setJoinStart(e.target.value)}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
-                  />
+              {joinMode === 'create' && joinRole === 'competitor' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">น้ำหนักเริ่มต้น (กก.)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={joinStart}
+                      onChange={(e) => setJoinStart(e.target.value)}
+                      className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">น้ำหนักเป้าหมาย (กก.)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={joinGoal}
+                      onChange={(e) => setJoinGoal(e.target.value)}
+                      className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1">5. น้ำหนักเป้าหมาย (กก.)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    required
-                    placeholder="68.0"
-                    value={joinGoal}
-                    onChange={(e) => setJoinGoal(e.target.value)}
-                    className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
-                  />
-                </div>
-              </div>
+              )}
 
               {joinError && (
                 <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
@@ -1094,9 +1779,16 @@ export default function Arena3DPage() {
                 disabled={joining}
                 className="w-full neo-btn bg-[#FFE600] hover:bg-[#fef08a] text-black font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1"
               >
-                {joining ? 'กำลังลงทะเบียน...' : '🏁 เข้าสู่สนามแข่ง 3D!'}
+                {joining
+                  ? 'กำลังบันทึก...'
+                  : joinMode === 'edit'
+                  ? '✨ บันทึกการแต่งตัว!'
+                  : joinRole === 'spectator'
+                  ? '👀 ส่งตัวละครไปเชียร์ข้างสนาม!'
+                  : '🏁 เข้าสู่สนามแข่ง 3D!'}
               </button>
             </form>
+            </div>
           </div>
         </div>
       )}

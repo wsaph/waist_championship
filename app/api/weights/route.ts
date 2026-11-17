@@ -62,14 +62,30 @@ export async function GET() {
       name: String(u.name),
       emoji: String(u.avatar_emoji),
       colorHex: String(u.color_hex),
+      accessory: u.accessory ? String(u.accessory) : undefined,
+      bandColor: u.band_color ? String(u.band_color) : undefined,
+      role: u.role === 'spectator' ? 'spectator' : 'competitor',
+      workoutType: u.workout_type ? String(u.workout_type) : 'cheer',
+      petType: u.pet_type ? String(u.pet_type) : 'none',
       startWeight: Number(u.start_weight),
       currentWeight: Number(u.current_weight),
       goalWeight: Number(u.goal_weight),
       taunt: String(u.latest_taunt),
     }));
 
-    const feed = logsRes.rows.map((l) => ({
-      id: Number(l.id),
+    const interactionsRes = await turso.execute(`
+      SELECT
+        i.id, i.sender_name, i.sender_emoji, i.target_user_id, i.kind, i.gift_item, i.message, i.created_at,
+        t.name AS target_name, t.avatar_emoji AS target_emoji
+      FROM interactions i
+      JOIN users t ON i.target_user_id = t.id
+      ORDER BY i.created_at DESC, i.id DESC
+      LIMIT 25
+    `);
+
+    const weightFeed = logsRes.rows.map((l) => ({
+      id: `w-${Number(l.id)}`,
+      type: 'weight' as const,
       user: String(l.name),
       emoji: String(l.avatar_emoji),
       weight: Number(l.weight),
@@ -78,6 +94,22 @@ export async function GET() {
       excuse: String(l.excuse_tag || ''),
       time: String(l.logged_at),
     }));
+
+    const interactionFeed = interactionsRes.rows.map((i) => ({
+      id: `i-${Number(i.id)}`,
+      type: (i.kind === 'tempt' ? 'tempt' : 'cheer') as 'cheer' | 'tempt',
+      user: String(i.sender_name),
+      emoji: String(i.sender_emoji),
+      targetName: String(i.target_name),
+      targetEmoji: String(i.target_emoji),
+      giftItem: String(i.gift_item),
+      roast: String(i.message || ''),
+      time: String(i.created_at),
+    }));
+
+    const feed = [...weightFeed, ...interactionFeed]
+      .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
+      .slice(0, 30);
 
     return NextResponse.json({ participants, feed });
   } catch (error) {
