@@ -716,10 +716,73 @@ export default function Arena3DPage() {
     leaderIdRef.current = rankedPlayers[0]?.id ?? null;
     loserIdRef.current = rankedPlayers.length > 1 ? rankedPlayers[rankedPlayers.length - 1].id : null;
 
+    const resolveWeatherTargets = (w: typeof bkkWeatherRef.current) => {
+      let targetHex = 0xbae6fd;
+      let targetLightHex = 0xffffff;
+      let targetHemi = 0.78;
+      let targetDir = 0.95;
+      if (w) {
+        if (w.dayPhase === 'night') {
+          targetLightHex = 0xcbd5e1;
+          if (w.condition === 'rain' || w.condition === 'storm') {
+            targetHex = 0x090d16;
+            targetHemi = 0.38;
+            targetDir = 0.35;
+          } else {
+            targetHex = 0x0f172a;
+            targetHemi = 0.45;
+            targetDir = 0.48;
+          }
+        } else if (w.dayPhase === 'dawn') {
+          targetLightHex = 0xffedd5;
+          if (w.condition === 'rain' || w.condition === 'storm') {
+            targetHex = 0x6b7280;
+            targetHemi = 0.52;
+            targetDir = 0.45;
+          } else if (w.condition === 'cloudy') {
+            targetHex = 0xfbcfe8;
+            targetHemi = 0.68;
+            targetDir = 0.65;
+          } else {
+            targetHex = 0xfde68a;
+            targetHemi = 0.74;
+            targetDir = 0.8;
+          }
+        } else if (w.dayPhase === 'dusk') {
+          targetLightHex = 0xfdba74;
+          if (w.condition === 'rain' || w.condition === 'storm') {
+            targetHex = 0x57534e;
+            targetHemi = 0.48;
+            targetDir = 0.42;
+          } else if (w.condition === 'cloudy') {
+            targetHex = 0xfdba74;
+            targetHemi = 0.62;
+            targetDir = 0.62;
+          } else {
+            targetHex = 0xfb923c;
+            targetHemi = 0.68;
+            targetDir = 0.78;
+          }
+        } else if (w.condition === 'rain' || w.condition === 'storm') {
+          targetHex = 0x64748b;
+          targetHemi = 0.52;
+          targetDir = 0.45;
+        } else if (w.condition === 'cloudy') {
+          targetHex = 0xcbd5e1;
+          targetHemi = 0.65;
+          targetDir = 0.68;
+        }
+      }
+      const isRaining = Boolean(w && (w.condition === 'rain' || w.condition === 'storm'));
+      const showNight = Boolean(w && w.dayPhase === 'night' && !isRaining);
+      return { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight };
+    };
+
+    const initWeather = resolveWeatherTargets(bkkWeatherRef.current);
     const scene = new THREE.Scene();
-    const skyColor = new THREE.Color(0xdbeafe);
+    const skyColor = new THREE.Color(initWeather.targetHex);
     scene.background = skyColor;
-    scene.fog = new THREE.FogExp2(0xdbeafe, 0.014);
+    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.014);
 
     // 3D Rain particles (synced with Bangkok weather)
     const rainCount = 360;
@@ -738,7 +801,7 @@ export default function Arena3DPage() {
       opacity: 0.78,
     });
     const rainPoints = new THREE.Points(rainGeo, rainMat);
-    rainPoints.visible = false;
+    rainPoints.visible = initWeather.isRaining;
     scene.add(rainPoints);
 
     // Night moon + stars (synced with Bangkok is_day)
@@ -760,7 +823,7 @@ export default function Arena3DPage() {
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
     const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.28, transparent: true, opacity: 0.85 });
     nightGroup.add(new THREE.Points(starGeo, starMat));
-    nightGroup.visible = false;
+    nightGroup.visible = initWeather.showNight;
     scene.add(nightGroup);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -791,11 +854,11 @@ export default function Arena3DPage() {
       cameraTargetPosRef.current = null;
     });
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfef08a, 0.75);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfef08a, initWeather.targetHemi);
     hemiLight.position.set(0, 30, 0);
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.95);
+    const dirLight = new THREE.DirectionalLight(initWeather.targetLightHex, initWeather.targetDir);
     dirLight.position.set(12, 24, 14);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -1346,60 +1409,7 @@ export default function Arena3DPage() {
 
       const bkkW = bkkWeatherRef.current;
       if (bkkW) {
-        let targetHex = 0xbae6fd;
-        let targetLightHex = 0xffffff;
-        let targetHemi = 0.78;
-        let targetDir = 0.95;
-        if (bkkW.dayPhase === 'night') {
-          targetLightHex = 0xcbd5e1;
-          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
-            targetHex = 0x090d16;
-            targetHemi = 0.38;
-            targetDir = 0.35;
-          } else {
-            targetHex = 0x0f172a;
-            targetHemi = 0.45;
-            targetDir = 0.48;
-          }
-        } else if (bkkW.dayPhase === 'dawn') {
-          targetLightHex = 0xffedd5;
-          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
-            targetHex = 0x6b7280;
-            targetHemi = 0.52;
-            targetDir = 0.45;
-          } else if (bkkW.condition === 'cloudy') {
-            targetHex = 0xfbcfe8;
-            targetHemi = 0.68;
-            targetDir = 0.65;
-          } else {
-            targetHex = 0xfde68a;
-            targetHemi = 0.74;
-            targetDir = 0.8;
-          }
-        } else if (bkkW.dayPhase === 'dusk') {
-          targetLightHex = 0xfdba74;
-          if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
-            targetHex = 0x57534e;
-            targetHemi = 0.48;
-            targetDir = 0.42;
-          } else if (bkkW.condition === 'cloudy') {
-            targetHex = 0xfdba74;
-            targetHemi = 0.62;
-            targetDir = 0.62;
-          } else {
-            targetHex = 0xfb923c;
-            targetHemi = 0.68;
-            targetDir = 0.78;
-          }
-        } else if (bkkW.condition === 'rain' || bkkW.condition === 'storm') {
-          targetHex = 0x64748b;
-          targetHemi = 0.52;
-          targetDir = 0.45;
-        } else if (bkkW.condition === 'cloudy') {
-          targetHex = 0xcbd5e1;
-          targetHemi = 0.65;
-          targetDir = 0.68;
-        }
+        const { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight } = resolveWeatherTargets(bkkW);
 
         const targetCol = new THREE.Color(targetHex);
         skyColor.lerp(targetCol, 0.03);
@@ -1413,7 +1423,6 @@ export default function Arena3DPage() {
           bkkW.condition === 'storm' && Math.sin(elapsed * 7.3) > 0.97 && Math.sin(elapsed * 19.1) > 0.6 ? 1.5 : 0;
         dirLight.intensity += (targetDir + lightningFlash - dirLight.intensity) * 0.12;
 
-        const isRaining = bkkW.condition === 'rain' || bkkW.condition === 'storm';
         rainPoints.visible = isRaining;
         if (isRaining) {
           const dropSpeed = bkkW.condition === 'storm' ? 0.65 : 0.42;
@@ -1425,7 +1434,7 @@ export default function Arena3DPage() {
           }
           posAttr.needsUpdate = true;
         }
-        nightGroup.visible = !bkkW.isDay && !isRaining;
+        nightGroup.visible = showNight;
       }
 
       const now = performance.now();
