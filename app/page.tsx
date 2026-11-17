@@ -2323,7 +2323,7 @@ export default function Arena3DPage() {
             className="neo-btn bg-white text-black font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
           >
             <Trophy className="w-4 h-4" />
-            <span className="hidden sm:inline">อันดับ & แซวสด</span>
+            <span className="hidden sm:inline">อันดับ</span>
           </button>
 
           {(() => {
@@ -2452,83 +2452,6 @@ export default function Arena3DPage() {
           </div>
         </div>
 
-        <div className="neo-card rounded-2xl p-3.5 pointer-events-auto flex flex-col flex-1 min-h-0 bg-[#FEF08A]/95">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-black shrink-0 gap-2">
-            <h2 className="font-[family-name:var(--font-kanit)] font-extrabold text-base flex items-center gap-1.5">
-              <span>📢 กระดานแซวสด</span>
-            </h2>
-            <span className="bg-[#FF4D8D] text-white text-[10px] font-bold px-2 py-0.5 rounded-full border border-black animate-pulse">
-              PUBLIC
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-zinc-600 mb-2 shrink-0">
-            👆 คลิกที่ตัวผู้เข้าแข่งขันในสนามเพื่อส่งดอกไม้หรือมารผจญได้เลย!
-          </p>
-
-          <div className="overflow-y-auto space-y-2 pr-1 flex-1">
-            {roastFeed.map((item) => {
-              if (item.type === 'cheer' || item.type === 'tempt') {
-                const isTempt = item.type === 'tempt';
-                return (
-                  <div
-                    key={item.id}
-                    className={`border-2 border-black rounded-xl p-2.5 shadow-[2px_2px_0px_#18181B] ${
-                      isTempt ? 'bg-[#FFF1F2]' : 'bg-[#ECFCCB]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <span className="font-extrabold text-xs truncate">
-                        {item.emoji} {item.user} ➔ {item.targetEmoji} {item.targetName}
-                      </span>
-                      <span
-                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black shrink-0 ${
-                          isTempt ? 'bg-[#FF4D8D] text-white' : 'bg-[#A3E635] text-black'
-                        }`}
-                      >
-                        {isTempt ? '😈 มารผจญ' : '🌸 กำลังใจ'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] font-bold text-zinc-900">
-                      ส่ง {item.giftItem}
-                    </div>
-                    {item.roast && (
-                      <p className="text-[11px] font-semibold text-zinc-700 bg-white/80 px-2 py-1 rounded border border-zinc-300 mt-1">
-                        💬 &quot;{item.roast}&quot;
-                      </p>
-                    )}
-                  </div>
-                );
-              }
-
-              const diffVal = item.diff ?? 0;
-              const isUp = diffVal > 0;
-              return (
-                <div key={item.id} className="bg-white border-2 border-black rounded-xl p-2.5 shadow-[2px_2px_0px_#18181B]">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-extrabold text-xs">
-                      {item.emoji} {item.user} ({item.weight} กก.)
-                    </span>
-                    {isUp ? (
-                      <span className="bg-[#FF4D8D] text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black">
-                        +{diffVal.toFixed(1)} กก.
-                      </span>
-                    ) : (
-                      <span className="bg-[#A3E635] text-black text-[10px] font-extrabold px-1.5 py-0.5 rounded border border-black">
-                        {diffVal.toFixed(1)} กก.
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] font-bold text-zinc-800 bg-zinc-100 px-2 py-1 rounded border border-zinc-200 mb-1">
-                    {item.roast}
-                  </p>
-                  <div className="text-[10px] text-zinc-500 font-semibold truncate">
-                    💬 &quot;{item.excuse}&quot;
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </aside>
 
       <div className="fixed bottom-3 left-3 z-20 pointer-events-none hidden sm:block">
@@ -2537,7 +2460,7 @@ export default function Arena3DPage() {
           <span>•</span>
           <span>🔍 สกรอลล์เพื่อซูม</span>
           <span>•</span>
-          <span>👆 คลิกตัวละครเพื่อแต่งตัว</span>
+          <span>👆 คลิกนักแข่งเพื่อส่งกำลังใจ/ของกิน</span>
           <span>•</span>
           <span>🤚 ลูบพุงตัวละครดูอาการ!</span>
         </div>
