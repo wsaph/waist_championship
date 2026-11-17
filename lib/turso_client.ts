@@ -25,6 +25,7 @@ async function ensureLocalSchema() {
           role TEXT NOT NULL DEFAULT 'competitor',
           workout_type TEXT DEFAULT 'cheer',
           pet_type TEXT DEFAULT 'none',
+          status_text TEXT DEFAULT '',
           pin_code TEXT NOT NULL DEFAULT '1234',
           start_weight REAL NOT NULL,
           goal_weight REAL NOT NULL,

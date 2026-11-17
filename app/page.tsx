@@ -15,7 +15,14 @@ import {
   buildFoodPileMesh,
   buildDeliveryRider,
 } from '@/lib/character_3d';
-import { getDailySpectatorActivity, isEatPath } from '@/lib/spectator_activities';
+import {
+  getDailySpectatorActivity,
+  isEatPath,
+  getBangkok7AmDayKey,
+  FIT_ACTIVITIES,
+  EAT_ACTIVITIES,
+  type SpectatorActivity,
+} from '@/lib/spectator_activities';
 import { startBgm, stopBgm } from '@/lib/bgm';
 import CharacterPreview3D from '@/components/CharacterPreview3D';
 
@@ -29,6 +36,7 @@ interface Player {
   role?: 'competitor' | 'spectator';
   workoutType?: string;
   petType?: string;
+  statusText?: string;
   startWeight: number;
   currentWeight: number;
   goalWeight: number;
@@ -164,6 +172,8 @@ export default function Arena3DPage() {
   const [joinAccessory, setJoinAccessory] = useState('headband');
   const [joinBandColor, setJoinBandColor] = useState('#FFE600');
   const [joinPin, setJoinPin] = useState('');
+  const [joinStatus, setJoinStatus] = useState('');
+  const [quickStatusInput, setQuickStatusInput] = useState('');
   const [joinStart, setJoinStart] = useState('');
   const [joinGoal, setJoinGoal] = useState('');
   const [joinError, setJoinError] = useState('');
@@ -171,15 +181,15 @@ export default function Arena3DPage() {
 
   const [boardSenderId, setBoardSenderId] = useState<string>('');
   const [boardTargetId, setBoardTargetId] = useState<number>(0);
-  const [boardSearch, setBoardSearch] = useState('');
-  const [isBoardComboOpen, setIsBoardComboOpen] = useState(false);
   const [boardKind, setBoardKind] = useState<'cheer' | 'tempt'>('cheer');
   const [boardMessage, setBoardMessage] = useState('');
   const [sendingBoard, setSendingBoard] = useState(false);
+  const [actionTargetPlayer, setActionTargetPlayer] = useState<Player | null>(null);
 
   const [walkingSpectatorId, setWalkingSpectatorId] = useState<number | null>(null);
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isPairMenuOpen, setIsPairMenuOpen] = useState(false);
+  const [radialMenu, setRadialMenu] = useState<{ x: number; y: number; options: SpectatorActivity[] } | null>(null);
   const [pairedActivities, setPairedActivities] = useState<Record<number, { animType: string; label: string }>>({});
 
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
@@ -190,7 +200,6 @@ export default function Arena3DPage() {
 
   const walkingSpectatorIdRef = useRef<number | null>(null);
   const nearbySpectatorIdRef = useRef<number | null>(null);
-  const boardComboRef = useRef<HTMLDivElement | null>(null);
   const keysPressedRef = useRef<Record<string, boolean>>({});
   const walkTargetRef = useRef<THREE.Vector3 | null>(null);
 
@@ -211,6 +220,8 @@ export default function Arena3DPage() {
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const labelsRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const statusSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const cameraTargetPosRef = useRef<THREE.Vector3 | null>(null);
@@ -242,13 +253,21 @@ export default function Arena3DPage() {
       if (savedPosStr) {
         savedSpectatorPosRef.current = JSON.parse(savedPosStr);
       }
+      const savedPairStr = localStorage.getItem(`waist_paired_activities_${getBangkok7AmDayKey()}`);
+      if (savedPairStr) {
+        setPairedActivities(JSON.parse(savedPairStr));
+      }
     } catch {
       // ignore invalid storage
     }
     const savedId = localStorage.getItem('waist_user_id');
-        if (savedId && walkingSpectatorIdRef.current === null) {
+        if (savedId) {
           const me = (data.participants as Player[]).find((p) => p.id === Number(savedId));
-          if (me?.role === 'spectator') {
+          if (!me) {
+            localStorage.removeItem('waist_user_id');
+            setCurrentUserId(null);
+            setWalkingSpectatorId(null);
+          } else if (walkingSpectatorIdRef.current === null && me.role === 'spectator') {
             setWalkingSpectatorId(me.id);
           }
         }
@@ -277,6 +296,10 @@ export default function Arena3DPage() {
       if (savedPosStr) {
         savedSpectatorPosRef.current = JSON.parse(savedPosStr);
       }
+      const savedPairStr = localStorage.getItem(`waist_paired_activities_${getBangkok7AmDayKey()}`);
+      if (savedPairStr) {
+        setPairedActivities(JSON.parse(savedPairStr));
+      }
     } catch {
       // ignore invalid storage
     }
@@ -302,17 +325,26 @@ export default function Arena3DPage() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      keysPressedRef.current[e.code] = true;
       keysPressedRef.current[e.key.toLowerCase()] = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      keysPressedRef.current[e.code] = false;
       keysPressedRef.current[e.key.toLowerCase()] = false;
+    };
+    const onBlur = () => {
+      keysPressedRef.current = {};
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       stopBgm();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -324,17 +356,6 @@ export default function Arena3DPage() {
       return next;
     });
   };
-
-  useEffect(() => {
-    if (!isBoardComboOpen) return;
-    const onDocPointerDown = (e: PointerEvent) => {
-      if (boardComboRef.current && !boardComboRef.current.contains(e.target as Node)) {
-        setIsBoardComboOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onDocPointerDown);
-    return () => document.removeEventListener('pointerdown', onDocPointerDown);
-  }, [isBoardComboOpen]);
 
   const competitors = React.useMemo(
     () => players.filter((p) => p.role !== 'spectator'),
@@ -370,6 +391,45 @@ export default function Arena3DPage() {
     cameraTargetPosRef.current = new THREE.Vector3(pos.x + 2.5, 5.2, pos.z + 7.5);
   }, []);
 
+  const openRadialActivityMenu = useCallback((cx: number, cy: number) => {
+    const pool = [...FIT_ACTIVITIES, ...EAT_ACTIVITIES];
+    const seen = new Set<string>();
+    const shuffled = pool
+      .slice()
+      .sort(() => Math.random() - 0.5)
+      .filter((item) => {
+        if (seen.has(item.animType)) return false;
+        seen.add(item.animType);
+        return true;
+      })
+      .slice(0, 6);
+    const pad = 145;
+    const x = Math.max(pad, Math.min(window.innerWidth - pad, cx));
+    const y = Math.max(pad, Math.min(window.innerHeight - pad, cy));
+    setRadialMenu({ x, y, options: shuffled });
+  }, []);
+
+  const applySpectatorActivity = useCallback(
+    (act: SpectatorActivity) => {
+      if (!currentUserId) return;
+      setPairedActivities((prev) => {
+        const next = {
+          ...prev,
+          [currentUserId]: { animType: act.animType, label: act.label },
+        };
+        try {
+          localStorage.setItem(`waist_paired_activities_${getBangkok7AmDayKey()}`, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+      setRadialMenu(null);
+      showToast('🎡', 'เปลี่ยนกิจกรรมแล้ว!', act.label);
+    },
+    [currentUserId]
+  );
+
   const openCreateModal = useCallback(() => {
     setJoinMode('create');
     setEditingPlayerId(null);
@@ -382,6 +442,7 @@ export default function Arena3DPage() {
     setJoinAccessory('headband');
     setJoinBandColor('#FFE600');
     setJoinPin('');
+    setJoinStatus('');
     setJoinStart('');
     setJoinGoal('');
     setJoinError('');
@@ -391,6 +452,12 @@ export default function Arena3DPage() {
   const openEditModal = useCallback(
     (p: Player) => {
       focusOnCharacter(p.id);
+      if (p.role !== 'spectator') {
+        setBoardTargetId(p.id);
+        setBoardMessage('');
+        setActionTargetPlayer(p);
+        return;
+      }
       if (p.id !== currentUserId) {
         return;
       }
@@ -407,6 +474,7 @@ export default function Arena3DPage() {
       setJoinAccessory(p.accessory || 'headband');
       setJoinBandColor(p.bandColor || '#FFE600');
       setJoinPin('');
+      setJoinStatus(p.statusText || '');
       setJoinError('');
       setIsJoinOpen(true);
     },
@@ -895,12 +963,24 @@ export default function Arena3DPage() {
       scene.add(rootGroup);
 
       const tagEl = document.createElement('div');
-      tagEl.className = 'player-tag';
-      tagEl.onclick = () => openEditModal(p);
+      tagEl.className = 'player-tag flex flex-col items-center';
+      tagEl.onclick = () => {
+        if (p.role !== 'spectator') {
+          openEditModal(p);
+        } else {
+          focusOnCharacter(p.id);
+        }
+      };
+
+      const escapeHtml = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const trimmedStatus = (p.statusText || '').trim();
+      const speechHtml = `<div data-speech-bubble class="mb-1 bg-[#FFFDF7] border-2 border-black rounded-2xl px-3 py-1 shadow-[3px_3px_0px_#18181B] text-xs font-extrabold text-black max-w-[200px] truncate ${trimmedStatus ? '' : 'hidden'}">💬 ${escapeHtml(trimmedStatus)}</div>`;
 
       if (isSpectator) {
         const workoutLabel = dailyAct?.label || '📣 เชียร์สุดใจ';
         tagEl.innerHTML = `
+          ${speechHtml}
           <div class="bg-[#FEF08A] border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
             <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
               <span>👀</span>
@@ -923,6 +1003,7 @@ export default function Arena3DPage() {
         const temptBadge = (p.temptCount ?? 0) > 0 ? `<span class="text-rose-600">😈${p.temptCount}</span>` : '';
 
         tagEl.innerHTML = `
+          ${speechHtml}
           <div class="bg-white border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
             <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
               <span>${rankLabel}</span>
@@ -961,6 +1042,7 @@ export default function Arena3DPage() {
         happyFace,
         angryFace,
         tagEl,
+        activityLabel: dailyAct?.label || '📣 เชียร์สุดใจ',
         targetPos,
         currentBellyScale: initialBellyScale,
         targetBellyScale: initialBellyScale,
@@ -970,6 +1052,20 @@ export default function Arena3DPage() {
     });
 
     charMeshesRef.current = meshes;
+
+    const plumbobMesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.28, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0x22C55E,
+        emissive: 0x4ADE80,
+        emissiveIntensity: 0.45,
+        roughness: 0.2,
+        metalness: 0.1,
+      })
+    );
+    plumbobMesh.scale.set(0.85, 1.55, 0.85);
+    plumbobMesh.visible = false;
+    scene.add(plumbobMesh);
 
     const flowerThrowGroup = new THREE.Group();
     flowerThrowGroup.visible = false;
@@ -1001,19 +1097,45 @@ export default function Arena3DPage() {
 
       const now = performance.now();
       const activeWalkerId = walkingSpectatorIdRef.current;
+      let foundCurrentUserMesh = false;
 
       meshes.forEach((c, idx) => {
+        if (c.id === currentUserId) {
+          foundCurrentUserMesh = true;
+          plumbobMesh.visible = true;
+          plumbobMesh.position.set(
+            c.rootGroup.position.x,
+            c.rootGroup.position.y + 3.55 + Math.sin(elapsed * 3.5) * 0.14,
+            c.rootGroup.position.z
+          );
+          plumbobMesh.rotation.y = elapsed * 2.4;
+        }
         if (activeWalkerId === c.id) {
           const keys = keysPressedRef.current;
-          let dx = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
-          let dz = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+          const inputRight =
+            (keys['KeyD'] || keys['ArrowRight'] || keys['d'] || keys['arrowright'] ? 1 : 0) -
+            (keys['KeyA'] || keys['ArrowLeft'] || keys['a'] || keys['arrowleft'] ? 1 : 0);
+          const inputForward =
+            (keys['KeyW'] || keys['ArrowUp'] || keys['w'] || keys['arrowup'] ? 1 : 0) -
+            (keys['KeyS'] || keys['ArrowDown'] || keys['s'] || keys['arrowdown'] ? 1 : 0);
+          let dx = 0;
+          let dz = 0;
           let isWalking = false;
 
-          if (dx !== 0 || dz !== 0) {
+          if (inputRight !== 0 || inputForward !== 0) {
             walkTargetRef.current = null;
-            const len = Math.hypot(dx, dz);
-            dx /= len;
-            dz /= len;
+            const camForward = new THREE.Vector3();
+            camera.getWorldDirection(camForward);
+            camForward.y = 0;
+            if (camForward.lengthSq() > 0.0001) camForward.normalize();
+            else camForward.set(0, 0, -1);
+            const camRight = new THREE.Vector3(-camForward.z, 0, camForward.x).normalize();
+            const moveVec = new THREE.Vector3()
+              .addScaledVector(camRight, inputRight)
+              .addScaledVector(camForward, inputForward)
+              .normalize();
+            dx = moveVec.x;
+            dz = moveVec.z;
             isWalking = true;
           } else if (walkTargetRef.current) {
             const toTargetX = walkTargetRef.current.x - c.rootGroup.position.x;
@@ -1190,7 +1312,10 @@ export default function Arena3DPage() {
 
         if (headWorldPos.z < 1) {
           const x = (headWorldPos.x * 0.5 + 0.5) * window.innerWidth;
-          const y = (-headWorldPos.y * 0.5 + 0.5) * window.innerHeight;
+          const rawY = (-headWorldPos.y * 0.5 + 0.5) * window.innerHeight;
+          const headerBottom = headerRef.current ? headerRef.current.getBoundingClientRect().bottom : 88;
+          const minBottomY = headerBottom + 12 + (c.tagEl.offsetHeight || 100);
+          const y = c.id === currentUserId ? Math.max(minBottomY, rawY) : rawY;
           c.tagEl.style.left = `${x}px`;
           c.tagEl.style.top = `${y}px`;
           c.tagEl.style.opacity = '1';
@@ -1199,6 +1324,7 @@ export default function Arena3DPage() {
           c.tagEl.style.opacity = '0';
         }
       });
+      if (!foundCurrentUserMesh) plumbobMesh.visible = false;
 
       const delivery = pendingDeliveryRef.current;
       if (delivery) {
@@ -1376,6 +1502,7 @@ export default function Arena3DPage() {
         isRubbingTouch = false;
         controls.enabled = true;
       }
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1389,7 +1516,13 @@ export default function Arena3DPage() {
         }
         if (obj?.userData.playerId !== undefined) {
           const found = players.find((pl) => pl.id === obj!.userData.playerId);
-          if (found) openEditModal(found);
+          if (found) {
+            if (found.role !== 'spectator') {
+              openEditModal(found);
+            } else {
+              focusOnCharacter(found.id);
+            }
+          }
           return;
         }
       }
@@ -1448,7 +1581,7 @@ export default function Arena3DPage() {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [players, competitors, rankedPlayers, openEditModal, pairedActivities]);
+  }, [players, competitors, rankedPlayers, openEditModal, focusOnCharacter, pairedActivities, currentUserId]);
 
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1569,6 +1702,7 @@ export default function Arena3DPage() {
                 role: joinRole,
                 workoutType: joinWorkout,
                 petType: joinPet,
+                statusText: joinStatus,
                 startWeight: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : undefined,
                 goalWeight: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : undefined,
               }
@@ -1672,6 +1806,7 @@ export default function Arena3DPage() {
         } else {
           showToast('😈', `ส่งมารผจญไปยั่ว ${inter.targetName}!`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
         }
+        setActionTargetPlayer(null);
         focusOnCharacter(inter.targetUserId);
       }
     } catch {
@@ -1681,6 +1816,52 @@ export default function Arena3DPage() {
     }
   };
 
+  useEffect(() => {
+    if (currentUserId === null) {
+      setQuickStatusInput('');
+      return;
+    }
+    const me = players.find((p) => p.id === currentUserId);
+    if (me) {
+      setQuickStatusInput(me.statusText || '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId]);
+
+  const handleQuickStatusChange = (val: string) => {
+    setQuickStatusInput(val);
+    const trimmed = val.trim();
+    const myMesh = charMeshesRef.current.find((m) => m.id === currentUserId);
+    const bubbleEl = myMesh?.tagEl?.querySelector('[data-speech-bubble]') as HTMLElement | null;
+    if (bubbleEl) {
+      if (trimmed) {
+        bubbleEl.textContent = `💬 ${trimmed}`;
+        bubbleEl.classList.remove('hidden');
+      } else {
+        bubbleEl.textContent = '';
+        bubbleEl.classList.add('hidden');
+      }
+    }
+    if (!currentUserId) return;
+    if (statusSaveTimerRef.current) clearTimeout(statusSaveTimerRef.current);
+    const targetUserId = currentUserId;
+    statusSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await fetch('/api/users', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: targetUserId,
+            isSelf: true,
+            statusText: trimmed,
+          }),
+        });
+      } catch {
+        // ignore background save failure
+      }
+    }, 400);
+  };
+
   const selectedPlayerObj = players.find((p) => p.id === selectedPlayerId);
 
   return (
@@ -1688,7 +1869,7 @@ export default function Arena3DPage() {
       <div ref={canvasRef} className="fixed inset-0 w-full h-full z-[1] touch-none cursor-grab active:cursor-grabbing" />
       <div ref={labelsRef} className="fixed inset-0 pointer-events-none z-10 overflow-hidden" />
 
-      <header className="fixed top-3 left-3 right-3 z-20 pointer-events-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+      <header ref={headerRef} className="fixed top-3 left-3 right-3 z-20 pointer-events-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
         <div className="neo-card rounded-2xl px-4 py-2.5 pointer-events-auto flex items-center gap-3 bg-[#FFE600]">
           <div className="w-10 h-10 bg-[#FF4D8D] border-2 border-black rounded-xl flex items-center justify-center text-xl shadow-[2px_2px_0px_#000] shrink-0">
             🏆
@@ -1773,17 +1954,6 @@ export default function Arena3DPage() {
                     {currentUser.role === 'spectator' ? 'ผู้ชม' : 'นักแข่ง'}
                   </span>
                 </button>
-                {currentUser.role === 'spectator' && (
-                  <button
-                    onClick={() => {
-                      setWalkingSpectatorId(currentUser.id);
-                      showToast('🚶', `ควบคุม ${currentUser.emoji} ${currentUser.name}`, 'ใช้ WASD / ลูกศร หรือแตะพื้นเพื่อเดิน!');
-                    }}
-                    className="neo-btn bg-[#FFE600] text-black font-extrabold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
-                  >
-                    🚶 เดินเล่น
-                  </button>
-                )}
                 <button
                   onClick={handleSignOut}
                   className="neo-btn bg-white hover:bg-zinc-100 text-black font-bold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
@@ -1885,7 +2055,7 @@ export default function Arena3DPage() {
         </div>
 
         <div className="neo-card rounded-2xl p-3.5 pointer-events-auto flex flex-col flex-1 min-h-0 bg-[#FEF08A]/95">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-black shrink-0">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-black shrink-0 gap-2">
             <h2 className="font-[family-name:var(--font-kanit)] font-extrabold text-base flex items-center gap-1.5">
               <span>📢 กระดานแซวสด</span>
             </h2>
@@ -1893,107 +2063,9 @@ export default function Arena3DPage() {
               PUBLIC
             </span>
           </div>
-
-          {competitors.length > 0 && (
-            <form onSubmit={handleBoardSubmit} className="bg-white border-2 border-black rounded-xl p-2.5 mb-2.5 space-y-2 shrink-0 shadow-[2px_2px_0px_#18181B]">
-              <div className="grid grid-cols-1 gap-1.5 relative">
-                <div className="flex items-center justify-between text-[11px] font-bold text-zinc-600 px-1">
-                  <span>
-                    ส่งจาก: {players.find((p) => p.id === currentUserId)?.emoji}{' '}
-                    {players.find((p) => p.id === currentUserId)?.name || 'คุณ'}
-                  </span>
-                </div>
-                <div className="relative" ref={boardComboRef}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBoardSearch('');
-                      setIsBoardComboOpen((v) => !v);
-                    }}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-lg px-2.5 py-1.5 text-xs font-bold flex items-center justify-between cursor-pointer"
-                  >
-                    <span className="truncate">
-                      {(() => {
-                        const t = competitors.find((c) => c.id === boardTargetId);
-                        return t ? `ส่งให้ ${t.emoji} ${t.name}` : 'เลือกผู้เข้าแข่งขัน...';
-                      })()}
-                    </span>
-                    <span className="text-[10px] ml-1">▼</span>
-                  </button>
-                  {isBoardComboOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-black rounded-xl shadow-[3px_3px_0px_#18181B] z-30 p-1.5 space-y-1">
-                      <input
-                        type="text"
-                        autoFocus
-                        placeholder="🔍 ค้นหาชื่อ..."
-                        value={boardSearch}
-                        onChange={(e) => setBoardSearch(e.target.value)}
-                        className="w-full bg-[#FFFDF7] border border-black rounded-lg px-2 py-1 text-xs font-semibold"
-                      />
-                      <div className="max-h-36 overflow-y-auto space-y-0.5">
-                        {competitors
-                          .filter((c) => c.name.toLowerCase().includes(boardSearch.trim().toLowerCase()))
-                          .map((c) => (
-                            <button
-                              type="button"
-                              key={c.id}
-                              onClick={() => {
-                                setBoardTargetId(c.id);
-                                setIsBoardComboOpen(false);
-                                setBoardSearch('');
-                              }}
-                              className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-                                c.id === boardTargetId ? 'bg-[#FFE600]' : 'hover:bg-zinc-100'
-                              }`}
-                            >
-                              <span>{c.emoji}</span>
-                              <span className="truncate">{c.name}</span>
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setBoardKind('cheer')}
-                  className={`border-2 border-black rounded-lg py-1 text-[11px] font-extrabold cursor-pointer transition ${
-                    boardKind === 'cheer' ? 'bg-[#A3E635] shadow-[1px_1px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
-                  }`}
-                >
-                  🌸 ให้กำลังใจ/ดอกไม้
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBoardKind('tempt')}
-                  className={`border-2 border-black rounded-lg py-1 text-[11px] font-extrabold cursor-pointer transition ${
-                    boardKind === 'tempt' ? 'bg-[#FF4D8D] text-white shadow-[1px_1px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
-                  }`}
-                >
-                  😈 มารผจญ/ส่งของกิน
-                </button>
-              </div>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  maxLength={120}
-                  placeholder="พิมพ์ข้อความ (ไม่พิมพ์ก็ได้)"
-                  value={boardMessage}
-                  onChange={(e) => setBoardMessage(e.target.value)}
-                  className="flex-1 min-w-0 bg-[#FFFDF7] border-2 border-black rounded-lg px-2.5 py-1 text-xs font-semibold"
-                />
-                <button
-                  type="submit"
-                  disabled={sendingBoard}
-                  className="neo-btn bg-[#FFE600] text-black font-extrabold text-xs px-3 py-1 rounded-lg cursor-pointer shrink-0"
-                >
-                  {sendingBoard ? '...' : 'ส่ง!'}
-                </button>
-              </div>
-            </form>
-          )}
+          <p className="text-[10px] font-bold text-zinc-600 mb-2 shrink-0">
+            👆 คลิกที่ตัวผู้เข้าแข่งขันในสนามเพื่อส่งดอกไม้หรือมารผจญได้เลย!
+          </p>
 
           <div className="overflow-y-auto space-y-2 pr-1 flex-1">
             {roastFeed.map((item) => {
@@ -2205,19 +2277,6 @@ export default function Arena3DPage() {
               </div>
 
               <form onSubmit={handleJoinSubmit} className="space-y-3.5">
-              {joinMode === 'edit' && joinRole === 'spectator' && editingPlayerId !== null && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWalkingSpectatorId(editingPlayerId);
-                    setIsJoinOpen(false);
-                    showToast('🚶', `ควบคุม ${joinEmoji} ${joinName}`, 'ใช้ปุ่ม WASD / ลูกศร หรือแตะพื้นเพื่อเดินไปหาเพื่อน!');
-                  }}
-                  className="w-full neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer"
-                >
-                  🚶 พาตัวนี้เดินเล่น &amp; ชวนเพื่อนทำกิจกรรม!
-                </button>
-              )}
 
               {(joinMode === 'create' || (joinMode === 'edit' && editingPlayerId === currentUserId)) && (
                 <div className="grid grid-cols-2 gap-2">
@@ -2433,6 +2492,20 @@ export default function Arena3DPage() {
                 </div>
               )}
 
+              {joinMode === 'edit' && (
+                <div>
+                  <label className="block text-xs font-bold mb-1">💬 ข้อความบนหัว (Speech Bubble)</label>
+                  <input
+                    type="text"
+                    maxLength={60}
+                    placeholder="เช่น วันนี้สู้ตาย! / หิวชาบู..."
+                    value={joinStatus}
+                    onChange={(e) => setJoinStatus(e.target.value)}
+                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-semibold text-xs"
+                  />
+                </div>
+              )}
+
               {joinError && (
                 <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
                   {joinError}
@@ -2454,6 +2527,104 @@ export default function Arena3DPage() {
               </button>
             </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {actionTargetPlayer && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-sm w-full p-5 relative">
+            <button
+              onClick={() => setActionTargetPlayer(null)}
+              className="absolute top-3 right-3 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div
+                className="w-12 h-12 rounded-2xl border-2 border-black flex items-center justify-center text-2xl shadow-[2px_2px_0px_#000] shrink-0"
+                style={{ backgroundColor: actionTargetPlayer.colorHex }}
+              >
+                {actionTargetPlayer.emoji}
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold truncate">
+                  {actionTargetPlayer.name}
+                </h3>
+                <p className="text-xs text-zinc-600 font-semibold">
+                  {actionTargetPlayer.startWeight} ➔ {actionTargetPlayer.currentWeight} กก. (เป้า {actionTargetPlayer.goalWeight} กก.)
+                </p>
+              </div>
+            </div>
+
+            {actionTargetPlayer.id === currentUserId && (
+              <button
+                type="button"
+                onClick={() => {
+                  const p = actionTargetPlayer;
+                  setActionTargetPlayer(null);
+                  setJoinMode('edit');
+                  setEditingPlayerId(p.id);
+                  setJoinRole('competitor');
+                  setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
+                  setJoinPet(p.petType || 'none');
+                  setJoinStart(p.startWeight > 0 ? String(p.startWeight) : '');
+                  setJoinGoal(p.goalWeight > 0 ? String(p.goalWeight) : '');
+                  setJoinName(p.name);
+                  setJoinEmoji(p.emoji);
+                  setJoinColor(p.colorHex || '#38BDF8');
+                  setJoinAccessory(p.accessory || 'headband');
+                  setJoinBandColor(p.bandColor || '#FFE600');
+                  setJoinPin('');
+                  setJoinError('');
+                  setIsJoinOpen(true);
+                }}
+                className="w-full neo-btn bg-[#38BDF8] text-black font-extrabold text-xs py-2 rounded-xl mb-3 cursor-pointer"
+              >
+                🎨 แต่งตัว / เปลี่ยนสัตว์คู่กาย / เปลี่ยนสาย
+              </button>
+            )}
+
+            <form onSubmit={handleBoardSubmit} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBoardKind('cheer')}
+                  className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
+                    boardKind === 'cheer' ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                  }`}
+                >
+                  🌸 ให้กำลังใจ/ดอกไม้
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBoardKind('tempt')}
+                  className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
+                    boardKind === 'tempt' ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                  }`}
+                >
+                  😈 มารผจญ/ส่งของกิน
+                </button>
+              </div>
+
+              <input
+                type="text"
+                maxLength={120}
+                placeholder="พิมพ์ข้อความถึงเพื่อน (ไม่ใส่ก็ได้)"
+                value={boardMessage}
+                onChange={(e) => setBoardMessage(e.target.value)}
+                className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 text-xs font-semibold"
+              />
+
+              <button
+                type="submit"
+                disabled={sendingBoard}
+                className="w-full neo-btn bg-[#FFE600] hover:bg-[#fef08a] text-black font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer"
+              >
+                {sendingBoard ? 'กำลังส่ง...' : boardKind === 'cheer' ? '🌸 ส่งดอกไม้ให้กำลังใจ!' : '🛵 ส่งไรเดอร์เอาของกินไปล่อ!'}
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -2483,10 +2654,55 @@ export default function Arena3DPage() {
                   required
                   autoFocus
                   value={signInUsername}
-                  onChange={(e) => setSignInUsername(e.target.value)}
+                  onChange={(e) => {
+                    setSignInUsername(e.target.value);
+                    if (signInError) setSignInError('');
+                  }}
+                  placeholder="พิมพ์ชื่อ หรือเลือกจากด้านล่าง..."
                   className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2.5 font-bold text-base"
                 />
               </div>
+
+              {players.length > 0 && (() => {
+                const q = signInUsername.trim().toLowerCase();
+                const matched = q
+                  ? players.filter((pl) => pl.name.toLowerCase().includes(q))
+                  : players;
+                if (matched.length === 0) return null;
+                return (
+                  <div className="bg-[#FFFDF7] border-2 border-black rounded-xl p-2.5">
+                    <div className="text-[11px] font-bold text-zinc-600 mb-1.5">
+                      ผู้เล่นที่สร้างไว้แล้ว (คลิกเพื่อเลือก):
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                      {matched.map((pl) => {
+                        const isSelected = signInUsername.trim().toLowerCase() === pl.name.toLowerCase();
+                        return (
+                          <button
+                            key={pl.id}
+                            type="button"
+                            onClick={() => {
+                              setSignInUsername(pl.name);
+                              setSignInError('');
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border-2 border-black text-xs font-extrabold cursor-pointer transition ${
+                              isSelected
+                                ? 'bg-[#FFE600] text-black'
+                                : 'bg-white hover:bg-[#FEF08A] text-black'
+                            }`}
+                          >
+                            <span>{pl.emoji}</span>
+                            <span>{pl.name}</span>
+                            <span className="text-[10px] opacity-70">
+                              {pl.role === 'spectator' ? '👀' : '🔥'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {signInError && (
                 <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
@@ -2514,18 +2730,70 @@ export default function Arena3DPage() {
           {nearbySpectator && (
             <div className="flex flex-col items-center gap-2">
               {isPairMenuOpen && (
-                <div className="neo-card bg-white rounded-2xl p-2.5 grid grid-cols-2 sm:grid-cols-3 gap-1.5 shadow-[4px_4px_0px_#18181B]">
-                  {GROUP_PAIR_ACTIVITIES.map((act) => (
+                <div className="neo-card bg-white rounded-2xl p-2.5 space-y-2 shadow-[4px_4px_0px_#18181B]">
+                  {(() => {
+                    const nearMesh = charMeshesRef.current.find((m) => m.id === nearbySpectator.id);
+                    if (!nearMesh) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const walker = players.find((pl) => pl.id === walkingSpectatorId);
+                          setPairedActivities((prev) => {
+                            const next = {
+                              ...prev,
+                              [walkingSpectatorId]: {
+                                animType: nearMesh.workoutType,
+                                label: nearMesh.activityLabel,
+                              },
+                            };
+                            try {
+                              localStorage.setItem(
+                                `waist_paired_activities_${getBangkok7AmDayKey()}`,
+                                JSON.stringify(next)
+                              );
+                            } catch {
+                              // ignore
+                            }
+                            return next;
+                          });
+                          setIsPairMenuOpen(false);
+                          confetti({ particleCount: 40, spread: 55, origin: { y: 0.7 } });
+                          showToast(
+                            '👯',
+                            'ก๊อปปี้ท่าเพื่อนสำเร็จ!',
+                            `${walker?.name || ''} ทำ ${nearMesh.activityLabel} ตาม ${nearbySpectator.name} แล้ว!`
+                          );
+                        }}
+                        className="w-full border-2 border-black bg-[#38BDF8] hover:bg-[#7dd3fc] text-black rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer transition"
+                      >
+                        👯 ทำตาม {nearbySpectator.name}: {nearMesh.activityLabel}
+                      </button>
+                    );
+                  })()}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {GROUP_PAIR_ACTIVITIES.map((act) => (
                     <button
                       key={act.animType}
                       type="button"
                       onClick={() => {
                         const walker = players.find((pl) => pl.id === walkingSpectatorId);
-                        setPairedActivities((prev) => ({
-                          ...prev,
-                          [walkingSpectatorId]: { animType: act.animType, label: act.label },
-                          [nearbySpectator.id]: { animType: act.animType, label: act.label },
-                        }));
+                        setPairedActivities((prev) => {
+                          const next = {
+                            ...prev,
+                            [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                            [nearbySpectator.id]: { animType: act.animType, label: act.label },
+                          };
+                          try {
+                            localStorage.setItem(
+                              `waist_paired_activities_${getBangkok7AmDayKey()}`,
+                              JSON.stringify(next)
+                            );
+                          } catch {
+                            // ignore
+                          }
+                          return next;
+                        });
                         setIsPairMenuOpen(false);
                         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
                         showToast(
@@ -2539,6 +2807,7 @@ export default function Arena3DPage() {
                       {act.label}
                     </button>
                   ))}
+                  </div>
                 </div>
               )}
               <button
@@ -2551,14 +2820,27 @@ export default function Arena3DPage() {
             </div>
           )}
 
-          <div className="neo-card bg-[#18181B] text-white rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-center gap-3">
+          <div className="neo-card bg-[#18181B] text-white rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-center gap-2.5">
             <span className="text-xs font-extrabold text-[#BEF264]">
               🚶 เดินเล่น: {players.find((pl) => pl.id === walkingSpectatorId)?.emoji}{' '}
               {players.find((pl) => pl.id === walkingSpectatorId)?.name}
             </span>
-            <span className="text-[11px] text-zinc-300 hidden sm:inline">
-              กด WASD / ลูกศร หรือแตะพื้นเพื่อเดิน
-            </span>
+            <input
+              type="text"
+              maxLength={60}
+              placeholder="💬 พิมพ์คำพูดบนหัว..."
+              value={quickStatusInput}
+              onChange={(e) => handleQuickStatusChange(e.target.value)}
+              className="bg-white text-black border-2 border-white rounded-lg px-2.5 py-1 text-xs font-semibold w-40 sm:w-48"
+            />
+            <button
+              type="button"
+              onClick={() => openRadialActivityMenu(window.innerWidth / 2, window.innerHeight / 2)}
+              className="bg-[#38BDF8] text-black border-2 border-white rounded-lg px-2.5 py-1 text-xs font-extrabold cursor-pointer"
+              title="สุ่มเปลี่ยนกิจกรรม"
+            >
+              🎡 กิจกรรม
+            </button>
             <button
               type="button"
               onClick={() => setWalkingSpectatorId(null)}
@@ -2570,21 +2852,56 @@ export default function Arena3DPage() {
         </div>
       )}
 
-      <div
-        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 pointer-events-none ${
-          toast.show ? 'translate-y-0 opacity-100' : 'translate-y-24 opacity-0'
-        }`}
-      >
-        <div className="bg-[#18181B] text-white border-2 border-black shadow-[4px_4px_0px_#FF4D8D] rounded-2xl px-4 py-3 flex items-center gap-3">
-          <span className="text-2xl">{toast.emoji}</span>
-          <div>
-            <div className="font-[family-name:var(--font-kanit)] font-extrabold text-sm text-[#BEF264]">
-              {toast.title}
+      {radialMenu && (
+        <div
+          className="fixed inset-0 z-50"
+          onClick={() => setRadialMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setRadialMenu(null);
+          }}
+        >
+          <div
+            className="absolute"
+            style={{ left: radialMenu.x, top: radialMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative -translate-x-1/2 -translate-y-1/2 w-[260px] h-[260px] rounded-full bg-black/25 backdrop-blur-xs border-2 border-dashed border-black/40 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => openRadialActivityMenu(radialMenu.x, radialMenu.y)}
+                className="w-16 h-16 rounded-full bg-[#FFE600] border-3 border-black shadow-[3px_3px_0px_#18181B] font-extrabold text-xs flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition z-10"
+              >
+                <span className="text-lg leading-none">🎲</span>
+                <span className="text-[10px]">สุ่มใหม่</span>
+              </button>
+              {radialMenu.options.map((act, i) => {
+                const angle = (i / radialMenu.options.length) * Math.PI * 2 - Math.PI / 2;
+                const radius = 92;
+                const bx = Math.cos(angle) * radius;
+                const by = Math.sin(angle) * radius;
+                const icon = act.label.split(' ')[0];
+                const shortText = act.label.split(' ').slice(1).join(' ');
+                return (
+                  <button
+                    key={`${act.animType}-${i}`}
+                    type="button"
+                    onClick={() => applySpectatorActivity(act)}
+                    style={{ transform: `translate(${bx}px, ${by}px)` }}
+                    className="absolute w-20 h-20 rounded-full bg-white hover:bg-[#A3E635] border-3 border-black shadow-[3px_3px_0px_#18181B] flex flex-col items-center justify-center p-1 cursor-pointer transition hover:scale-110"
+                  >
+                    <span className="text-xl leading-none">{icon}</span>
+                    <span className="text-[9px] font-extrabold text-black leading-tight text-center line-clamp-2 mt-0.5">
+                      {shortText}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="text-xs text-zinc-200">{toast.text}</div>
           </div>
         </div>
-      </div>
+      )}
+
     </div>
   );
 }

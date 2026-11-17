@@ -124,6 +124,7 @@ export async function PATCH(req: Request) {
       role,
       startWeight,
       goalWeight,
+      statusText,
     } = await req.json();
 
     if (!userId || (!isSelf && !pinCode)) {
@@ -174,10 +175,12 @@ export async function PATCH(req: Request) {
       typeof petType === 'string' && ALLOWED_PETS.has(petType)
         ? petType
         : String(user.pet_type || 'none');
+    const nextStatus =
+      typeof statusText === 'string' ? statusText.trim().slice(0, 60) : String(user.status_text || '');
 
     await turso.execute({
-      sql: 'UPDATE users SET name = ?, avatar_emoji = ?, color_hex = ?, accessory = ?, band_color = ?, role = ?, workout_type = ?, pet_type = ?, start_weight = ?, goal_weight = ? WHERE id = ?',
-      args: [nextName, nextEmoji, nextColor, nextAccessory, nextBandColor, nextRole, nextWorkout, nextPet, nextStart, nextGoal, userId],
+      sql: 'UPDATE users SET name = ?, avatar_emoji = ?, color_hex = ?, accessory = ?, band_color = ?, role = ?, workout_type = ?, pet_type = ?, status_text = ?, start_weight = ?, goal_weight = ? WHERE id = ?',
+      args: [nextName, nextEmoji, nextColor, nextAccessory, nextBandColor, nextRole, nextWorkout, nextPet, nextStatus, nextStart, nextGoal, userId],
     });
 
     if (nextRole === 'competitor') {

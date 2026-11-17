@@ -82,6 +82,7 @@ export async function GET() {
       role: u.role === 'spectator' ? 'spectator' : 'competitor',
       workoutType: u.workout_type ? String(u.workout_type) : 'cheer',
       petType: u.pet_type ? String(u.pet_type) : 'none',
+      statusText: u.status_text ? String(u.status_text) : '',
       startWeight: Number(u.start_weight),
       currentWeight: Number(u.current_weight),
       goalWeight: Number(u.goal_weight),
