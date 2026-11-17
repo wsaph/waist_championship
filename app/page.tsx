@@ -378,13 +378,62 @@ export default function Arena3DPage() {
         }
       })
       .on('broadcast', { event: 'activity' }, ({ payload }) => {
-        if (!payload || typeof payload.userId !== 'number') return;
-        setPairedActivities((prev) => ({
-          ...prev,
-          [payload.userId]: { animType: payload.animType, label: payload.label },
-        }));
+        if (!payload) return;
+        const incoming: Record<number, { animType: string; label: string }> = {};
+        if (payload.updates && typeof payload.updates === 'object') {
+          Object.entries(payload.updates).forEach(([k, v]: [string, any]) => {
+            const uid = Number(k);
+            if (!Number.isNaN(uid) && v && typeof v.animType === 'string' && typeof v.label === 'string') {
+              incoming[uid] = { animType: v.animType, label: v.label };
+            }
+          });
+        } else if (typeof payload.userId === 'number' && typeof payload.animType === 'string') {
+          incoming[payload.userId] = { animType: payload.animType, label: payload.label };
+        }
+        if (Object.keys(incoming).length === 0) return;
+        setPairedActivities((prev) => {
+          const next = { ...prev, ...incoming };
+          try {
+            localStorage.setItem(`waist_paired_activities_${getBangkok7AmDayKey()}`, JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
+        });
       })
-      .subscribe();
+      .on('broadcast', { event: 'hello' }, () => {
+        const myId = walkingSpectatorIdRef.current;
+        if (myId === null) return;
+        const myMesh = charMeshesRef.current.find((m) => m.id === myId);
+        if (myMesh) {
+          channel.send({
+            type: 'broadcast',
+            event: 'move',
+            payload: {
+              userId: myId,
+              x: Number(myMesh.rootGroup.position.x.toFixed(2)),
+              y: Number(myMesh.rootGroup.position.y.toFixed(2)),
+              z: Number(myMesh.rootGroup.position.z.toFixed(2)),
+              rotY: Number(myMesh.rootGroup.rotation.y.toFixed(2)),
+              isWalking: false,
+            },
+          });
+          channel.send({
+            type: 'broadcast',
+            event: 'activity',
+            payload: {
+              userId: myId,
+              animType: myMesh.workoutType,
+              label: myMesh.activityLabel,
+            },
+          });
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channel.send({ type: 'broadcast', event: 'hello', payload: {} });
+        }
+      });
 
     realtimeChannelRef.current = channel;
 
@@ -2930,12 +2979,12 @@ export default function Arena3DPage() {
                         realtimeChannelRef.current?.send({
                           type: 'broadcast',
                           event: 'activity',
-                          payload: { userId: walkingSpectatorId, animType: act.animType, label: act.label },
-                        });
-                        realtimeChannelRef.current?.send({
-                          type: 'broadcast',
-                          event: 'activity',
-                          payload: { userId: nearbySpectator.id, animType: act.animType, label: act.label },
+                          payload: {
+                            updates: {
+                              [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                              [nearbySpectator.id]: { animType: act.animType, label: act.label },
+                            },
+                          },
                         });
                         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
                         showToast(
