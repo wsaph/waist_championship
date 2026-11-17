@@ -1411,38 +1411,37 @@ export default function Arena3DPage() {
               guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
             }
           }
-          return;
-        }
-
-        const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
-        if (remoteState) {
-          c.targetPos.set(remoteState.x, remoteState.y, remoteState.z);
-          c.rootGroup.position.lerp(c.targetPos, 0.18);
-          let rotDiff = remoteState.rotY - c.rootGroup.rotation.y;
-          while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-          while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-          c.rootGroup.rotation.y += rotDiff * 0.22;
         } else {
-          c.rootGroup.position.lerp(c.targetPos, 0.06);
-        }
-        c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
-        const isRubbed = now < c.rubbedUntil;
-        const jiggle = isRubbed ? Math.sin(elapsed * 22) * 0.05 : 0;
-        const nextScale = c.currentBellyScale + jiggle;
-        setCharacterExpression(c, isRubbed ? (c.isCloseToFinish ? 'angry' : 'happy') : 'normal');
-        const isRemoteWalking =
-          Boolean(remoteState) &&
-          ((remoteState!.isWalking && now - remoteState!.updatedAt < 450) ||
-            c.rootGroup.position.distanceTo(c.targetPos) > 0.12);
-        if (isRemoteWalking) {
-          c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
-          c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
-          c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
-          c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
-          c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
-          c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
-        } else {
-          animateCharacterMotion(c, elapsed, idx, nextScale);
+          const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
+          if (remoteState) {
+            c.targetPos.set(remoteState.x, remoteState.y, remoteState.z);
+            c.rootGroup.position.lerp(c.targetPos, 0.18);
+            let rotDiff = remoteState.rotY - c.rootGroup.rotation.y;
+            while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+            while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+            c.rootGroup.rotation.y += rotDiff * 0.22;
+          } else {
+            c.rootGroup.position.lerp(c.targetPos, 0.06);
+          }
+          c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
+          const isRubbed = now < c.rubbedUntil;
+          const jiggle = isRubbed ? Math.sin(elapsed * 22) * 0.05 : 0;
+          const nextScale = c.currentBellyScale + jiggle;
+          setCharacterExpression(c, isRubbed ? (c.isCloseToFinish ? 'angry' : 'happy') : 'normal');
+          const isRemoteWalking =
+            Boolean(remoteState) &&
+            ((remoteState!.isWalking && now - remoteState!.updatedAt < 450) ||
+              c.rootGroup.position.distanceTo(c.targetPos) > 0.12);
+          if (isRemoteWalking) {
+            c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
+            c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
+            c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
+            c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
+            c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
+            c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+          } else {
+            animateCharacterMotion(c, elapsed, idx, nextScale);
+          }
         }
         if (c.petParts) {
           animatePetMotion(c.petParts, c, c.petType, c.isCloseToFinish, elapsed, idx);
