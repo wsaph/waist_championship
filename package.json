@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "download-models": "node scripts/download-models.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",

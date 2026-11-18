@@ -135,3 +135,53 @@ export function getDailySpectatorActivity(
   const idx = hashString(`${dayKey}-user-${userId}`) % list.length;
   return list[idx];
 }
+
+export interface FoodStallSlackerActivity {
+  statusBadge: string;
+  label: string;
+  animType: SpectatorActivity['animType'];
+}
+
+export const FOOD_STALL_SLACKER_ACTIVITIES: FoodStallSlackerActivity[] = [
+  {
+    statusBadge: '🍖 ตบะแตกอยู่ซุ้มอาหาร',
+    label: '😴 อิ่มจุกนอนกลิ้งผึ่งพุง',
+    animType: 'food_roll',
+  },
+  {
+    statusBadge: '🍲 หนีวิ่งมาเฝ้าซุ้มอาหาร',
+    label: '🍲 นั่งซดชาบูหม้อไฟริมหาด',
+    animType: 'picnic_shabu',
+  },
+  {
+    statusBadge: '🍕 ตบะแตกอยู่ซุ้มอาหาร',
+    label: '🍕 กินพิซซ่าชีสเยิ้มไม่สนลู่วิ่ง',
+    animType: 'eat_pizza',
+  },
+  {
+    statusBadge: '😴 พักพุงยาวที่ซุ้มอาหาร',
+    label: '😴 นอนกลิ้งย่อยบุฟเฟต์ชิลๆ',
+    animType: 'food_roll',
+  },
+  {
+    statusBadge: '🧋 แวะเติมหวานซุ้มอาหาร',
+    label: '🧋 ดูดชานมไข่มุกหวาน 100%',
+    animType: 'boba_tea',
+  },
+  {
+    statusBadge: '🍖 ตบะแตกอยู่ซุ้มอาหาร',
+    label: '📱 นอนไถมือถือสั่งของกินเพิ่ม',
+    animType: 'phone_scroll',
+  },
+];
+
+export function getFoodStallSlackerActivity(
+  userId: number,
+  slotIndex = 0
+): FoodStallSlackerActivity {
+  const dayKey = getBangkok7AmDayKey();
+  const idx =
+    (hashString(`${dayKey}-slacker-${userId}`) + slotIndex) %
+    FOOD_STALL_SLACKER_ACTIVITIES.length;
+  return FOOD_STALL_SLACKER_ACTIVITIES[idx];
+}

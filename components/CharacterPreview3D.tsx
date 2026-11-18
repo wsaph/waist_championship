@@ -88,11 +88,15 @@ export default function CharacterPreview3D({
 
     const clock = new THREE.Clock();
     let frameId: number;
+    let elapsed = 0;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
+      const delta = Math.min(0.05, clock.getDelta());
+      elapsed += delta;
       const state = activePartsRef.current;
       if (state.charParts) {
+        state.charParts.mixer?.update(delta);
+        state.petParts?.mixer?.update(delta);
         animateCharacterMotion(
           { ...state.charParts, isSpectator: state.isSpectator, workoutType: state.workoutType },
           elapsed,

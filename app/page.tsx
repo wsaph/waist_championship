@@ -9,15 +9,22 @@ import { Trophy, Scale, UserPlus } from 'lucide-react';
 import {
   buildCharacterMesh,
   animateCharacterMotion,
+  syncCharacterMountPose,
   setCharacterExpression,
+  resolveRpgAnimPatterns,
   buildPetMesh,
   animatePetMotion,
-  buildFlowerMesh,
+  buildFireOrbProjectileMesh,
+  buildFireEmberPileMesh,
   buildFoodPileMesh,
   buildDeliveryRider,
+  buildCustomGuardCharacter,
+  buildFantasyArenaDecor,
 } from '@/lib/character_3d';
+import { resolvePowerBoostMeta } from '@/lib/power_boost';
 import {
   getDailySpectatorActivity,
+  getFoodStallSlackerActivity,
   isEatPath,
   getBangkok7AmDayKey,
   FIT_ACTIVITIES,
@@ -25,7 +32,18 @@ import {
   type SpectatorActivity,
 } from '@/lib/spectator_activities';
 import { startBgm, stopBgm } from '@/lib/bgm';
-import CharacterPreview3D from '@/components/CharacterPreview3D';
+import {
+  computeGoalProgress,
+  getGoalTypeMeta,
+  resolveBreedOption,
+  type GoalType,
+  type ShopCategory,
+  type ShopItem,
+} from '@/lib/rpg_catalog';
+import {
+  WardrobeShopModal,
+  LoginGateModal,
+} from '@/lib/WardrobeAndAdminModals';
 
 interface Player {
   id: number;
@@ -38,9 +56,29 @@ interface Player {
   workoutType?: string;
   petType?: string;
   statusText?: string;
-  startWeight: number;
-  currentWeight: number;
-  goalWeight: number;
+  startWeight?: number;
+  currentWeight?: number;
+  goalWeight?: number;
+  goalType?: GoalType;
+  startVal?: number;
+  currentVal?: number;
+  targetVal?: number;
+  progressPct?: number;
+  diffLabel?: string;
+  isInFoodStall?: boolean;
+  points?: number;
+  species?: string;
+  breed?: string;
+  themeId?: string;
+  equipHat?: string;
+  equipFace?: string;
+  equipArmor?: string;
+  equipWeapon?: string;
+  equipWings?: string;
+  equipAura?: string;
+  equipPetGear?: string;
+  equipMount?: string;
+  unlockedItems?: string[];
   taunt: string;
   cheerCount?: number;
   temptCount?: number;
@@ -48,6 +86,7 @@ interface Player {
   pctLost?: number;
   progressRatio?: number;
   bellyScale?: number;
+  muscleScale?: number;
 }
 
 interface FeedItem {
@@ -163,15 +202,27 @@ export default function Arena3DPage() {
 
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinMode, setJoinMode] = useState<'create' | 'edit'>('create');
+  const [wardrobeInitialTab, setWardrobeInitialTab] = useState<ShopCategory | 'gacha'>('armor');
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
   const [joinRole, setJoinRole] = useState<'competitor' | 'spectator'>('competitor');
-  const [joinWorkout, setJoinWorkout] = useState('fit');
+  const [joinWorkout, setJoinWorkout] = useState<'fit' | 'eat'>('fit');
   const [joinPet, setJoinPet] = useState('none');
   const [joinName, setJoinName] = useState('');
-  const [joinEmoji, setJoinEmoji] = useState('🦊');
-  const [joinColor, setJoinColor] = useState('#38BDF8');
+  const [joinEmoji, setJoinEmoji] = useState('🐰');
+  const [joinColor, setJoinColor] = useState('#F8FAFC');
   const [joinAccessory, setJoinAccessory] = useState('headband');
   const [joinBandColor, setJoinBandColor] = useState('#FFE600');
+  const [joinSpecies, setJoinSpecies] = useState('bunny');
+  const [joinThemeId, setJoinThemeId] = useState('none');
+  const [joinEquipHat, setJoinEquipHat] = useState('none');
+  const [joinEquipFace, setJoinEquipFace] = useState('face_none');
+  const [joinEquipArmor, setJoinEquipArmor] = useState('armor_none');
+  const [joinEquipWeapon, setJoinEquipWeapon] = useState('weapon_none');
+  const [joinEquipWings, setJoinEquipWings] = useState('wings_none');
+  const [joinEquipAura, setJoinEquipAura] = useState('aura_none');
+  const [joinEquipPetGear, setJoinEquipPetGear] = useState('pet_none');
+  const [joinEquipMount, setJoinEquipMount] = useState('mount_none');
+  const [joinGoalType, setJoinGoalType] = useState<GoalType>('weight_loss');
   const [joinPin, setJoinPin] = useState('');
   const [joinStatus, setJoinStatus] = useState('');
   const [quickStatusInput, setQuickStatusInput] = useState('');
@@ -250,66 +301,203 @@ export default function Arena3DPage() {
   const savedSpectatorPosRef = useRef<Record<number, { x: number; y: number; z: number; rotY: number }>>({});
   const savedCameraPosRef = useRef<THREE.Vector3 | null>(null);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const localBroadcastRef = useRef<BroadcastChannel | null>(null);
+  const playersRef = useRef<Player[]>([]);
+  const openEditModalRef = useRef<(p: Player) => void>(() => {});
+  const fetchArenaDataRef = useRef<(opts?: { force?: boolean; viewerId?: number | null }) => Promise<void>>(
+    async () => {}
+  );
+  const lastDataSignatureRef = useRef<string>('');
+  const clientInstanceIdRef = useRef<string>(
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
   const remoteSpectatorStateRef = useRef<
     Record<number, { x: number; y: number; z: number; rotY: number; isWalking: boolean; updatedAt: number }>
   >({});
   const lastMoveBroadcastAtRef = useRef<number>(0);
+  const lastLocalEjectAtRef = useRef<number>(0);
   const wasWalkingRef = useRef<boolean>(false);
 
-  const showToast = (emoji: string, title: string, text: string) => {
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+
+  const showToast = useCallback((emoji: string, title: string, text: string) => {
     setToast({ show: true, emoji, title, text });
     setTimeout(() => setToast((t) => ({ ...t, show: false })), 4000);
-  };
+  }, []);
 
-  const fetchArenaData = useCallback(async () => {
-    try {
-      const res = await fetch('/api/weights');
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : {};
-      if (!res.ok) {
-        console.error('Failed to fetch /api/weights:', data?.error || res.statusText);
-        return;
-      }
-      if (data.participants) {
-        setPlayers(data.participants);
-        try {
-      const savedPosStr = localStorage.getItem('waist_spectator_positions');
-      if (savedPosStr) {
-        savedSpectatorPosRef.current = JSON.parse(savedPosStr);
-      }
-      const savedPairStr = localStorage.getItem(`waist_paired_activities_${getBangkok7AmDayKey()}`);
-      if (savedPairStr) {
-        setPairedActivities(JSON.parse(savedPairStr));
-      }
-    } catch {
-      // ignore invalid storage
-    }
-    const savedId = localStorage.getItem('waist_user_id');
-        if (savedId) {
-          const me = (data.participants as Player[]).find((p) => p.id === Number(savedId));
-          if (!me) {
-            localStorage.removeItem('waist_user_id');
-            setCurrentUserId(null);
-            setWalkingSpectatorId(null);
-          } else if (walkingSpectatorIdRef.current === null && me.role === 'spectator') {
-            setWalkingSpectatorId(me.id);
+  const fetchArenaData = useCallback(
+    async (opts?: { force?: boolean; viewerId?: number | null }) => {
+      try {
+        const activeViewerId =
+          opts?.viewerId !== undefined
+            ? Number(opts.viewerId || 0)
+            : Number(localStorage.getItem('waist_user_id') || 0);
+        const query = activeViewerId > 0 ? `?viewerId=${activeViewerId}` : '';
+        const res = await fetch(`/api/weights${query}`, { cache: 'no-store' });
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!res.ok) {
+          console.error('Failed to fetch /api/weights:', data?.error || res.statusText);
+          return;
+        }
+
+        const nextParticipants: Player[] = Array.isArray(data.participants) ? data.participants : [];
+
+        // ซิงก์ข้อความ Speech Bubble บนหัวแบบสดๆ ใน DOM ทันที แม้ยังไม่ต้องสร้างฉาก 3D ใหม่
+        nextParticipants.forEach((p) => {
+          const meshEntry = charMeshesRef.current.find((m) => m.id === p.id);
+          const bubbleEl = meshEntry?.tagEl?.querySelector('[data-speech-bubble]') as HTMLElement | null;
+          if (bubbleEl && p.id !== walkingSpectatorIdRef.current) {
+            const trimmed = (p.statusText || '').trim();
+            if (trimmed) {
+              bubbleEl.textContent = `💬 ${trimmed}`;
+              bubbleEl.classList.remove('hidden');
+            } else {
+              bubbleEl.textContent = '';
+              bubbleEl.classList.add('hidden');
+            }
+          }
+          // หากผู้เล่นเปลี่ยนบทบาทจากผู้ชม (spectator) เป็นผู้เข้าแข่งขัน (competitor) ให้ล้างพิกัดเดินเล่นเก่าออก
+          if (p.role !== 'spectator') {
+            delete remoteSpectatorStateRef.current[p.id];
+            delete savedSpectatorPosRef.current[p.id];
+          }
+        });
+
+        // สร้างลายเซ็นข้อมูล (Data Signature) เพื่อตรวจว่ามีอะไรเปลี่ยนจริงหรือไม่ ป้องกันการกระพริบตอน Polling
+        const fullSig = JSON.stringify({
+          viewerId: activeViewerId,
+          participants: nextParticipants.map((p) => [
+            p.id,
+            p.name,
+            p.emoji,
+            p.colorHex,
+            p.bandColor,
+            p.accessory,
+            p.role,
+            p.workoutType,
+            p.petType,
+            p.statusText,
+            p.goalType,
+            p.startVal,
+            p.currentVal,
+            p.targetVal,
+            p.progressPct,
+            p.points,
+            p.species,
+            p.breed,
+            p.themeId,
+            p.equipHat,
+            p.equipFace,
+            p.equipArmor,
+            p.equipWeapon,
+            p.equipWings,
+            p.equipAura,
+            p.equipPetGear,
+            p.equipMount,
+            p.cheerCount,
+            p.temptCount,
+            p.taunt,
+            (p.unlockedItems || []).length,
+          ]),
+        });
+
+        if (!opts?.force && fullSig === lastDataSignatureRef.current) {
+          return;
+        }
+        lastDataSignatureRef.current = fullSig;
+
+        if (data.participants) {
+          try {
+            const savedPosStr = localStorage.getItem('waist_spectator_positions');
+            if (savedPosStr) {
+              const parsedPos = JSON.parse(savedPosStr);
+              // Merge โดยไม่ทับพิกัดสดของผู้เล่นอื่นที่เพิ่งเดินผ่าน Realtime
+              savedSpectatorPosRef.current = {
+                ...parsedPos,
+                ...savedSpectatorPosRef.current,
+              };
+            }
+            const savedPairStr = localStorage.getItem(`waist_paired_activities_${getBangkok7AmDayKey()}`);
+            if (savedPairStr) {
+              setPairedActivities((prev) => ({ ...JSON.parse(savedPairStr), ...prev }));
+            }
+          } catch {
+            // ignore invalid storage
+          }
+
+          setPlayers(nextParticipants);
+
+          const savedId = localStorage.getItem('waist_user_id');
+          if (savedId) {
+            const me = nextParticipants.find((p) => p.id === Number(savedId));
+            if (!me) {
+              localStorage.removeItem('waist_user_id');
+              setCurrentUserId(null);
+              setWalkingSpectatorId(null);
+            } else if (me.role === 'spectator' && walkingSpectatorIdRef.current === null) {
+              setWalkingSpectatorId(me.id);
+            } else if (me.role !== 'spectator' && walkingSpectatorIdRef.current === me.id) {
+              setWalkingSpectatorId(null);
+            }
+          }
+          const comps = nextParticipants.filter((p) => p.role !== 'spectator');
+          if (comps.length > 0) {
+            setSelectedPlayerId((prev) => (comps.some((p) => p.id === prev) ? prev : comps[0].id));
+            setBoardTargetId((prev) => (comps.some((p) => p.id === prev) ? prev : comps[0].id));
           }
         }
-        const competitors = (data.participants as Player[]).filter((p) => p.role !== 'spectator');
-        if (competitors.length > 0) {
-          setSelectedPlayerId((prev) =>
-            competitors.some((p) => p.id === prev) ? prev : competitors[0].id
-          );
-          setBoardTargetId((prev) =>
-            competitors.some((p) => p.id === prev) ? prev : competitors[0].id
-          );
+        if (data.feed && Array.isArray(data.feed) && data.feed.length > 0) {
+          setRoastFeed(data.feed);
         }
+      } catch (e) {
+        console.error(e);
       }
-      if (data.feed) setRoastFeed(data.feed);
-    } catch (e) {
-      console.error(e);
+    },
+    []
+  );
+
+  useEffect(() => {
+    fetchArenaDataRef.current = fetchArenaData;
+  }, [fetchArenaData]);
+
+  const broadcastRealtimeEvent = useCallback((event: string, payload: Record<string, any>) => {
+    const enriched = { ...payload, _senderInstance: clientInstanceIdRef.current };
+    realtimeChannelRef.current?.send({
+      type: 'broadcast',
+      event,
+      payload: enriched,
+    });
+    try {
+      localBroadcastRef.current?.postMessage({ event, payload: enriched });
+    } catch {
+      // ignore closed channel
     }
   }, []);
+
+  const broadcastArenaSync = useCallback(
+    (
+      reason: 'user_created' | 'user_updated' | 'weight_logged' | 'shop_updated',
+      meta?: {
+        actorId?: number | null;
+        actorName?: string;
+        actorEmoji?: string;
+        detail?: string;
+      }
+    ) => {
+      broadcastRealtimeEvent('arena_sync', {
+        reason,
+        actorId: meta?.actorId ?? currentUserId,
+        actorName: meta?.actorName ?? '',
+        actorEmoji: meta?.actorEmoji ?? '✨',
+        detail: meta?.detail ?? '',
+        ts: Date.now(),
+      });
+    },
+    [broadcastRealtimeEvent, currentUserId]
+  );
 
   useEffect(() => {
     if (window.innerWidth < 768) {
@@ -334,7 +522,7 @@ export default function Arena3DPage() {
       setBoardSenderId(String(uid));
     }
     setAuthChecked(true);
-    fetchArenaData();
+    fetchArenaData({ force: true });
   }, [fetchArenaData]);
 
   useEffect(() => {
@@ -348,21 +536,14 @@ export default function Arena3DPage() {
   }, [walkingSpectatorId]);
 
   useEffect(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) return;
+    const handleIncomingRealtimeEvent = (event: string, payload: any) => {
+      if (!payload) return;
+      if (payload._senderInstance && payload._senderInstance === clientInstanceIdRef.current) {
+        return;
+      }
 
-    const supabase = createClient(url, key, {
-      realtime: { params: { eventsPerSecond: 20 } },
-    });
-
-    const channel = supabase.channel('waist-arena-live', {
-      config: { broadcast: { self: false } },
-    });
-
-    channel
-      .on('broadcast', { event: 'move' }, ({ payload }) => {
-        if (!payload || typeof payload.userId !== 'number') return;
+      if (event === 'move') {
+        if (typeof payload.userId !== 'number') return;
         if (payload.userId === walkingSpectatorIdRef.current) return;
         remoteSpectatorStateRef.current[payload.userId] = {
           x: payload.x,
@@ -378,9 +559,47 @@ export default function Arena3DPage() {
           z: payload.z,
           rotY: payload.rotY ?? 0,
         };
-      })
-      .on('broadcast', { event: 'status' }, ({ payload }) => {
-        if (!payload || typeof payload.userId !== 'number') return;
+      } else if (event === 'guard_eject') {
+        if (typeof payload.userId !== 'number') return;
+        const ejX = Number(payload.x);
+        const ejY = Number(payload.y ?? 0.2);
+        const ejZ = Number(payload.z);
+        const ejRot = Number(payload.rotY ?? 0);
+        savedSpectatorPosRef.current[payload.userId] = { x: ejX, y: ejY, z: ejZ, rotY: ejRot };
+        remoteSpectatorStateRef.current[payload.userId] = {
+          x: ejX,
+          y: ejY,
+          z: ejZ,
+          rotY: ejRot,
+          isWalking: false,
+          updatedAt: performance.now(),
+        };
+        const targetMesh = charMeshesRef.current.find((m) => m.id === payload.userId);
+        if (targetMesh) {
+          targetMesh.rootGroup.position.set(ejX, ejY, ejZ);
+          targetMesh.targetPos.set(ejX, ejY, ejZ);
+          targetMesh.rootGroup.rotation.y = ejRot;
+        }
+        if (payload.userId === walkingSpectatorIdRef.current) {
+          walkTargetRef.current = null;
+          const nowT = performance.now();
+          if (nowT - lastLocalEjectAtRef.current > 900) {
+            lastLocalEjectAtRef.current = nowT;
+            setShakeScreen(true);
+            setTimeout(() => setShakeScreen(false), 450);
+            if (payload.mode === 'food') {
+              showToast(
+                '🍖',
+                'โดนพี่ยามปาอาหารอัดกระเด็น!',
+                'แห่เข้าสนามพร้อมกันหลายคน พี่ยามเลยสาดหมูกรอบในจานไล่ซะเลย!'
+              );
+            } else {
+              showToast('👮', 'โดนพี่ยามไล่ออกจากสนาม!', 'กรุณาข้ามลู่วิ่งตรงทางม้าลายเท่านั้นนะ!');
+            }
+          }
+        }
+      } else if (event === 'status') {
+        if (typeof payload.userId !== 'number') return;
         const text = String(payload.statusText || '').trim();
         const targetMesh = charMeshesRef.current.find((m) => m.id === payload.userId);
         const bubbleEl = targetMesh?.tagEl?.querySelector('[data-speech-bubble]') as HTMLElement | null;
@@ -393,9 +612,7 @@ export default function Arena3DPage() {
             bubbleEl.classList.add('hidden');
           }
         }
-      })
-      .on('broadcast', { event: 'activity' }, ({ payload }) => {
-        if (!payload) return;
+      } else if (event === 'activity') {
         const incoming: Record<number, { animType: string; label: string }> = {};
         if (payload.updates && typeof payload.updates === 'object') {
           Object.entries(payload.updates).forEach(([k, v]: [string, any]) => {
@@ -417,48 +634,195 @@ export default function Arena3DPage() {
           }
           return next;
         });
-      })
-      .on('broadcast', { event: 'hello' }, () => {
-        const myId = walkingSpectatorIdRef.current;
-        if (myId === null) return;
-        const myMesh = charMeshesRef.current.find((m) => m.id === myId);
-        if (myMesh) {
-          channel.send({
-            type: 'broadcast',
-            event: 'move',
-            payload: {
-              userId: myId,
-              x: Number(myMesh.rootGroup.position.x.toFixed(2)),
-              y: Number(myMesh.rootGroup.position.y.toFixed(2)),
-              z: Number(myMesh.rootGroup.position.z.toFixed(2)),
-              rotY: Number(myMesh.rootGroup.rotation.y.toFixed(2)),
-              isWalking: false,
-            },
-          });
-          channel.send({
-            type: 'broadcast',
-            event: 'activity',
-            payload: {
-              userId: myId,
-              animType: myMesh.workoutType,
-              label: myMesh.activityLabel,
-            },
-          });
+      } else if (event === 'arena_sync') {
+        // ซิงก์ทันทีเมื่อมีผู้เล่นสร้างตัวละครใหม่ เปลี่ยนบทบาท แต่งตัว หรืออัปเดตน้ำหนัก
+        fetchArenaDataRef.current({ force: true });
+
+        if (payload.actorName) {
+          if (payload.reason === 'user_created') {
+            showToast(
+              payload.actorEmoji || '🆕',
+              'ผู้เล่นใหม่เข้าสู่สนาม!',
+              `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail || 'เข้าร่วมอารีน่าแล้ว!'}`
+            );
+          } else if (payload.reason === 'user_updated' && payload.detail) {
+            showToast(
+              payload.actorEmoji || '✨',
+              'อัปเดตตัวละครสด!',
+              `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail}`
+            );
+          } else if (payload.reason === 'weight_logged') {
+            showToast(
+              '⚡',
+              'อัปเดตผลภารกิจสด!',
+              `${payload.actorEmoji || ''} ${payload.actorName} ส่งผลภารกิจใหม่ในสนามแล้ว!`
+            );
+          }
         }
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          channel.send({ type: 'broadcast', event: 'hello', payload: {} });
+      } else if (event === 'interaction') {
+        // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
+        const inter = payload;
+        if (typeof inter.targetUserId === 'number') {
+          setRoastFeed((prev) => [
+            {
+              id: `i-${inter.id || Date.now()}`,
+              type: inter.kind,
+              user: inter.senderName || 'เพื่อนในสนาม',
+              emoji: inter.senderEmoji || '📣',
+              targetName: inter.targetName || '',
+              targetEmoji: inter.targetEmoji || '',
+              giftItem: inter.giftItem || '',
+              roast: inter.message || '',
+              time: new Date().toISOString(),
+            },
+            ...prev,
+          ]);
+          pendingDeliveryRef.current = {
+            targetId: inter.targetUserId,
+            kind: inter.kind === 'tempt' ? 'tempt' : 'cheer',
+            label: `${inter.kind === 'cheer' ? '🔥' : '😈'} ${inter.giftItem || ''}`,
+            startTime: performance.now(),
+          };
+          const nextNet = typeof inter.netPower === 'number' ? inter.netPower : null;
+          if (inter.kind === 'cheer') {
+            if (nextNet === 6) {
+              showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `${inter.senderName} เติมไฟทะลุขีดจำกัด (+6)!`);
+            } else if (nextNet === 3) {
+              showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `${inter.senderName} เติมเชื้อเพลิง ${inter.giftItem}!`);
+            } else {
+              showToast(
+                '🔥',
+                `เติมไฟให้ ${inter.targetName}! (+1)`,
+                `${inter.senderName} ส่ง ${inter.giftItem}`
+              );
+            }
+          } else {
+            if (nextNet === -6) {
+              showToast('🩷', `${inter.targetName} กลายร่างเป็นจอมมารบู!!`, `โดน ${inter.senderName} ขุนของกินทะลุพิกัด (-6)!`);
+            } else if (nextNet === -3) {
+              showToast('💤', `${inter.targetName} ขยายร่างเป็นคาบิก้อน!!`, `โดน ${inter.senderName} ส่ง ${inter.giftItem} จนพุงกาง (-3)!`);
+            } else {
+              showToast(
+                '😈',
+                `มารผจญบุกขุน ${inter.targetName}! (-1)`,
+                `${inter.senderName} ส่ง ${inter.giftItem} ไปล่อถึงที่!`
+              );
+            }
+          }
+          // ซิงก์เกจพลัง +/- จากเซิร์ฟเวอร์ทันทีที่ลูกไฟ/ไรเดอร์ส่งถึงเป้าหมาย
+          setTimeout(() => {
+            fetchArenaDataRef.current({ force: true });
+          }, 1150);
         }
+      }
+    };
+
+    // 1. BroadcastChannel สำหรับซิงก์ข้ามแท็บในเบราว์เซอร์เดียวกันทันที (ทำงานได้แม้ไม่ตั้งค่า Supabase)
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      bc = new BroadcastChannel('waist-arena-local-sync');
+      bc.onmessage = (ev) => {
+        if (ev.data && typeof ev.data.event === 'string') {
+          handleIncomingRealtimeEvent(ev.data.event, ev.data.payload);
+        }
+      };
+      localBroadcastRef.current = bc;
+    }
+
+    // 2. Smart Background Diff-Polling + Tab Focus Sync (รับประกันการอัปเดตสด 100% ทุกกรณีโดยไม่กระพริบ)
+    const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchArenaDataRef.current();
+      }
+    }, 5000);
+
+    const onVisibilityOrFocus = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        fetchArenaDataRef.current();
+      }
+    };
+    window.addEventListener('focus', onVisibilityOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+
+    // 3. Supabase Realtime สำหรับซิงก์ข้ามเครื่องแบบเสี้ยววินาที
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    let supabase: ReturnType<typeof createClient> | null = null;
+    let channel: RealtimeChannel | null = null;
+
+    if (url && key) {
+      supabase = createClient(url, key, {
+        realtime: { params: { eventsPerSecond: 20 } },
       });
 
-    realtimeChannelRef.current = channel;
+      channel = supabase.channel('waist-arena-live', {
+        config: { broadcast: { self: false } },
+      });
+
+      channel
+        .on('broadcast', { event: 'move' }, ({ payload }) => handleIncomingRealtimeEvent('move', payload))
+        .on('broadcast', { event: 'guard_eject' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('guard_eject', payload)
+        )
+        .on('broadcast', { event: 'status' }, ({ payload }) => handleIncomingRealtimeEvent('status', payload))
+        .on('broadcast', { event: 'activity' }, ({ payload }) => handleIncomingRealtimeEvent('activity', payload))
+        .on('broadcast', { event: 'arena_sync' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('arena_sync', payload)
+        )
+        .on('broadcast', { event: 'interaction' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('interaction', payload)
+        )
+        .on('broadcast', { event: 'hello' }, () => {
+          const myId = walkingSpectatorIdRef.current;
+          if (myId === null || !channel) return;
+          const myMesh = charMeshesRef.current.find((m) => m.id === myId);
+          if (myMesh) {
+            channel.send({
+              type: 'broadcast',
+              event: 'move',
+              payload: {
+                userId: myId,
+                x: Number(myMesh.rootGroup.position.x.toFixed(2)),
+                y: Number(myMesh.rootGroup.position.y.toFixed(2)),
+                z: Number(myMesh.rootGroup.position.z.toFixed(2)),
+                rotY: Number(myMesh.rootGroup.rotation.y.toFixed(2)),
+                isWalking: false,
+              },
+            });
+            channel.send({
+              type: 'broadcast',
+              event: 'activity',
+              payload: {
+                userId: myId,
+                animType: myMesh.workoutType,
+                label: myMesh.activityLabel,
+              },
+            });
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED' && channel) {
+            channel.send({ type: 'broadcast', event: 'hello', payload: {} });
+          }
+        });
+
+      realtimeChannelRef.current = channel;
+    }
 
     return () => {
-      realtimeChannelRef.current = null;
-      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+      if (bc) {
+        bc.close();
+        localBroadcastRef.current = null;
+      }
+      if (supabase && channel) {
+        realtimeChannelRef.current = null;
+        supabase.removeChannel(channel);
+      }
     };
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     const getBangkokDayPhase = (): 'dawn' | 'day' | 'dusk' | 'night' => {
@@ -565,22 +929,86 @@ export default function Arena3DPage() {
   const rankedPlayers = React.useMemo(() => {
     return competitors
       .map((p) => {
-        const lostKg = p.startWeight - p.currentWeight;
-        const pctLost = p.startWeight > 0 ? (lostKg / p.startWeight) * 100 : 0;
-        const totalGoalKg = p.startWeight - p.goalWeight;
-        const progressRatio = totalGoalKg > 0 ? Math.max(0, Math.min(1, lostKg / totalGoalKg)) : 0;
-        const weightDiffRatio = p.startWeight > 0 ? (p.currentWeight - p.startWeight) / p.startWeight : 0;
-        const bellyScale = Math.max(0.76, Math.min(1.48, 1.0 + weightDiffRatio * 4.2));
+        const gType = p.goalType || 'weight_loss';
+        const sVal = p.startVal ?? p.startWeight;
+        const cVal = p.currentVal ?? p.currentWeight;
+        const tVal = p.targetVal ?? p.goalWeight;
+        const hasOwnVals =
+          typeof sVal === 'number' && typeof cVal === 'number' && typeof tVal === 'number';
+        const { pct, diffLabel, isInFoodStall } = hasOwnVals
+          ? computeGoalProgress(gType, sVal, cVal, tVal)
+          : {
+              pct: p.progressPct ?? 0,
+              diffLabel: p.diffLabel ?? '',
+              isInFoodStall: Boolean(p.isInFoodStall),
+            };
+        const progressRatio = Math.max(0, Math.min(1, pct / 100));
+        const negRatio = pct < 0 ? Math.min(1, Math.abs(pct) / 45) : 0;
+
+        let bellyScale = 1.0;
+        let muscleScale = 1.0;
+        if (gType === 'weight_loss') {
+          bellyScale = Math.max(0.78, Math.min(1.55, 1.25 - progressRatio * 0.42 + negRatio * 0.25));
+        } else if (gType === 'weight_gain') {
+          bellyScale = Math.max(0.76, Math.min(1.45, 0.86 + progressRatio * 0.45 - negRatio * 0.08));
+        } else if (gType === 'muscle_gain') {
+          bellyScale = isInFoodStall ? 1.18 : 1.04;
+          muscleScale = Math.max(0.92, 1.05 + progressRatio * 0.65 - negRatio * 0.12);
+        } else {
+          bellyScale = 0.94;
+          muscleScale = 1.1 + progressRatio * 0.25;
+        }
 
         return {
           ...p,
-          lostKg: Number(lostKg.toFixed(1)),
-          pctLost: Number(pctLost.toFixed(2)),
+          goalType: gType,
+          progressPct: pct,
+          diffLabel,
+          isInFoodStall,
+          lostKg: hasOwnVals ? Number((sVal - cVal).toFixed(1)) : undefined,
+          pctLost: pct,
           progressRatio,
           bellyScale,
+          muscleScale,
         };
       })
-      .sort((a, b) => (b.pctLost ?? 0) - (a.pctLost ?? 0));
+      .sort((a, b) => (b.progressPct ?? 0) - (a.progressPct ?? 0));
+  }, [competitors]);
+
+  // ลายเซ็นเฉพาะฟิลด์ที่ส่งผลต่อโมเดลและตำแหน่ง 3D ในสนาม เพื่อไม่ให้ฉาก 3D ถูกรีเซ็ตหากเปลี่ยนแค่แต้มหรือข้อความพูดคุย
+  const sceneSignature = React.useMemo(() => {
+    return JSON.stringify(
+      players.map((p) => [
+        p.id,
+        p.name,
+        p.emoji,
+        p.colorHex,
+        p.bandColor,
+        p.accessory,
+        p.role,
+        p.workoutType,
+        p.petType,
+        p.goalType,
+        p.startVal,
+        p.currentVal,
+        p.targetVal,
+        p.progressPct,
+        p.isInFoodStall,
+        p.species,
+        p.breed,
+        p.themeId,
+        p.equipHat,
+        p.equipFace,
+        p.equipArmor,
+        p.equipWeapon,
+        p.equipWings,
+        p.equipAura,
+        p.equipPetGear,
+        p.equipMount,
+        p.cheerCount,
+        p.temptCount,
+      ])
+    );
   }, [players]);
 
   const focusOnCharacter = useCallback((playerId: number) => {
@@ -625,27 +1053,39 @@ export default function Arena3DPage() {
         return next;
       });
       setRadialMenu(null);
-      realtimeChannelRef.current?.send({
-        type: 'broadcast',
-        event: 'activity',
-        payload: { userId: currentUserId, animType: act.animType, label: act.label },
+      broadcastRealtimeEvent('activity', {
+        userId: currentUserId,
+        animType: act.animType,
+        label: act.label,
       });
       showToast('🎡', 'เปลี่ยนกิจกรรมแล้ว!', act.label);
     },
-    [currentUserId]
+    [currentUserId, broadcastRealtimeEvent, showToast]
   );
 
   const openCreateModal = useCallback(() => {
     setJoinMode('create');
+    setWardrobeInitialTab('armor');
     setEditingPlayerId(null);
     setJoinRole('competitor');
     setJoinWorkout('fit');
     setJoinPet('none');
     setJoinName('');
-    setJoinEmoji('🦊');
-    setJoinColor('#38BDF8');
+    setJoinEmoji('🐰');
+    setJoinColor('#F8FAFC');
     setJoinAccessory('headband');
     setJoinBandColor('#FFE600');
+    setJoinSpecies('bunny');
+    setJoinThemeId('none');
+    setJoinEquipHat('hat_red_bow');
+    setJoinEquipFace('face_none');
+    setJoinEquipArmor('armor_snow_dress');
+    setJoinEquipWeapon('weapon_none');
+    setJoinEquipWings('wings_none');
+    setJoinEquipAura('aura_none');
+    setJoinEquipPetGear('pet_none');
+    setJoinEquipMount('mount_none');
+    setJoinGoalType('weight_loss');
     setJoinPin('');
     setJoinStatus('');
     setJoinStart('');
@@ -653,6 +1093,42 @@ export default function Arena3DPage() {
     setJoinError('');
     setIsJoinOpen(true);
   }, []);
+
+  const openWardrobeModal = useCallback(
+    (p: Player, tab: ShopCategory | 'gacha' = 'armor') => {
+      setJoinMode('edit');
+      setWardrobeInitialTab(tab);
+      setEditingPlayerId(p.id);
+      setJoinRole(p.role === 'spectator' ? 'spectator' : 'competitor');
+      setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
+      setJoinPet(p.petType || 'none');
+      setJoinGoalType((p.goalType as GoalType) || 'weight_loss');
+      const sVal = p.startVal ?? p.startWeight ?? 0;
+      const tVal = p.targetVal ?? p.goalWeight ?? 0;
+      setJoinStart(p.id === currentUserId && sVal > 0 ? String(sVal) : '');
+      setJoinGoal(p.id === currentUserId && tVal > 0 ? String(tVal) : '');
+      setJoinName(p.name);
+      setJoinEmoji(p.emoji);
+      setJoinColor(p.colorHex || '#F8FAFC');
+      setJoinAccessory(p.accessory || 'headband');
+      setJoinBandColor(p.bandColor || '#FFE600');
+      setJoinSpecies(p.breed || p.species || 'bunny');
+      setJoinThemeId(p.themeId || 'none');
+      setJoinEquipHat(p.equipHat || 'none');
+      setJoinEquipFace(p.equipFace || 'face_none');
+      setJoinEquipArmor(p.equipArmor || 'armor_none');
+      setJoinEquipWeapon(p.equipWeapon || 'weapon_none');
+      setJoinEquipWings(p.equipWings || 'wings_none');
+      setJoinEquipAura(p.equipAura || 'aura_none');
+      setJoinEquipPetGear(p.equipPetGear || 'pet_none');
+      setJoinEquipMount(p.equipMount || 'mount_none');
+      setJoinPin('');
+      setJoinStatus(p.statusText || '');
+      setJoinError('');
+      setIsJoinOpen(true);
+    },
+    [currentUserId]
+  );
 
   const openEditModal = useCallback(
     (p: Player) => {
@@ -666,32 +1142,21 @@ export default function Arena3DPage() {
       if (p.id !== currentUserId) {
         return;
       }
-      setJoinMode('edit');
-      setEditingPlayerId(p.id);
-      setJoinRole(p.role === 'spectator' ? 'spectator' : 'competitor');
-      setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
-      setJoinPet(p.petType || 'none');
-      setJoinStart(p.startWeight > 0 ? String(p.startWeight) : '');
-      setJoinGoal(p.goalWeight > 0 ? String(p.goalWeight) : '');
-      setJoinName(p.name);
-      setJoinEmoji(p.emoji);
-      setJoinColor(p.colorHex || '#38BDF8');
-      setJoinAccessory(p.accessory || 'headband');
-      setJoinBandColor(p.bandColor || '#FFE600');
-      setJoinPin('');
-      setJoinStatus(p.statusText || '');
-      setJoinError('');
-      setIsJoinOpen(true);
+      openWardrobeModal(p);
     },
-    [focusOnCharacter, currentUserId]
+    [focusOnCharacter, currentUserId, openWardrobeModal]
   );
+
+  useEffect(() => {
+    openEditModalRef.current = openEditModal;
+  }, [openEditModal]);
 
   const getOverviewCameraPos = () => {
     const isPortrait = typeof window !== 'undefined' && window.innerWidth < window.innerHeight;
-    const extra = Math.max(0, competitors.length - 6) * 0.9;
+    const extra = Math.max(0, players.length - 6) * 0.95;
     return isPortrait
-      ? new THREE.Vector3(0, 24 + extra, 36 + extra * 1.2)
-      : new THREE.Vector3(0, 17 + extra, 26 + extra);
+      ? new THREE.Vector3(-2, 30 + extra, 46 + extra * 1.3)
+      : new THREE.Vector3(-2, 22 + extra, 34 + extra * 1.15);
   };
 
   const setCameraView = (mode: 'overview' | 'leader' | 'loser') => {
@@ -782,15 +1247,28 @@ export default function Arena3DPage() {
     const scene = new THREE.Scene();
     const skyColor = new THREE.Color(initWeather.targetHex);
     scene.background = skyColor;
-    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.014);
+    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.0065);
+
+    const spectatorList = players.filter((pl) => pl.role === 'spectator');
+    const laneCount = Math.min(20, Math.max(6, competitors.length));
+    const halfLen = Math.min(
+      40,
+      Math.max(23, 20 + Math.floor(Math.max(competitors.length, spectatorList.length) * 0.45))
+    );
+    const trackWidth = laneCount * 2.55 + 1.2;
+    const specPerSide = Math.max(1, Math.ceil(spectatorList.length / 2));
+    const specRows = Math.max(1, Math.ceil(specPerSide / 14));
+    const islandCenterX = -4.0;
+    const islandW = halfLen * 2 + 36;
+    const islandD = Math.max(54, trackWidth + 32 + (specRows - 1) * 6.5);
 
     // 3D Rain particles (synced with Bangkok weather)
-    const rainCount = 360;
+    const rainCount = 520;
     const rainPositions = new Float32Array(rainCount * 3);
     for (let i = 0; i < rainCount; i++) {
-      rainPositions[i * 3] = (Math.random() - 0.5) * 60;
-      rainPositions[i * 3 + 1] = Math.random() * 24;
-      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 52;
+      rainPositions[i * 3] = islandCenterX + (Math.random() - 0.5) * (islandW + 16);
+      rainPositions[i * 3 + 1] = Math.random() * 28;
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * (islandD + 16);
     }
     const rainGeo = new THREE.BufferGeometry();
     rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
@@ -807,17 +1285,17 @@ export default function Arena3DPage() {
     // Night moon + stars (synced with Bangkok is_day)
     const nightGroup = new THREE.Group();
     const moonMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1.6, 16, 16),
+      new THREE.SphereGeometry(2.0, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0xfef08a })
     );
-    moonMesh.position.set(-18, 22, -26);
+    moonMesh.position.set(-24, 28, -(islandD / 2 + 22));
     nightGroup.add(moonMesh);
-    const starCount = 140;
+    const starCount = 200;
     const starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
-      starPos[i * 3] = (Math.random() - 0.5) * 90;
-      starPos[i * 3 + 1] = 16 + Math.random() * 22;
-      starPos[i * 3 + 2] = -18 - Math.random() * 32;
+      starPos[i * 3] = (Math.random() - 0.5) * (islandW + 60);
+      starPos[i * 3 + 1] = 18 + Math.random() * 28;
+      starPos[i * 3 + 2] = -(islandD / 2 + 8) - Math.random() * 45;
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
@@ -826,7 +1304,7 @@ export default function Arena3DPage() {
     nightGroup.visible = initWeather.showNight;
     scene.add(nightGroup);
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 340);
     if (savedCameraPosRef.current) {
       camera.position.copy(savedCameraPosRef.current);
     } else {
@@ -846,7 +1324,7 @@ export default function Arena3DPage() {
     controls.dampingFactor = 0.07;
     controls.maxPolarAngle = Math.PI / 2 - 0.06;
     controls.minDistance = 4.5;
-    controls.maxDistance = 110;
+    controls.maxDistance = 165;
     controls.target.copy(cameraLookAtRef.current);
     controlsRef.current = controls;
 
@@ -855,23 +1333,18 @@ export default function Arena3DPage() {
     });
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfef08a, initWeather.targetHemi);
-    hemiLight.position.set(0, 30, 0);
+    hemiLight.position.set(0, 34, 0);
     scene.add(hemiLight);
 
     const dirLight = new THREE.DirectionalLight(initWeather.targetLightHex, initWeather.targetDir);
-    dirLight.position.set(12, 24, 14);
+    dirLight.position.set(16, 32, 18);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
-    const spectatorList = players.filter((pl) => pl.role === 'spectator');
-    const halfLen = competitors.length >= 8 || spectatorList.length >= 10 ? 22 : 15;
-    const trackWidth = Math.max(8.5, competitors.length * 2.1 + 1.5);
-    const islandW = halfLen * 2 + 14;
-    const islandD = Math.max(30, trackWidth + 16);
 
     dirLight.shadow.camera.near = 5;
-    dirLight.shadow.camera.far = 110;
-    const d = Math.max(28, Math.max(islandW, islandD) / 2 + 4);
+    dirLight.shadow.camera.far = 160;
+    const d = Math.max(32, Math.max(islandW, islandD) / 2 + 6);
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
@@ -879,20 +1352,35 @@ export default function Arena3DPage() {
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
+    // Golden Tropical Sandy Beach Island Texture
+    const sandCanvas = document.createElement('canvas');
+    sandCanvas.width = 512;
+    sandCanvas.height = 512;
+    const sCtx = sandCanvas.getContext('2d');
+    if (sCtx) {
+      const grad = sCtx.createRadialGradient(256, 256, 80, 256, 256, 340);
+      grad.addColorStop(0, '#fef3c7');
+      grad.addColorStop(0.72, '#fde68a');
+      grad.addColorStop(1, '#fcd34d');
+      sCtx.fillStyle = grad;
+      sCtx.fillRect(0, 0, 512, 512);
+      for (let i = 0; i < 1600; i++) {
+        const sx = (i * 73) % 512;
+        const sy = (i * 137) % 512;
+        sCtx.fillStyle = i % 2 === 0 ? 'rgba(217, 119, 6, 0.12)' : 'rgba(255, 255, 255, 0.22)';
+        sCtx.fillRect(sx, sy, 2, 2);
+      }
+    }
+    const sandTex = new THREE.CanvasTexture(sandCanvas);
+    sandTex.colorSpace = THREE.SRGBColorSpace;
+
     const island = new THREE.Mesh(
-      new THREE.BoxGeometry(islandW, 2.2, islandD),
-      new THREE.MeshStandardMaterial({ color: 0x86EFAC, roughness: 0.7 })
+      new THREE.BoxGeometry(islandW, 1.1, islandD),
+      new THREE.MeshStandardMaterial({ map: sandTex, roughness: 0.86 })
     );
-    island.position.set(0, -1.15, 0);
+    island.position.set(islandCenterX, -0.55, 0);
     island.receiveShadow = true;
     scene.add(island);
-
-    const dirt = new THREE.Mesh(
-      new THREE.BoxGeometry(islandW - 1.5, 1.8, islandD - 1.5),
-      new THREE.MeshStandardMaterial({ color: 0xFDBA74, roughness: 0.9 })
-    );
-    dirt.position.set(0, -3.1, 0);
-    scene.add(dirt);
 
     // Long straight track (stretches automatically when there are more players)
     const trackCurve = new THREE.CatmullRomCurve3([
@@ -903,6 +1391,7 @@ export default function Arena3DPage() {
 
     const segments = 120;
     const positions: number[] = [];
+    const uvs: number[] = [];
     const indices: number[] = [];
     for (let i = 0; i <= segments; i++) {
       const t = i / segments;
@@ -912,6 +1401,7 @@ export default function Arena3DPage() {
       const left = pt.clone().addScaledVector(normal, -trackWidth / 2);
       const right = pt.clone().addScaledVector(normal, trackWidth / 2);
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
+      uvs.push(t, 0, t, 1);
       if (i < segments) {
         const base = i * 2;
         indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
@@ -919,21 +1409,65 @@ export default function Arena3DPage() {
     }
     const trackGeo = new THREE.BufferGeometry();
     trackGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trackGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     trackGeo.setIndex(indices);
     trackGeo.computeVertexNormals();
+
+    // Procedural grassy racing track texture with dynamic multi-lane dividers + glowing magic rune circle
+    const trackCanvas = document.createElement('canvas');
+    trackCanvas.width = 1024;
+    trackCanvas.height = 1024;
+    const tCtx = trackCanvas.getContext('2d');
+    if (tCtx) {
+      tCtx.fillStyle = '#65a30d';
+      tCtx.fillRect(0, 0, 1024, 1024);
+      const lanePx = 1024 / laneCount;
+      // Alternating subtle grass stripes
+      tCtx.fillStyle = '#84cc16';
+      for (let l = 0; l < laneCount; l += 2) {
+        tCtx.fillRect(0, l * lanePx, 1024, lanePx);
+      }
+      // Crisp white lane dividers
+      tCtx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      for (let l = 1; l < laneCount; l++) {
+        tCtx.fillRect(0, l * lanePx - 3, 1024, 6);
+      }
+      // Glowing magic rune circle in the center of the arena
+      tCtx.save();
+      tCtx.translate(512, 512);
+      tCtx.strokeStyle = 'rgba(254, 240, 138, 0.65)';
+      tCtx.lineWidth = 10;
+      tCtx.beginPath();
+      tCtx.arc(0, 0, 220, 0, Math.PI * 2);
+      tCtx.stroke();
+      tCtx.lineWidth = 5;
+      tCtx.beginPath();
+      tCtx.arc(0, 0, 174, 0, Math.PI * 2);
+      tCtx.stroke();
+      for (let r = 0; r < 8; r++) {
+        const a = (r / 8) * Math.PI * 2;
+        tCtx.beginPath();
+        tCtx.moveTo(Math.cos(a) * 174, Math.sin(a) * 174);
+        tCtx.lineTo(Math.cos(a) * 220, Math.sin(a) * 220);
+        tCtx.stroke();
+      }
+      tCtx.restore();
+    }
+    const trackTex = new THREE.CanvasTexture(trackCanvas);
+    trackTex.colorSpace = THREE.SRGBColorSpace;
+
     const trackMesh = new THREE.Mesh(
       trackGeo,
-      new THREE.MeshStandardMaterial({ color: 0xFB7185, roughness: 0.6, side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ map: trackTex, roughness: 0.75, side: THREE.DoubleSide })
     );
     trackMesh.receiveShadow = true;
     scene.add(trackMesh);
 
-    // Raised yellow/white curbs & center line along the S-curve
+    // Stone curbs along the outer edges of the track
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-    const curbMat = new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.4 });
+    const curbMat = new THREE.MeshStandardMaterial({ color: 0x94A3B8, roughness: 0.7 });
     [
       { offset: -trackWidth / 2, radius: 0.16, mat: curbMat },
-      { offset: 0, radius: 0.08, mat: lineMat },
       { offset: trackWidth / 2, radius: 0.16, mat: curbMat },
     ].forEach(({ offset, radius, mat }) => {
       const pts: THREE.Vector3[] = [];
@@ -978,38 +1512,16 @@ export default function Arena3DPage() {
         finishGroup.add(sq);
       }
     }
-
-    const pillarGeo = new THREE.CylinderGeometry(0.35, 0.4, 5.2, 16);
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0xFFE600, roughness: 0.3 });
-
-    const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
-    leftPillar.position.set(0, 2.6, -trackWidth / 2 - 0.3);
-    leftPillar.castShadow = true;
-    const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
-    rightPillar.position.set(0, 2.6, trackWidth / 2 + 0.3);
-    rightPillar.castShadow = true;
-
-    const banner = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8, 1.2, trackWidth + 0.8),
-      new THREE.MeshStandardMaterial({ color: 0x18181B, roughness: 0.4 })
-    );
-    banner.position.set(0, 5.2, 0);
-    banner.castShadow = true;
-
-    const trophyMesh = new THREE.Group();
-    const cupMat = new THREE.MeshStandardMaterial({ color: 0xFACC15, metalness: 0.6, roughness: 0.2 });
-    const cupBody = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.35, 1.1, 16), cupMat);
-    cupBody.position.y = 0.7;
-    const cupBase = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8, 0.3, 0.8),
-      new THREE.MeshStandardMaterial({ color: 0x18181B })
-    );
-    cupBase.position.y = 0.15;
-    trophyMesh.add(cupBody, cupBase);
-    trophyMesh.position.set(0, 5.8, 0);
-
-    finishGroup.add(leftPillar, rightPillar, banner, trophyMesh);
     scene.add(finishGroup);
+
+    const { decorGroup, balloons, floatingIslands, oceanMesh, foamRings, palmCrowns } =
+      buildFantasyArenaDecor(halfLen, trackWidth, endPt, endTan, {
+        islandCenterX,
+        islandW,
+        islandD,
+        specRows,
+      });
+    scene.add(decorGroup);
 
     // Zebra crossing (ทางม้าลาย) at center of S-curve (t = 0.5)
     const crosswalkPt = trackCurve.getPointAt(0.5);
@@ -1065,70 +1577,105 @@ export default function Arena3DPage() {
       return { onTrack, onCrosswalk, t, pt: trackSamples[nearestIdx] };
     };
 
-    // 3D Security Guard (ยาม) patrolling near the crosswalk
+    // 3D Real-Person Full-Body Arena Guard (พี่ยามคุมลู่สายกิน) patrolling near the crosswalk
     const guardPostPos = crosswalkPt.clone().addScaledVector(crosswalkNorm, -(trackWidth / 2 + 2.2));
     guardPostPos.y = 0.2;
-    const guardParts = buildCharacterMesh({
-      colorHex: '#1E3A8A',
-      accessory: 'cap',
-      bandColor: '#FACC15',
-      bellyScale: 1.05,
-    });
-    const vestMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.68, 0.72, 0.65, 16),
-      new THREE.MeshStandardMaterial({ color: 0xBEF264, roughness: 0.4 })
-    );
-    vestMesh.position.y = 1.05;
-    guardParts.bodyMesh.add(vestMesh);
+    const guardParts = buildCustomGuardCharacter('/images/guard_face_tex.jpg');
     guardParts.rootGroup.position.copy(guardPostPos);
     guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
     scene.add(guardParts.rootGroup);
 
     const guardTagEl = document.createElement('div');
-    guardTagEl.className = 'player-tag';
+    guardTagEl.className = 'player-tag cursor-pointer';
+    guardTagEl.onclick = () => {
+      const gp = guardParts.rootGroup.position;
+      cameraLookAtRef.current.set(gp.x, 1.95, gp.z);
+      cameraTargetPosRef.current = new THREE.Vector3(gp.x + 1.2, 3.4, gp.z + 5.2);
+    };
     guardTagEl.innerHTML = `
-      <div class="bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap">
-        👮 พี่ยาม (ข้ามเฉพาะทางม้าลาย!)
+      <div data-guard-badge class="bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        🍴 พี่ยามคุมลู่สายกิน (ข้ามเฉพาะทางม้าลาย!)
       </div>
     `;
     labelsContainer.appendChild(guardTagEl);
+    const guardBadgeEl = guardTagEl.querySelector('[data-guard-badge]') as HTMLElement | null;
+    let currentGuardBadgeKey = 'idle';
     let lastGuardWarnAt = 0;
+    let lastFoodVolleyAt = 0;
+    const remoteEjectSentAt: Record<number, number> = {};
 
-    const treeX = islandW / 2 - 4;
-    const treeZ = islandD / 2 - 3.5;
-    const treePositions = [
-      [-treeX, -treeZ], [0, -treeZ], [treeX, -treeZ],
-      [-treeX, treeZ], [0, treeZ], [treeX, treeZ],
-    ];
-    treePositions.forEach(([tx, tz], idx) => {
-      const tree = new THREE.Group();
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.3, 1.2, 8),
-        new THREE.MeshStandardMaterial({ color: 0x92400E })
-      );
-      trunk.position.y = 0.6;
-      trunk.castShadow = true;
-      const leaves = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(1.05, 1),
-        new THREE.MeshStandardMaterial({ color: idx % 2 === 0 ? 0x22C55E : 0x4ADE80, roughness: 0.6 })
-      );
-      leaves.position.y = 1.8;
-      leaves.castShadow = true;
-      tree.add(trunk, leaves);
-      tree.position.set(tx, 0, tz);
-      scene.add(tree);
-    });
+    // 3D Flying Food Projectiles Pool (หมูกรอบ / น่องไก่ทอด / ลูกชิ้นปิ้ง ที่พี่ยามปาไล่เมื่อคนบุกสนามหลายคน!)
+    interface GuardFoodProjectile {
+      mesh: THREE.Group;
+      active: boolean;
+      startPos: THREE.Vector3;
+      targetUserId: number;
+      launchedAt: number;
+      durationMs: number;
+    }
+    const guardProjectiles: GuardFoodProjectile[] = [];
+    const porkMeatMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.55 });
+    const porkFatMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.45 });
+    const porkCrustMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 });
+    const boneWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+
+    for (let pi = 0; pi < 10; pi++) {
+      const pGroup = new THREE.Group();
+      if (pi % 3 === 0) {
+        // หมูกรอบ 3 ชั้นชิ้นยักษ์
+        const meat = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.24), porkMeatMat);
+        const fat = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.24), porkFatMat);
+        fat.position.y = 0.11;
+        const crust = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.26), porkCrustMat);
+        crust.position.y = 0.18;
+        pGroup.add(meat, fat, crust);
+      } else if (pi % 3 === 1) {
+        // น่องไก่ทอดสีทอง
+        const drum = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), porkCrustMat);
+        drum.scale.set(1.35, 0.95, 0.95);
+        const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.28, 8), boneWhiteMat);
+        bone.rotation.z = Math.PI / 2;
+        bone.position.x = -0.24;
+        pGroup.add(drum, bone);
+      } else {
+        // ลูกชิ้นปิ้งเสียบไม้
+        const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.56, 6), porkFatMat);
+        stick.rotation.z = Math.PI / 2;
+        [-0.14, 0, 0.14].forEach((bx) => {
+          const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), porkMeatMat);
+          ball.position.x = bx;
+          pGroup.add(ball);
+        });
+        pGroup.add(stick);
+      }
+      pGroup.scale.setScalar(1.45);
+      pGroup.visible = false;
+      scene.add(pGroup);
+      guardProjectiles.push({
+        mesh: pGroup,
+        active: false,
+        startPos: new THREE.Vector3(),
+        targetUserId: -1,
+        launchedAt: 0,
+        durationMs: 420,
+      });
+    }
 
     const clouds: THREE.Group[] = [];
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.9 });
-    for (let i = 0; i < 6; i++) {
+    const cloudBoundX = halfLen + 26;
+    for (let i = 0; i < 8; i++) {
       const cloud = new THREE.Group();
       for (let j = 0; j < 3; j++) {
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.8 + Math.random() * 0.5, 12, 12), cloudMat);
-        puff.position.set((j - 1) * 0.9, Math.random() * 0.3, 0);
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.9 + Math.random() * 0.6, 12, 12), cloudMat);
+        puff.position.set((j - 1) * 1.0, Math.random() * 0.3, 0);
         cloud.add(puff);
       }
-      cloud.position.set(-22 + i * 9, 10 + (i % 3) * 1.8, -22 - (i % 2) * 4);
+      cloud.position.set(
+        -cloudBoundX + (i / 7) * cloudBoundX * 2,
+        12 + (i % 3) * 2.2,
+        -(islandD / 2 + 6) - (i % 2) * 6
+      );
       scene.add(cloud);
       clouds.push(cloud);
     }
@@ -1168,13 +1715,17 @@ export default function Arena3DPage() {
     const meshes: any[] = [];
     const fitSpectators = spectatorList.filter((pl) => !isEatPath(pl.workoutType));
     const eatSpectators = spectatorList.filter((pl) => isEatPath(pl.workoutType));
+    const foodStallCompetitorList = rankedPlayers.filter((r) => r.isInFoodStall);
+    const activeTrackCompetitorCount = Math.max(0, competitors.length - foodStallCompetitorList.length);
     let compIdx = 0;
+    let foodStallIdx = 0;
     let specIdx = 0;
 
     players.forEach((p, idx) => {
       const isSpectator = p.role === 'spectator';
       const rankedInfo = !isSpectator ? rankedPlayers.find((r) => r.id === p.id) : undefined;
       const rankIndex = !isSpectator ? rankedPlayers.findIndex((r) => r.id === p.id) : -1;
+      const isInFoodStall = Boolean(!isSpectator && rankedInfo?.isInFoodStall);
       const style = STYLES[idx % STYLES.length];
 
       const isEat = isSpectator && isEatPath(p.workoutType);
@@ -1185,6 +1736,7 @@ export default function Arena3DPage() {
         ? customPair || getDailySpectatorActivity(p.id, p.workoutType, samePathList.length, indexInPath)
         : null;
 
+      let slackerAct: ReturnType<typeof getFoodStallSlackerActivity> | null = null;
       let targetPos = new THREE.Vector3(0, 0.2, 0);
       let facingY = 0;
 
@@ -1192,38 +1744,88 @@ export default function Arena3DPage() {
         const currentSpec = specIdx++;
         const side = currentSpec % 2 === 0 ? 1 : -1;
         const sideIdx = Math.floor(currentSpec / 2);
-        const perSide = Math.max(1, Math.ceil(spectatorList.length / 2));
-        const row = perSide > 14 ? Math.floor(sideIdx / Math.ceil(perSide / 2)) : 0;
-        const idxInRow = perSide > 14 ? sideIdx % Math.ceil(perSide / 2) : sideIdx;
-        const rowTotal = perSide > 14 ? Math.ceil(perSide / 2) : perSide;
-        const t = 0.05 + (rowTotal > 1 ? idxInRow / (rowTotal - 1) : 0.5) * 0.9;
+        const maxPerRow = 14;
+        const row = Math.floor(sideIdx / maxPerRow);
+        const idxInRow = sideIdx % maxPerRow;
+        const rowTotal = Math.min(maxPerRow, Math.max(1, specPerSide - row * maxPerRow));
+        const staggerT = (row % 2) * 0.025;
+        const t = Math.min(
+          0.95,
+          0.05 + staggerT + (rowTotal > 1 ? idxInRow / (rowTotal - 1) : 0.5) * 0.88
+        );
         const pt = trackCurve.getPointAt(t);
         const tan = trackCurve.getTangentAt(t);
         const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-        const dist = trackWidth / 2 + 1.85 + row * 2.1;
+        const dist = trackWidth / 2 + 2.8 + row * 3.4;
         targetPos = pt.clone().addScaledVector(normal, side * dist);
         targetPos.y = 0.2;
         const inward = normal.clone().multiplyScalar(-side);
         facingY = Math.atan2(-inward.z, inward.x);
+      } else if (isInFoodStall) {
+        const slot = foodStallIdx++;
+        slackerAct = getFoodStallSlackerActivity(p.id, slot);
+        const perRow = Math.max(6, Math.floor((trackWidth + 4) / 2.6));
+        const row = Math.floor(slot / perRow);
+        const col = slot % perRow;
+        const countInThisRow = Math.min(perRow, foodStallCompetitorList.length - row * perRow);
+        const zSpan = trackWidth + 2.5;
+        const zOff =
+          countInThisRow > 1
+            ? (col / (countInThisRow - 1) - 0.5) * zSpan
+            : (slot % 2 === 0 ? -1 : 1) * 1.8;
+        const xPos = -halfLen - 4.2 - row * 2.85;
+        targetPos.set(xPos, 0.2, zOff);
+        // หันหน้าเฉียงออกหาผู้ชมและลู่วิ่งจะได้เห็นท่านั่งกิน/นอนกลิ้งชัดๆ
+        facingY = zOff > 0.5 ? 0.38 : zOff < -0.5 ? -0.38 : -0.18;
       } else {
         const currentComp = compIdx++;
-        const t = Math.max(0.03, Math.min(0.95, 0.04 + (rankedInfo?.progressRatio ?? 0) * 0.9));
+        const laneSlot = currentComp % laneCount;
+        const tierInLane = Math.floor(currentComp / laneCount);
+        const baseT = Math.max(
+          0.03,
+          Math.min(0.95, 0.04 + (rankedInfo?.progressRatio ?? 0) * 0.9)
+        );
+        const t = Math.max(0.025, Math.min(0.96, baseT + (tierInLane > 0 ? (tierInLane % 3 - 1) * 0.016 : 0)));
         const pt = trackCurve.getPointAt(t);
         const tan = trackCurve.getTangentAt(t);
         const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-        const laneSpread = competitors.length > 1 ? (currentComp / (competitors.length - 1) - 0.5) * (trackWidth - 1.6) : 0;
+        // จัดตำแหน่งนักวิ่งแต่ละคนให้อยู่กึ่งกลางช่องลู่ของตัวเองพอดี ไม่เหยียบเส้นขาว
+        const laneCenterRatio = (laneSlot + 0.5) / laneCount - 0.5;
+        const laneSpread = laneCenterRatio * (trackWidth - 0.8);
         targetPos = pt.clone().addScaledVector(normal, laneSpread);
         targetPos.y = 0.2;
         facingY = Math.atan2(-tan.z, tan.x);
       }
 
+      const activePropType = dailyAct
+        ? dailyAct.animType
+        : slackerAct
+        ? slackerAct.animType
+        : '';
       const initialBellyScale = rankedInfo?.bellyScale ?? 1;
+      const initialMuscleScale = rankedInfo?.muscleScale ?? 1;
+      const powerMeta = !isSpectator
+        ? resolvePowerBoostMeta(p.cheerCount ?? 0, p.temptCount ?? 0)
+        : null;
       const charParts = buildCharacterMesh({
         colorHex: p.colorHex || style.bodyColor,
-        accessory: p.accessory || style.accessory,
+        accessory: 'none',
         bandColor: p.bandColor || style.bandColor,
         bellyScale: initialBellyScale,
-        spectatorProp: dailyAct ? dailyAct.animType : '',
+        muscleScale: initialMuscleScale,
+        showDumbbells: !isSpectator && !isInFoodStall && p.goalType === 'muscle_gain',
+        spectatorProp: activePropType,
+        species: p.breed || p.species || 'bunny',
+        equipHat: p.equipHat || 'none',
+        equipFace: p.equipFace || 'face_none',
+        equipArmor: p.equipArmor || 'armor_none',
+        equipWeapon: p.equipWeapon || 'weapon_none',
+        equipWings: p.equipWings || 'wings_none',
+        equipAura: p.equipAura || 'aura_none',
+        equipMount: p.equipMount || 'mount_none',
+        animMode: isSpectator || isInFoodStall ? 'spectator' : 'run',
+        animSeed: idx,
+        netPower: powerMeta ? powerMeta.netPower : 0,
       });
       const { rootGroup, bounceGroup, bodyMesh, legL, legR, armL, armR, normalEyes, happyFace, angryFace } = charParts;
       const savedPos = isSpectator ? savedSpectatorPosRef.current[p.id] : undefined;
@@ -1235,40 +1837,47 @@ export default function Arena3DPage() {
       rootGroup.rotation.y = facingY;
       rootGroup.userData.playerId = p.id;
 
-      const petType = !isSpectator ? p.petType || 'none' : 'none';
+      const petType =
+        p.equipPetGear && p.equipPetGear !== 'pet_none'
+          ? p.equipPetGear
+          : !isSpectator
+          ? p.petType || 'none'
+          : 'none';
       const petParts = buildPetMesh(petType);
       if (petParts) {
         rootGroup.add(petParts.petGroup);
         if (petParts.leashMesh) rootGroup.add(petParts.leashMesh);
       }
 
-      if (!isSpectator) {
-        const flowerCount = Math.min(20, p.cheerCount ?? 0);
-        for (let fi = 0; fi < flowerCount; fi++) {
-          const fl = buildFlowerMesh(fi);
-          fl.scale.setScalar(1.45);
-          const ring = Math.floor(fi / 5);
-          const angle = (fi % 5) * 0.55 - 1.1;
-          fl.position.set(
-            -0.35 + Math.cos(angle) * (0.55 + ring * 0.34),
-            ring * 0.12,
-            -0.95 - Math.sin(angle) * 0.3 - ring * 0.25
-          );
-          rootGroup.add(fl);
-        }
-
-        const foodCount = Math.min(20, p.temptCount ?? 0);
-        for (let di = 0; di < foodCount; di++) {
-          const fd = buildFoodPileMesh(di);
-          fd.scale.setScalar(1.45);
-          const layer = Math.floor(di / 4);
-          const slot = di % 4;
-          fd.position.set(
-            -0.35 + (slot - 1.5) * 0.36,
-            layer * 0.2,
-            0.95 + (slot % 2) * 0.32
-          );
-          rootGroup.add(fd);
+      if (!isSpectator && powerMeta) {
+        if (powerMeta.netPower > 0) {
+          const fireCount = Math.min(12, powerMeta.netPower);
+          for (let fi = 0; fi < fireCount; fi++) {
+            const fl = buildFireEmberPileMesh(fi);
+            fl.scale.setScalar(1.3);
+            const ring = Math.floor(fi / 4);
+            const angle = (fi % 4) * 0.65 - 0.95;
+            fl.position.set(
+              -0.35 + Math.cos(angle) * (0.62 + ring * 0.36),
+              0,
+              -1.0 - Math.sin(angle) * 0.32 - ring * 0.28
+            );
+            rootGroup.add(fl);
+          }
+        } else if (powerMeta.netPower < 0) {
+          const foodCount = Math.min(20, Math.abs(powerMeta.netPower));
+          for (let di = 0; di < foodCount; di++) {
+            const fd = buildFoodPileMesh(di);
+            fd.scale.setScalar(1.45);
+            const layer = Math.floor(di / 4);
+            const slot = di % 4;
+            fd.position.set(
+              -0.35 + (slot - 1.5) * 0.36,
+              layer * 0.2,
+              1.1 + (slot % 2) * 0.34
+            );
+            rootGroup.add(fd);
+          }
         }
       }
 
@@ -1287,48 +1896,54 @@ export default function Arena3DPage() {
       const escapeHtml = (s: string) =>
         s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       const trimmedStatus = (p.statusText || '').trim();
-      const speechHtml = `<div data-speech-bubble class="mb-1 bg-[#FFFDF7] border-2 border-black rounded-2xl px-3 py-1 shadow-[3px_3px_0px_#18181B] text-xs font-extrabold text-black max-w-[200px] truncate ${trimmedStatus ? '' : 'hidden'}">💬 ${escapeHtml(trimmedStatus)}</div>`;
+      const speechHtml = `<div data-speech-bubble class="mb-1 bg-[#FFFDF7] border-2 border-amber-500 rounded-2xl px-3 py-1 shadow-[0_3px_0_#422006] text-xs font-extrabold text-black max-w-[200px] truncate ${trimmedStatus ? '' : 'hidden'}">💬 ${escapeHtml(trimmedStatus)}</div>`;
 
       if (isSpectator) {
         const workoutLabel = dailyAct?.label || '📣 เชียร์สุดใจ';
         tagEl.innerHTML = `
           ${speechHtml}
-          <div class="bg-[#FEF08A] border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
-            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
+          <div class="rpg-panel-wood rounded-xl px-2.5 py-1 text-center whitespace-nowrap">
+            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-amber-200">
               <span>👀</span>
-              <span>${p.emoji} ${p.name}</span>
+              <span>${p.emoji} ${escapeHtml(p.name)}</span>
             </div>
-            <div class="text-[10px] font-bold text-zinc-700 max-w-[145px] truncate">
+            <div class="text-[10px] font-bold text-amber-100/85 max-w-[155px] truncate">
               ${workoutLabel}
             </div>
           </div>
-          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black mx-auto"></div>
+          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-amber-500 mx-auto"></div>
         `;
       } else {
         const rankLabel =
-          rankIndex === 0 ? '👑 #1' : rankIndex === rankedPlayers.length - 1 && rankedPlayers.length > 1 ? '🔥 บ๊วย' : `#${rankIndex + 1}`;
-        const pctVal = rankedInfo?.pctLost ?? 0;
-        const sign = pctVal > 0 ? '-' : pctVal < 0 ? '+' : '';
-        const pctColor = pctVal >= 0 ? 'text-emerald-600' : 'text-rose-600';
+          rankIndex === 0 ? '👑 #1' : rankIndex === rankedPlayers.length - 1 && rankedPlayers.length > 1 ? '💀 รั้งท้าย' : `#${rankIndex + 1}`;
+        const pctVal = rankedInfo?.progressPct ?? 0;
+        const gMeta = getGoalTypeMeta(p.goalType);
 
-        const cheerBadge = (p.cheerCount ?? 0) > 0 ? `<span class="text-emerald-600">🌸${p.cheerCount}</span>` : '';
-        const temptBadge = (p.temptCount ?? 0) > 0 ? `<span class="text-rose-600">😈${p.temptCount}</span>` : '';
+        const powerPillHtml =
+          powerMeta && powerMeta.netPower !== 0
+            ? `<span class="px-1.5 py-0.2 rounded-full border text-[10px] font-extrabold ${powerMeta.badgeBgClass}">${escapeHtml(powerMeta.shortLabel)}</span>`
+            : '';
+        const pctColorClass = pctVal < 0 ? 'text-rose-300' : 'text-emerald-300';
+        const slackerHtml =
+          isInFoodStall && slackerAct
+            ? `<div class="mt-1 px-2 py-0.5 rounded-full bg-rose-600/95 border border-amber-300 text-[10px] font-extrabold text-amber-100 shadow-sm">${escapeHtml(slackerAct.statusBadge)} • ${escapeHtml(slackerAct.label)}</div>`
+            : '';
 
         tagEl.innerHTML = `
           ${speechHtml}
-          <div class="bg-white border-2 border-black rounded-xl px-2.5 py-1 shadow-[3px_3px_0px_#18181B] text-center whitespace-nowrap">
-            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black">
+          <div class="rpg-banner rounded-xl px-3 py-1 text-center whitespace-nowrap">
+            <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-xs text-amber-200">
               <span>${rankLabel}</span>
-              <span>${p.emoji} ${p.name}</span>
-              <span class="${pctColor}">${sign}${Math.abs(pctVal)}%</span>
-              ${cheerBadge}
-              ${temptBadge}
+              <span>${p.emoji} ${escapeHtml(p.name)}</span>
+              <span class="${pctColorClass}">(${pctVal}%)</span>
             </div>
-            <div class="text-[10px] font-semibold text-zinc-600 max-w-[145px] truncate">
-              ${p.taunt}
+            <div class="flex items-center justify-center gap-1 text-[10px] font-bold text-amber-100/90 mt-0.5">
+              <span class="px-1.5 py-0.2 rounded bg-black/50 border border-amber-500/50">${gMeta.shortTag}</span>
+              ${powerPillHtml}
             </div>
+            ${slackerHtml}
           </div>
-          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-black mx-auto"></div>
+          <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-amber-400 mx-auto"></div>
         `;
       }
       labelsContainer.appendChild(tagEl);
@@ -1337,12 +1952,14 @@ export default function Arena3DPage() {
         id: p.id,
         player: p,
         isSpectator,
+        isInFoodStall,
         cheerCount: p.cheerCount ?? 0,
         temptCount: p.temptCount ?? 0,
         isCloseToFinish: !isSpectator && (rankedInfo?.progressRatio ?? 0) >= 0.6,
-        workoutType: dailyAct ? dailyAct.animType : 'cheer',
+        workoutType: dailyAct ? dailyAct.animType : slackerAct ? slackerAct.animType : 'cheer',
         petType,
         petParts,
+        charParts,
         rootGroup,
         bounceGroup,
         bodyMesh,
@@ -1354,7 +1971,7 @@ export default function Arena3DPage() {
         happyFace,
         angryFace,
         tagEl,
-        activityLabel: dailyAct?.label || '📣 เชียร์สุดใจ',
+        activityLabel: dailyAct?.label || slackerAct?.label || '📣 เชียร์สุดใจ',
         targetPos,
         currentBellyScale: initialBellyScale,
         targetBellyScale: initialBellyScale,
@@ -1379,14 +1996,9 @@ export default function Arena3DPage() {
     plumbobMesh.visible = false;
     scene.add(plumbobMesh);
 
-    const flowerThrowGroup = new THREE.Group();
+    const flowerThrowGroup = buildFireOrbProjectileMesh();
     flowerThrowGroup.visible = false;
-    for (let i = 0; i < 3; i++) {
-      const fl = buildFlowerMesh(i);
-      fl.position.set((i - 1) * 0.22, 0, 0);
-      fl.scale.setScalar(1.5);
-      flowerThrowGroup.add(fl);
-    }
+    flowerThrowGroup.scale.setScalar(1.35);
     scene.add(flowerThrowGroup);
 
     const deliveryRiderGroup = buildDeliveryRider();
@@ -1394,18 +2006,54 @@ export default function Arena3DPage() {
     scene.add(deliveryRiderGroup);
 
     let frameId: number;
+    let elapsed = 0;
     const clock = new THREE.Clock();
 
     const animate = () => {
       frameId = requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
-
-      trophyMesh.rotation.y = elapsed * 1.2;
+      const delta = Math.min(0.05, clock.getDelta());
+      elapsed += delta;
 
       clouds.forEach((c) => {
-        c.position.x += 0.012;
-        if (c.position.x > 22) c.position.x = -22;
+        c.position.x += 0.015;
+        if (c.position.x > cloudBoundX) c.position.x = -cloudBoundX;
       });
+      balloons.forEach((b, bi) => {
+        b.position.y += Math.sin(elapsed * 1.4 + bi * 1.7) * 0.012;
+        b.rotation.y = Math.sin(elapsed * 0.5 + bi) * 0.15;
+      });
+      floatingIslands.forEach((isl, ii) => {
+        isl.position.y = -0.35 + Math.sin(elapsed * 1.6 + ii * 2.1) * 0.08;
+        isl.rotation.z = Math.sin(elapsed * 1.25 + ii * 1.5) * 0.045;
+      });
+      palmCrowns.forEach((crown, pi) => {
+        crown.rotation.z = Math.sin(elapsed * 1.5 + pi * 0.85) * 0.05;
+        crown.rotation.x = Math.cos(elapsed * 1.2 + pi * 1.1) * 0.038;
+      });
+      foamRings.forEach((foam, fi) => {
+        const wave = Math.sin(elapsed * 2.1 - fi * 1.4);
+        const sc = 1 + wave * 0.016;
+        foam.scale.set(sc, sc, 1);
+        const fMat = foam.material as THREE.MeshBasicMaterial;
+        fMat.opacity = (fi === 0 ? 0.66 : 0.38) + wave * 0.14;
+      });
+      if (oceanMesh) {
+        const oPos = oceanMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let oi = 0; oi < oPos.count; oi++) {
+          const ox = oPos.getX(oi);
+          const oy = oPos.getY(oi);
+          const inIsland =
+            Math.abs(ox - islandCenterX) < islandW / 2 + 2.5 &&
+            Math.abs(oy) < islandD / 2 + 2.5;
+          const amp = inIsland ? 0.04 : 0.16;
+          const wh =
+            (Math.sin(ox * 0.18 + elapsed * 1.9) + Math.cos(oy * 0.21 + elapsed * 1.5)) *
+            0.5 *
+            amp;
+          oPos.setZ(oi, wh);
+        }
+        oPos.needsUpdate = true;
+      }
 
       const bkkW = bkkWeatherRef.current;
       if (bkkW) {
@@ -1442,12 +2090,22 @@ export default function Arena3DPage() {
       let foundCurrentUserMesh = false;
 
       meshes.forEach((c, idx) => {
+        const hScale = c.charParts?.formHeightScale ?? 1;
+        if (c.charParts) {
+          c.glbGroup = c.charParts.glbGroup;
+          c.mixer = c.charParts.mixer;
+          c.rpgBones = c.charParts.rpgBones;
+          c.isChibiAnimalGlb = c.charParts.isChibiAnimalGlb;
+          c.charParts.mixer?.update(delta * (c.charParts.animSpeedMult ?? 1));
+        }
+        c.petParts?.mixer?.update(delta);
         if (c.id === currentUserId) {
           foundCurrentUserMesh = true;
+          const plumbobMountLift = (c.charParts?.riderGroup?.position.y ?? 0) * hScale;
           plumbobMesh.visible = true;
           plumbobMesh.position.set(
             c.rootGroup.position.x,
-            c.rootGroup.position.y + 3.55 + Math.sin(elapsed * 3.5) * 0.14,
+            c.rootGroup.position.y + plumbobMountLift + 3.55 * hScale + Math.sin(elapsed * 3.5) * 0.14,
             c.rootGroup.position.z
           );
           plumbobMesh.rotation.y = elapsed * 2.4;
@@ -1494,8 +2152,11 @@ export default function Arena3DPage() {
 
           if (isWalking) {
             const speed = 0.16;
-            c.rootGroup.position.x = Math.max(-29, Math.min(29, c.rootGroup.position.x + dx * speed));
-            c.rootGroup.position.z = Math.max(-26, Math.min(26, c.rootGroup.position.z + dz * speed));
+            const minBeachX = islandCenterX - islandW / 2 + 1.8;
+            const maxBeachX = islandCenterX + islandW / 2 - 1.8;
+            const maxBeachZ = islandD / 2 - 1.8;
+            c.rootGroup.position.x = Math.max(minBeachX, Math.min(maxBeachX, c.rootGroup.position.x + dx * speed));
+            c.rootGroup.position.z = Math.max(-maxBeachZ, Math.min(maxBeachZ, c.rootGroup.position.z + dz * speed));
             c.targetPos.copy(c.rootGroup.position);
             c.rootGroup.rotation.y = Math.atan2(-dz, dx);
             savedSpectatorPosRef.current[c.id] = {
@@ -1511,31 +2172,54 @@ export default function Arena3DPage() {
                 // ignore quota errors
               }
             }
-            c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
-            c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
-            c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
-            c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
-            c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
-            c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+            if (c.charParts?.groundPropGroup) {
+              c.charParts.groundPropGroup.visible = false;
+            }
+            if (c.charParts?.playClip && c.charParts.mixer) {
+              c.charParts.playClip(resolveRpgAnimPatterns('run'));
+              c.bounceGroup.position.set(0, 0, 0);
+              c.bounceGroup.rotation.set(0, 0, 0);
+            } else {
+              c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
+              c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
+              c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
+              c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
+              c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
+              c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+            }
+            syncCharacterMountPose(c, elapsed, idx, true, false);
           } else {
+            if (c.charParts?.groundPropGroup) {
+              c.charParts.groundPropGroup.visible = true;
+            }
+            if (c.charParts?.playClip && c.charParts.mixer) {
+              c.charParts.playClip(resolveRpgAnimPatterns('spectator', c.workoutType));
+            }
             animateCharacterMotion(c, elapsed, idx, c.currentBellyScale);
           }
 
-          if (realtimeChannelRef.current && (isWalking || wasWalkingRef.current)) {
+          if ((realtimeChannelRef.current || localBroadcastRef.current) && (isWalking || wasWalkingRef.current)) {
             if (!isWalking || now - lastMoveBroadcastAtRef.current >= 85) {
               lastMoveBroadcastAtRef.current = now;
-              realtimeChannelRef.current.send({
+              const movePayload = {
+                userId: c.id,
+                x: Number(c.rootGroup.position.x.toFixed(2)),
+                y: Number(c.rootGroup.position.y.toFixed(2)),
+                z: Number(c.rootGroup.position.z.toFixed(2)),
+                rotY: Number(c.rootGroup.rotation.y.toFixed(2)),
+                isWalking,
+                _senderInstance: clientInstanceIdRef.current,
+              };
+              realtimeChannelRef.current?.send({
                 type: 'broadcast',
                 event: 'move',
-                payload: {
-                  userId: c.id,
-                  x: Number(c.rootGroup.position.x.toFixed(2)),
-                  y: Number(c.rootGroup.position.y.toFixed(2)),
-                  z: Number(c.rootGroup.position.z.toFixed(2)),
-                  rotY: Number(c.rootGroup.rotation.y.toFixed(2)),
-                  isWalking,
-                },
+                payload: movePayload,
               });
+              try {
+                localBroadcastRef.current?.postMessage({ event: 'move', payload: movePayload });
+              } catch {
+                // ignore
+              }
             }
           }
           wasWalkingRef.current = isWalking;
@@ -1565,69 +2249,6 @@ export default function Arena3DPage() {
             setNearbySpectator(closest);
             if (!closest) setIsPairMenuOpen(false);
           }
-
-          // Security Guard (ยาม) chases spectator if they step on the track outside the zebra crossing!
-          const trackInfo = getNearestTrackInfo(c.rootGroup.position);
-          if (trackInfo.onTrack && !trackInfo.onCrosswalk) {
-            setCharacterExpression(guardParts, 'angry');
-            const gPos = guardParts.rootGroup.position;
-            const toWalkerX = c.rootGroup.position.x - gPos.x;
-            const toWalkerZ = c.rootGroup.position.z - gPos.z;
-            const distToWalker = Math.hypot(toWalkerX, toWalkerZ);
-
-            if (now - lastGuardWarnAt > 2500) {
-              lastGuardWarnAt = now;
-              showToast('🚨', 'พี่ยามเป่านกหวีด!', 'ห้ามเดินลงลู่วิ่ง! ให้ไปข้ามตรงทางม้าลายกลางสนาม!');
-            }
-
-            if (distToWalker > 1.7) {
-              const gSpeed = 0.25;
-              gPos.x += (toWalkerX / distToWalker) * gSpeed;
-              gPos.z += (toWalkerZ / distToWalker) * gSpeed;
-              guardParts.rootGroup.rotation.y = Math.atan2(-toWalkerZ, toWalkerX);
-              guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.25;
-              guardParts.legL.rotation.z = Math.sin(elapsed * 14) * 0.75;
-              guardParts.legR.rotation.z = -Math.sin(elapsed * 14) * 0.75;
-              guardParts.armL.position.x = Math.sin(elapsed * 14) * 0.3;
-              guardParts.armR.position.x = -Math.sin(elapsed * 14) * 0.3;
-            } else {
-              // Caught! Push spectator off the track
-              const tan = trackCurve.getTangentAt(trackInfo.t);
-              const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-              const sideSign =
-                (c.rootGroup.position.x - trackInfo.pt.x) * normal.x +
-                  (c.rootGroup.position.z - trackInfo.pt.z) * normal.z >=
-                0
-                  ? 1
-                  : -1;
-              const ejected = trackInfo.pt.clone().addScaledVector(normal, sideSign * (trackWidth / 2 + 2.4));
-              c.rootGroup.position.set(ejected.x, 0.2, ejected.z);
-              c.targetPos.copy(c.rootGroup.position);
-              walkTargetRef.current = null;
-              setShakeScreen(true);
-              setTimeout(() => setShakeScreen(false), 450);
-              showToast('👮', 'โดนพี่ยามไล่ออกจากสนาม!', 'กรุณาข้ามลู่วิ่งตรงทางม้าลายเท่านั้นนะ!');
-            }
-          } else {
-            setCharacterExpression(guardParts, 'normal');
-            const gPos = guardParts.rootGroup.position;
-            const backX = guardPostPos.x - gPos.x;
-            const backZ = guardPostPos.z - gPos.z;
-            const backDist = Math.hypot(backX, backZ);
-            if (backDist > 0.2) {
-              gPos.x += (backX / backDist) * 0.1;
-              gPos.z += (backZ / backDist) * 0.1;
-              guardParts.rootGroup.rotation.y = Math.atan2(-backZ, backX);
-              guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 8)) * 0.15;
-              guardParts.legL.rotation.z = Math.sin(elapsed * 8) * 0.5;
-              guardParts.legR.rotation.z = -Math.sin(elapsed * 8) * 0.5;
-            } else {
-              guardParts.bounceGroup.position.y = 0;
-              guardParts.legL.rotation.z = 0;
-              guardParts.legR.rotation.z = 0;
-              guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
-            }
-          }
         } else {
           const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
           if (remoteState) {
@@ -1650,13 +2271,34 @@ export default function Arena3DPage() {
             ((remoteState!.isWalking && now - remoteState!.updatedAt < 450) ||
               c.rootGroup.position.distanceTo(c.targetPos) > 0.12);
           if (isRemoteWalking) {
-            c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
-            c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
-            c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
-            c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
-            c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
-            c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+            if (c.charParts?.groundPropGroup) {
+              c.charParts.groundPropGroup.visible = false;
+            }
+            if (c.charParts?.playClip && c.charParts.mixer) {
+              c.charParts.playClip(resolveRpgAnimPatterns('run'));
+              c.bounceGroup.position.set(0, 0, 0);
+              c.bounceGroup.rotation.set(0, 0, 0);
+            } else {
+              c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.2;
+              c.bounceGroup.rotation.z = Math.sin(elapsed * 10) * 0.06;
+              c.legL.rotation.z = Math.sin(elapsed * 10) * 0.65;
+              c.legR.rotation.z = -Math.sin(elapsed * 10) * 0.65;
+              c.armL.position.x = Math.sin(elapsed * 10) * 0.25;
+              c.armR.position.x = -Math.sin(elapsed * 10) * 0.25;
+            }
+            syncCharacterMountPose(c, elapsed, idx, true, false);
           } else {
+            if (c.charParts?.groundPropGroup) {
+              c.charParts.groundPropGroup.visible = true;
+            }
+            if (c.charParts?.playClip && c.charParts.mixer) {
+              c.charParts.playClip(
+                c.isSpectator || c.isInFoodStall
+                  ? resolveRpgAnimPatterns('spectator', c.workoutType)
+                  : resolveRpgAnimPatterns('run'),
+                idx * 0.37
+              );
+            }
             animateCharacterMotion(c, elapsed, idx, nextScale);
           }
         }
@@ -1664,10 +2306,12 @@ export default function Arena3DPage() {
           animatePetMotion(c.petParts, c, c.petType, c.isCloseToFinish, elapsed, idx);
         }
 
+        const riderLift = (c.charParts?.riderGroup?.position.y ?? 0) * hScale;
+
         if (c.id === leaderIdRef.current) {
           crownMesh.position.set(
             c.rootGroup.position.x + 0.05,
-            c.rootGroup.position.y + c.bounceGroup.position.y + 2.85 + Math.sin(elapsed * 4) * 0.08,
+            c.rootGroup.position.y + riderLift + c.bounceGroup.position.y + 2.85 * hScale + Math.sin(elapsed * 4) * 0.08,
             c.rootGroup.position.z
           );
           crownMesh.rotation.y = elapsed * 2.2;
@@ -1688,7 +2332,7 @@ export default function Arena3DPage() {
 
         const headWorldPos = new THREE.Vector3(
           c.rootGroup.position.x,
-          c.rootGroup.position.y + 3.15,
+          c.rootGroup.position.y + riderLift + 3.15 * hScale,
           c.rootGroup.position.z
         );
         headWorldPos.project(camera);
@@ -1742,17 +2386,17 @@ export default function Arena3DPage() {
           if (dt >= 1.1 && !delivery.addedToPile) {
             delivery.addedToPile = true;
             if (delivery.kind === 'cheer') {
-              const fi = Math.min(19, targetChar.cheerCount ?? 0);
+              const fi = Math.min(11, targetChar.cheerCount ?? 0);
               targetChar.cheerCount = (targetChar.cheerCount ?? 0) + 1;
-              if (fi < 20) {
-                const fl = buildFlowerMesh(fi);
-                fl.scale.setScalar(1.45);
-                const ring = Math.floor(fi / 5);
-                const angle = (fi % 5) * 0.55 - 1.1;
+              if (fi < 12) {
+                const fl = buildFireEmberPileMesh(fi);
+                fl.scale.setScalar(1.3);
+                const ring = Math.floor(fi / 4);
+                const angle = (fi % 4) * 0.65 - 0.95;
                 fl.position.set(
-                  -0.35 + Math.cos(angle) * (0.55 + ring * 0.34),
-                  ring * 0.12,
-                  -0.95 - Math.sin(angle) * 0.3 - ring * 0.25
+                  -0.35 + Math.cos(angle) * (0.62 + ring * 0.36),
+                  0,
+                  -1.0 - Math.sin(angle) * 0.32 - ring * 0.28
                 );
                 targetChar.rootGroup.add(fl);
               }
@@ -1783,9 +2427,254 @@ export default function Arena3DPage() {
         deliveryRiderGroup.visible = false;
       }
 
+      // Shared Synchronized Arena Guard AI (ทุกคนเห็นพร้อมกันทั้งหมด: คนเดียววิ่งไล่ • หลายคนปาอาหารในจานใส่!)
+      const ejectSpectatorOffTrack = (
+        targetMesh: any,
+        tInfo: ReturnType<typeof getNearestTrackInfo>,
+        mode: 'fork' | 'food'
+      ) => {
+        const tan = trackCurve.getTangentAt(tInfo.t);
+        const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+        const sideSign =
+          (targetMesh.rootGroup.position.x - tInfo.pt.x) * normal.x +
+            (targetMesh.rootGroup.position.z - tInfo.pt.z) * normal.z >=
+          0
+            ? 1
+            : -1;
+        const ejected = tInfo.pt.clone().addScaledVector(normal, sideSign * (trackWidth / 2 + 2.5));
+        const ejX = Number(ejected.x.toFixed(2));
+        const ejZ = Number(ejected.z.toFixed(2));
+        const ejRot = Number(targetMesh.rootGroup.rotation.y.toFixed(2));
+
+        targetMesh.rootGroup.position.set(ejX, 0.2, ejZ);
+        targetMesh.targetPos.set(ejX, 0.2, ejZ);
+        savedSpectatorPosRef.current[targetMesh.id] = { x: ejX, y: 0.2, z: ejZ, rotY: ejRot };
+        remoteSpectatorStateRef.current[targetMesh.id] = {
+          x: ejX,
+          y: 0.2,
+          z: ejZ,
+          rotY: ejRot,
+          isWalking: false,
+          updatedAt: now,
+        };
+
+        if (targetMesh.id === activeWalkerId) {
+          walkTargetRef.current = null;
+          if (now - lastLocalEjectAtRef.current > 900) {
+            lastLocalEjectAtRef.current = now;
+            setShakeScreen(true);
+            setTimeout(() => setShakeScreen(false), 450);
+            if (mode === 'food') {
+              showToast(
+                '🍖',
+                'โดนพี่ยามปาอาหารอัดกระเด็น!',
+                'แห่เข้าสนามพร้อมกันหลายคน พี่ยามเลยสาดหมูกรอบในจานไล่ซะเลย!'
+              );
+            } else {
+              showToast('👮', 'โดนพี่ยามไล่ออกจากสนาม!', 'กรุณาข้ามลู่วิ่งตรงทางม้าลายเท่านั้นนะ!');
+            }
+          }
+          broadcastRealtimeEvent('guard_eject', {
+            userId: targetMesh.id,
+            x: ejX,
+            y: 0.2,
+            z: ejZ,
+            rotY: ejRot,
+            mode,
+          });
+          broadcastRealtimeEvent('move', {
+            userId: targetMesh.id,
+            x: ejX,
+            y: 0.2,
+            z: ejZ,
+            rotY: ejRot,
+            isWalking: false,
+          });
+        } else if (now - (remoteEjectSentAt[targetMesh.id] || 0) > 900) {
+          remoteEjectSentAt[targetMesh.id] = now;
+          broadcastRealtimeEvent('guard_eject', {
+            userId: targetMesh.id,
+            x: ejX,
+            y: 0.2,
+            z: ejZ,
+            rotY: ejRot,
+            mode,
+          });
+        }
+      };
+
+      const trespassers = meshes
+        .filter((m) => m.isSpectator)
+        .map((m) => ({ mesh: m, info: getNearestTrackInfo(m.rootGroup.position) }))
+        .filter((item) => item.info.onTrack && !item.info.onCrosswalk)
+        .sort((a, b) => a.mesh.id - b.mesh.id);
+
+      const gPos = guardParts.rootGroup.position;
+
+      if (trespassers.length >= 2) {
+        // โหมดหลายคน: พี่ยามหยุดวิ่งไล่ แล้วหันไปหยิบอาหารในจานปาใส่รัวๆ จนกระเด็นออกจากสนามทุกคน!
+        setCharacterExpression(guardParts, 'angry');
+        const nextKey = `barrage-${trespassers.length}`;
+        if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
+          currentGuardBadgeKey = nextKey;
+          guardBadgeEl.className =
+            'bg-rose-600 text-amber-100 border-2 border-amber-300 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
+          guardBadgeEl.textContent = `🍖 พี่ยามของขึ้น! ปาอาหารในมือไล่แก๊งบุกสนาม (${trespassers.length} คน)!!`;
+        }
+
+        if (
+          activeWalkerId !== null &&
+          trespassers.some((t) => t.mesh.id === activeWalkerId) &&
+          now - lastGuardWarnAt > 2500
+        ) {
+          lastGuardWarnAt = now;
+          showToast('🍖', 'พี่ยามหยิบของกินขึ้นปาแล้ว!', 'ลงสนามพร้อมกันหลายคนระวังหมูกรอบบินอัดหน้านะ!');
+        }
+
+        // หันหน้าเล็งไปทางจุดกึ่งกลางของกลุ่มผู้บุกรุก พร้อมท่าควักของกินจากจานขว้างรัวๆ
+        let avgX = 0;
+        let avgZ = 0;
+        trespassers.forEach((tr) => {
+          avgX += tr.mesh.rootGroup.position.x;
+          avgZ += tr.mesh.rootGroup.position.z;
+        });
+        avgX /= trespassers.length;
+        avgZ /= trespassers.length;
+
+        guardParts.rootGroup.rotation.y = Math.atan2(-(avgZ - gPos.z), avgX - gPos.x);
+        guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 16)) * 0.16;
+        guardParts.legL.rotation.z = Math.sin(elapsed * 16) * 0.22;
+        guardParts.legR.rotation.z = -Math.sin(elapsed * 16) * 0.22;
+        guardParts.armL.rotation.z = 0.38 + Math.sin(elapsed * 10) * 0.12;
+        guardParts.armR.rotation.z = 0.65 + Math.sin(elapsed * 22) * 0.85;
+
+        // ปล่อยกระสุนอาหารจากจานในมือพุ่งโค้งเข้าใส่ผู้บุกรุกทุกคนเป็นชุดๆ
+        if (now - lastFoodVolleyAt > 290) {
+          lastFoodVolleyAt = now;
+          trespassers.forEach((tr) => {
+            const alreadyFlying = guardProjectiles.some(
+              (p) => p.active && p.targetUserId === tr.mesh.id
+            );
+            if (alreadyFlying) return;
+            const slotProj = guardProjectiles.find((p) => !p.active);
+            if (!slotProj) return;
+            slotProj.active = true;
+            slotProj.targetUserId = tr.mesh.id;
+            slotProj.startPos.set(gPos.x, gPos.y + 1.95, gPos.z);
+            slotProj.launchedAt = now;
+            const dist = Math.hypot(
+              tr.mesh.rootGroup.position.x - gPos.x,
+              tr.mesh.rootGroup.position.z - gPos.z
+            );
+            slotProj.durationMs = Math.max(280, Math.min(560, dist * 34));
+            slotProj.mesh.position.copy(slotProj.startPos);
+            slotProj.mesh.visible = true;
+          });
+        }
+      } else if (trespassers.length === 1) {
+        // โหมดคนเดียว: ทุกคนในห้องเห็นพี่ยามวิ่งหน้าตั้งถือส้อมเงินไล่กวดผู้บุกรุก!
+        const single = trespassers[0];
+        setCharacterExpression(guardParts, 'angry');
+        const nextKey = `chase-${single.mesh.id}`;
+        if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
+          currentGuardBadgeKey = nextKey;
+          guardBadgeEl.className =
+            'bg-amber-500 text-black border-2 border-black rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
+          guardBadgeEl.textContent = `🚨 พี่ยามวิ่งไล่ตะเพิด ${single.mesh.player.name}!`;
+        }
+
+        if (single.mesh.id === activeWalkerId && now - lastGuardWarnAt > 2500) {
+          lastGuardWarnAt = now;
+          showToast('🚨', 'พี่ยามเป่านกหวีด!', 'ห้ามเดินลงลู่วิ่ง! ให้ไปข้ามตรงทางม้าลายกลางสนาม!');
+        }
+
+        const toWalkerX = single.mesh.rootGroup.position.x - gPos.x;
+        const toWalkerZ = single.mesh.rootGroup.position.z - gPos.z;
+        const distToWalker = Math.hypot(toWalkerX, toWalkerZ);
+
+        if (distToWalker > 1.72) {
+          const gSpeed = 0.25;
+          gPos.x += (toWalkerX / distToWalker) * gSpeed;
+          gPos.z += (toWalkerZ / distToWalker) * gSpeed;
+          guardParts.rootGroup.rotation.y = Math.atan2(-toWalkerZ, toWalkerX);
+          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.24;
+          guardParts.legL.rotation.z = Math.sin(elapsed * 14) * 0.72;
+          guardParts.legR.rotation.z = -Math.sin(elapsed * 14) * 0.72;
+          guardParts.armR.rotation.z = 0.52 + Math.sin(elapsed * 18) * 0.55;
+          guardParts.armL.rotation.z = -Math.sin(elapsed * 14) * 0.22;
+        } else {
+          ejectSpectatorOffTrack(single.mesh, single.info, 'fork');
+        }
+      } else {
+        // โหมดสงบ: เดินกลับป้อมทางม้าลาย ยืนกินหมูกรอบเหล่ซ้าย-ขวาชิลๆ
+        setCharacterExpression(guardParts, 'normal');
+        if (guardBadgeEl && currentGuardBadgeKey !== 'idle') {
+          currentGuardBadgeKey = 'idle';
+          guardBadgeEl.className =
+            'bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap hover:scale-105 transition';
+          guardBadgeEl.textContent = '🍴 พี่ยามคุมลู่สายกิน (ข้ามเฉพาะทางม้าลาย!)';
+        }
+
+        const backX = guardPostPos.x - gPos.x;
+        const backZ = guardPostPos.z - gPos.z;
+        const backDist = Math.hypot(backX, backZ);
+        if (backDist > 0.2) {
+          gPos.x += (backX / backDist) * 0.12;
+          gPos.z += (backZ / backDist) * 0.12;
+          guardParts.rootGroup.rotation.y = Math.atan2(-backZ, backX);
+          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 8)) * 0.15;
+          guardParts.legL.rotation.z = Math.sin(elapsed * 8) * 0.5;
+          guardParts.legR.rotation.z = -Math.sin(elapsed * 8) * 0.5;
+          guardParts.armR.rotation.z = 0;
+          guardParts.armL.rotation.z = 0;
+        } else {
+          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 2.2)) * 0.03;
+          guardParts.legL.rotation.z = 0;
+          guardParts.legR.rotation.z = 0;
+          guardParts.armR.rotation.z = Math.max(0, Math.sin(elapsed * 1.8)) * 0.26;
+          guardParts.armL.rotation.z = 0;
+          guardParts.rootGroup.rotation.y =
+            Math.atan2(-crosswalkNorm.z, crosswalkNorm.x) + Math.sin(elapsed * 0.9) * 0.12;
+        }
+      }
+
+      // อัปเดตวิถีโค้งของอาหารที่พี่ยามปาออกไปทุกเฟรม (ทุกคนในสนามเห็นอาหารลอยไปชนเป้าหมายพร้อมกัน!)
+      guardProjectiles.forEach((proj) => {
+        if (!proj.active) return;
+        const targetMesh = meshes.find((m) => m.id === proj.targetUserId);
+        if (!targetMesh) {
+          proj.active = false;
+          proj.mesh.visible = false;
+          return;
+        }
+        const p = Math.min(1, (now - proj.launchedAt) / proj.durationMs);
+        const tx = targetMesh.rootGroup.position.x;
+        const ty = targetMesh.rootGroup.position.y + 1.35;
+        const tz = targetMesh.rootGroup.position.z;
+        const arcH = Math.sin(p * Math.PI) * 2.25;
+
+        proj.mesh.position.set(
+          proj.startPos.x + (tx - proj.startPos.x) * p,
+          proj.startPos.y + (ty - proj.startPos.y) * p + arcH,
+          proj.startPos.z + (tz - proj.startPos.z) * p
+        );
+        proj.mesh.rotation.x += 0.32;
+        proj.mesh.rotation.y += 0.24;
+        proj.mesh.rotation.z += 0.28;
+
+        if (p >= 1) {
+          proj.active = false;
+          proj.mesh.visible = false;
+          const hitInfo = getNearestTrackInfo(targetMesh.rootGroup.position);
+          if (hitInfo.onTrack && !hitInfo.onCrosswalk) {
+            ejectSpectatorOffTrack(targetMesh, hitInfo, 'food');
+          }
+        }
+      });
+
       const guardHeadPos = new THREE.Vector3(
         guardParts.rootGroup.position.x,
-        guardParts.rootGroup.position.y + 3.0,
+        guardParts.rootGroup.position.y + 3.45,
         guardParts.rootGroup.position.z
       );
       guardHeadPos.project(camera);
@@ -1898,10 +2787,10 @@ export default function Arena3DPage() {
           obj = obj.parent;
         }
         if (obj?.userData.playerId !== undefined) {
-          const found = players.find((pl) => pl.id === obj!.userData.playerId);
+          const found = playersRef.current.find((pl) => pl.id === obj!.userData.playerId);
           if (found) {
             if (found.role !== 'spectator') {
-              openEditModal(found);
+              openEditModalRef.current(found);
             } else {
               focusOnCharacter(found.id);
             }
@@ -1941,7 +2830,10 @@ export default function Arena3DPage() {
 
     return () => {
       savedCameraPosRef.current = camera.position.clone();
+      cameraLookAtRef.current.copy(controls.target);
       meshes.forEach((m) => {
+        m.rootGroup.userData.disposed = true;
+        if (m.petParts) m.petParts.petGroup.userData.disposed = true;
         if (m.isSpectator) {
           savedSpectatorPosRef.current[m.id] = {
             x: m.rootGroup.position.x,
@@ -1964,7 +2856,8 @@ export default function Arena3DPage() {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [players, competitors, rankedPlayers, openEditModal, focusOnCharacter, pairedActivities, currentUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneSignature, pairedActivities, currentUserId]);
 
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1980,6 +2873,7 @@ export default function Arena3DPage() {
           userId: activeUserId,
           isSelf: true,
           weight: parseFloat(newWeightInput),
+          value: parseFloat(newWeightInput),
           excuseTag: selectedExcuse,
         }),
       });
@@ -1987,27 +2881,63 @@ export default function Arena3DPage() {
       if (!res.ok) {
         setModalError(data.error || 'เกิดข้อผิดพลาด');
       } else {
-        const player = players.find((p) => p.id === selectedPlayerId);
-        if (data.diff < 0) {
+        if (data.earnedPoints > 0 || data.diff < 0) {
           confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-          showToast('🎉', 'น้ำหนักลดลง! หุ่น 3D เพรียวขึ้นแล้ว', `${player?.name} ลดไป ${Math.abs(data.diff)} กก. วิ่งนำลิ่ว!`);
-        } else if (data.diff > 0) {
-          setShakeScreen(true);
-          setTimeout(() => setShakeScreen(false), 500);
-          showToast('🚨', 'อุ๊ย! พุง 3D ขยายใหญ่ขึ้น!', `${player?.name} น้ำหนักเพิ่ม +${data.diff} กก. โดนระบบแฉแล้ว!`);
-        } else {
-          showToast('⚖️', 'อัปเดตเรียบร้อย', `น้ำหนักเท่าเดิมเป๊ะ ${newWeightInput} กก.`);
         }
         setIsLogOpen(false);
         setPinInput('');
-        await fetchArenaData();
-        setTimeout(() => focusOnCharacter(selectedPlayerId), 300);
+        await fetchArenaData({ force: true });
+        const actor = playersRef.current.find((pl) => pl.id === activeUserId);
+        broadcastArenaSync('weight_logged', {
+          actorId: activeUserId,
+          actorName: actor?.name || '',
+          actorEmoji: actor?.emoji || '⚡',
+        });
+        setTimeout(() => focusOnCharacter(activeUserId), 300);
       }
     } catch {
       setModalError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleUnlockOrEquipItem = async (itemId: string) => {
+    const targetUid = editingPlayerId || currentUserId;
+    if (!targetUid) return;
+    const res = await fetch('/api/shop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: targetUid, itemId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'ทำรายการร้านค้าไม่สำเร็จ');
+    }
+    await fetchArenaData({ force: true });
+    broadcastArenaSync('shop_updated', { actorId: targetUid });
+  };
+
+  const handleSpinGacha = async (): Promise<ShopItem> => {
+    const targetUid = editingPlayerId || currentUserId;
+    if (!targetUid) {
+      throw new Error('กรุณาเข้าสู่ระบบก่อนหมุนกาชาปอง');
+    }
+    const res = await fetch('/api/gacha', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: targetUid }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'หมุนกาชาปองไม่สำเร็จ');
+    }
+    await fetchArenaData({ force: true });
+    broadcastArenaSync('shop_updated', {
+      actorId: targetUid,
+      detail: `🎰 สุ่มกาชาปองได้ ${data.wonItem?.icon || ''} ${data.wonItem?.name || ''}!`,
+    });
+    return data.wonItem as ShopItem;
   };
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
@@ -2033,6 +2963,7 @@ export default function Arena3DPage() {
           setSelectedPlayerId(data.user.id);
         }
         setSignInUsername('');
+        await fetchArenaData({ force: true, viewerId: data.user.id });
         showToast(
           '👋',
           'เข้าสู่ระบบสำเร็จ!',
@@ -2058,6 +2989,19 @@ export default function Arena3DPage() {
     setWalkingSpectatorId(null);
     setSignInUsername('');
     setSignInError('');
+    setPlayers((prev) =>
+      prev.map((pl) => ({
+        ...pl,
+        startWeight: undefined,
+        currentWeight: undefined,
+        goalWeight: undefined,
+        startVal: undefined,
+        currentVal: undefined,
+        targetVal: undefined,
+        diffLabel: undefined,
+      }))
+    );
+    void fetchArenaData({ force: true, viewerId: 0 });
   };
 
   const handleJoinSubmit = async (e: React.FormEvent) => {
@@ -2068,39 +3012,47 @@ export default function Arena3DPage() {
     try {
       const isEdit = joinMode === 'edit' && editingPlayerId !== null;
       const isSelf = isEdit && editingPlayerId === currentUserId;
+      const payloadCommon = {
+        name: joinName,
+        avatarEmoji: joinEmoji,
+        colorHex: joinColor,
+        accessory: joinAccessory,
+        bandColor: joinBandColor,
+        role: joinRole,
+        workoutType: joinWorkout,
+        petType: joinPet,
+        statusText: joinStatus,
+        species: resolveBreedOption(joinSpecies).category,
+        breed: joinSpecies,
+        themeId: joinThemeId,
+        equipHat: joinEquipHat,
+        equipFace: joinEquipFace,
+        equipArmor: joinEquipArmor,
+        equipWeapon: joinEquipWeapon,
+        equipWings: joinEquipWings,
+        equipAura: joinEquipAura,
+        equipPetGear: joinEquipPetGear,
+        equipMount: joinEquipMount,
+        goalType: joinGoalType,
+        startVal: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : 0,
+        targetVal: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : 0,
+        startWeight: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : 0,
+        goalWeight: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : 0,
+      };
       const res = await fetch('/api/users', {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           isEdit
             ? {
+                ...payloadCommon,
                 userId: editingPlayerId,
                 isSelf,
                 pinCode: joinPin,
-                name: joinName,
-                avatarEmoji: joinEmoji,
-                colorHex: joinColor,
-                accessory: joinAccessory,
-                bandColor: joinBandColor,
-                role: joinRole,
-                workoutType: joinWorkout,
-                petType: joinPet,
-                statusText: joinStatus,
-                startWeight: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : undefined,
-                goalWeight: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : undefined,
               }
             : {
-                name: joinName,
-                avatarEmoji: joinEmoji,
-                colorHex: joinColor,
-                accessory: joinAccessory,
-                bandColor: joinBandColor,
-                role: joinRole,
-                workoutType: joinWorkout,
-                petType: joinPet,
+                ...payloadCommon,
                 pinCode: joinPin || '1234',
-                startWeight: joinRole === 'competitor' ? parseFloat(joinStart) : 0,
-                goalWeight: joinRole === 'competitor' ? parseFloat(joinGoal) : 0,
               }
         ),
       });
@@ -2130,12 +3082,33 @@ export default function Arena3DPage() {
             ? `ยินดีต้อนรับผู้ชม ${joinEmoji} ${joinName} สู่ขอบสนาม!`
             : `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`
         );
+        const submittedName = joinName;
+        const submittedEmoji = joinEmoji;
+        const submittedRole = joinRole;
+        const prevPlayer = isEdit ? playersRef.current.find((pl) => pl.id === editingPlayerId) : null;
+        const roleSwitched = Boolean(prevPlayer && prevPlayer.role !== submittedRole);
+
         setIsJoinOpen(false);
         setJoinName('');
         setJoinPin('');
         setJoinStart('');
         setJoinGoal('');
-        await fetchArenaData();
+        await fetchArenaData({ force: true });
+
+        broadcastArenaSync(isEdit ? 'user_updated' : 'user_created', {
+          actorId: activeId,
+          actorName: submittedName,
+          actorEmoji: submittedEmoji,
+          detail: !isEdit
+            ? submittedRole === 'spectator'
+              ? 'เข้าร่วมเป็นผู้ชมขอบสนามแล้ว!'
+              : 'ลงสนามเป็นผู้เข้าแข่งขันคนใหม่!'
+            : roleSwitched
+            ? submittedRole === 'spectator'
+              ? 'สลับบทบาทเป็นผู้ชมขอบสนาม!'
+              : 'เปลี่ยนบทบาทลงลู่เป็นผู้เข้าแข่งขัน!'
+            : 'อัปเดตชุดและตัวละครใหม่แล้ว!',
+        });
       }
     } catch {
       setJoinError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
@@ -2180,15 +3153,37 @@ export default function Arena3DPage() {
         pendingDeliveryRef.current = {
           targetId: inter.targetUserId,
           kind: inter.kind,
-          label: `${inter.kind === 'cheer' ? '💐' : '😈'} ${inter.giftItem}`,
+          label: `${inter.kind === 'cheer' ? '🔥' : '😈'} ${inter.giftItem}`,
           startTime: performance.now(),
         };
+        broadcastRealtimeEvent('interaction', inter);
+        const nextNet = typeof inter.netPower === 'number' ? inter.netPower : null;
         if (inter.kind === 'cheer') {
-          confetti({ particleCount: 50, spread: 55, origin: { y: 0.65 } });
-          showToast('🌸', `ส่งกำลังใจให้ ${inter.targetName}!`, `${inter.senderName} มอบ ${inter.giftItem}`);
+          confetti({
+            particleCount: nextNet && nextNet >= 6 ? 100 : 50,
+            spread: nextNet && nextNet >= 6 ? 80 : 55,
+            origin: { y: 0.65 },
+          });
+          if (nextNet === 6) {
+            showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `พลังไฟทะลุ +6 ผมทองออร่าสายฟ้ามาเต็ม!`);
+          } else if (nextNet === 3) {
+            showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `เติมไฟครบ +3 ไฟลุกท่วมตัวพุ่งฉิว!`);
+          } else {
+            showToast('🔥', `เติมไฟให้ ${inter.targetName}! (+1)`, `${inter.senderName} ส่ง ${inter.giftItem}`);
+          }
         } else {
-          showToast('😈', `ส่งมารผจญไปยั่ว ${inter.targetName}!`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
+          if (nextNet === -6) {
+            showToast('🩷', `${inter.targetName} กลายร่างเป็นจอมมารบู!!`, `โดนขุนของกินครบ -6 ตัวเบิ้มพ่นไอน้ำฟู่ๆ!`);
+          } else if (nextNet === -3) {
+            showToast('💤', `${inter.targetName} ขยายร่างเป็นคาบิก้อน!!`, `โดนส่ง ${inter.giftItem} จนตัวบึ้มพุงป่อง (-3)!`);
+          } else {
+            showToast('😈', `มารผจญขุนพุง ${inter.targetName}! (-1)`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
+          }
         }
+        // ซิงก์สถานะร่างแปลง 3D ทันทีเมื่อลูกไฟ/ไรเดอร์พุ่งถึงตัวละคร
+        setTimeout(() => {
+          fetchArenaDataRef.current({ force: true });
+        }, 1150);
         setActionTargetPlayer(null);
         focusOnCharacter(inter.targetUserId);
       }
@@ -2226,11 +3221,7 @@ export default function Arena3DPage() {
       }
     }
     if (!currentUserId) return;
-    realtimeChannelRef.current?.send({
-      type: 'broadcast',
-      event: 'status',
-      payload: { userId: currentUserId, statusText: trimmed },
-    });
+    broadcastRealtimeEvent('status', { userId: currentUserId, statusText: trimmed });
     if (statusSaveTimerRef.current) clearTimeout(statusSaveTimerRef.current);
     const targetUserId = currentUserId;
     statusSaveTimerRef.current = setTimeout(async () => {
@@ -2258,19 +3249,21 @@ export default function Arena3DPage() {
       <div ref={labelsRef} className="fixed inset-0 pointer-events-none z-10 overflow-hidden" />
 
       <header ref={headerRef} className="fixed top-3 left-3 right-3 z-20 pointer-events-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-        <div className="neo-card rounded-2xl px-4 py-2.5 pointer-events-auto flex items-center gap-3 bg-[#FFE600]">
-          <div className="w-10 h-10 bg-[#FF4D8D] border-2 border-black rounded-xl flex items-center justify-center text-xl shadow-[2px_2px_0px_#000] shrink-0">
-            🏆
+        <div className="rpg-banner rounded-2xl px-4 py-2.5 pointer-events-auto flex items-center gap-3">
+          <div className="w-10 h-10 bg-amber-400 border-2 border-amber-100 rounded-xl flex items-center justify-center text-xl shadow-[0_2px_0_#422006] shrink-0">
+            ⚔️
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="font-[family-name:var(--font-kanit)] font-extrabold text-lg sm:text-xl text-black leading-none">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <h1 className="font-[family-name:var(--font-kanit)] font-extrabold text-base sm:text-lg text-amber-300 leading-none drop-shadow">
                 ศึกชิงบัลลังก์เอวเอส 3D
               </h1>
-              <span className="bg-black text-[#BEF264] text-[10px] font-bold px-1.5 py-0.5 rounded">LIVE</span>
+              <span className="bg-emerald-500 text-black text-[10px] font-extrabold px-1.5 py-0.5 rounded">
+                MMO ARENA
+              </span>
             </div>
-            <p className="text-[11px] font-semibold text-zinc-800 mt-0.5">
-              หมุนดูพุงเพื่อนได้ 360° • ใครแพ้เลี้ยงชาบู!
+            <p className="text-[11px] font-semibold text-amber-100/80 mt-0.5">
+              รวมทุกสายในสนามเดียวด้วย Progress % • ทุก +1% รับ +25 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
             </p>
           </div>
         </div>
@@ -2278,51 +3271,51 @@ export default function Arena3DPage() {
         <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
           {bkkWeather && (
             <div
-              className="neo-card rounded-xl px-2.5 py-1.5 bg-white text-black text-xs font-extrabold flex items-center gap-1.5"
+              className="rpg-panel rounded-xl px-2.5 py-1.5 text-amber-200 text-xs font-extrabold flex items-center gap-1.5"
               title={`สภาพอากาศกรุงเทพฯ ล่าสุด: ${bkkWeather.label} ${bkkWeather.temp}°C`}
             >
               <span>{bkkWeather.emoji}</span>
               <span>กทม. {bkkWeather.temp}°C</span>
-              <span className="hidden lg:inline text-zinc-500 font-bold">· {bkkWeather.label}</span>
+              <span className="hidden lg:inline text-amber-100/75 font-bold">· {bkkWeather.label}</span>
             </div>
           )}
-          <div className="neo-card rounded-xl p-1 flex items-center gap-1 bg-white">
+
+          <div className="rpg-panel rounded-xl p-1 flex items-center gap-1">
             <button
               onClick={() => setCameraView('overview')}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold hover:bg-[#38BDF8] hover:text-black transition cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-100 hover:bg-amber-400 hover:text-black transition cursor-pointer flex items-center gap-1"
             >
               🎥 <span className="hidden md:inline">มุมมองรวม</span>
             </button>
             <button
               onClick={() => setCameraView('leader')}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold hover:bg-[#FFE600] transition cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-100 hover:bg-amber-400 hover:text-black transition cursor-pointer flex items-center gap-1"
             >
               👑 <span className="hidden md:inline">ซูมผู้นำ</span>
             </button>
             <button
               onClick={() => setCameraView('loser')}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold hover:bg-[#FF4D8D] hover:text-white transition cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-amber-100 hover:bg-rose-500 hover:text-white transition cursor-pointer flex items-center gap-1"
             >
-              🔥 <span className="hidden md:inline">ส่องคนบ๊วย</span>
+              🔥 <span className="hidden md:inline">ส่องคนรั้งท้าย</span>
             </button>
           </div>
 
           <button
             onClick={toggleMusic}
-            className={`neo-btn font-bold text-xs sm:text-sm px-3 py-2.5 rounded-xl flex items-center gap-1 cursor-pointer ${
-              isMusicOn ? 'bg-[#FFE600] text-black' : 'bg-white text-zinc-700'
+            className={`neo-btn font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1 cursor-pointer ${
+              isMusicOn ? 'rpg-btn-gold' : 'rpg-panel text-amber-100'
             }`}
             title="เปิด/ปิดเพลงประกอบ"
           >
             <span>{isMusicOn ? '🔊' : '🔇'}</span>
-            <span className="hidden md:inline">{isMusicOn ? 'เพลง' : 'ปิดเสียง'}</span>
           </button>
 
           <button
             onClick={() => setIsDrawerOpen((v) => !v)}
-            className="neo-btn bg-white text-black font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            className="neo-btn rpg-panel text-amber-200 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
           >
-            <Trophy className="w-4 h-4" />
+            <Trophy className="w-4 h-4 text-amber-400" />
             <span className="hidden sm:inline">อันดับ</span>
           </button>
 
@@ -2332,29 +3325,37 @@ export default function Arena3DPage() {
               return (
                 <button
                   onClick={openCreateModal}
-                  className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                  className="neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4 stroke-[2.5]" />
-                  <span>+ สมัคร / เข้าร่วม</span>
+                  <span>+ สร้างผู้กล้า / เข้าร่วม</span>
                 </button>
               );
             }
             return (
               <div className="flex items-center gap-1.5">
                 <button
-                  onClick={() => openEditModal(currentUser)}
-                  className="neo-btn bg-[#38BDF8] hover:bg-[#7dd3fc] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  title="แก้ไขโปรไฟล์ / เปลี่ยนสาย"
+                  onClick={() => openWardrobeModal(currentUser, 'gacha')}
+                  className="neo-btn bg-gradient-to-r from-fuchsia-600 via-amber-400 to-cyan-400 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-[0_3px_0_#000]"
+                  title="เปิดตู้สุ่มกาชาปองลุ้นชุดและออร่าลิมิเต็ด!"
+                >
+                  <span>🎰</span>
+                  <span className="hidden sm:inline">กาชาปอง</span>
+                </button>
+                <button
+                  onClick={() => openWardrobeModal(currentUser, 'armor')}
+                  className="neo-btn rpg-btn-blue font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                  title="เปิดหน้าต่างแต่งตัว 3D & ร้านค้าแต้ม"
                 >
                   <span>{currentUser.emoji}</span>
                   <span>{currentUser.name}</span>
-                  <span className="text-[10px] bg-white/80 px-1.5 py-0.5 rounded border border-black">
-                    {currentUser.role === 'spectator' ? 'ผู้ชม' : 'นักแข่ง'}
+                  <span className="text-[10px] bg-black/50 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400">
+                    🪙 {currentUser.points ?? 100}
                   </span>
                 </button>
                 <button
                   onClick={handleSignOut}
-                  className="neo-btn bg-white hover:bg-zinc-100 text-black font-bold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
+                  className="neo-btn rpg-panel text-amber-200 font-bold text-xs px-2.5 py-2 rounded-xl cursor-pointer"
                   title="สลับบัญชี"
                 >
                   สลับ
@@ -2366,18 +3367,22 @@ export default function Arena3DPage() {
           {(() => {
             const currentUser = players.find((pl) => pl.id === currentUserId);
             if (!currentUser || currentUser.role === 'spectator') return null;
+            const gMeta = getGoalTypeMeta(currentUser.goalType);
             return (
               <button
                 onClick={() => {
                   setSelectedPlayerId(currentUser.id);
-                  setNewWeightInput(String(currentUser.currentWeight));
+                  const curVal = currentUser.currentVal ?? currentUser.currentWeight;
+                  setNewWeightInput(
+                    gMeta.isCumulative || curVal === undefined ? '' : String(curVal)
+                  );
                   setModalError('');
                   setIsLogOpen(true);
                 }}
-                className="neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                className="neo-btn rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
               >
                 <Scale className="w-4 h-4 stroke-[2.5]" />
-                <span>+ อัปเดตน้ำหนักวันนี้</span>
+                <span>+ ส่งผลภารกิจ ({gMeta.shortTag})</span>
               </button>
             );
           })()}
@@ -2385,31 +3390,31 @@ export default function Arena3DPage() {
       </header>
 
       <aside
-        className={`fixed top-32 sm:top-20 right-3 bottom-3 w-[340px] max-w-[calc(100vw-24px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
+        className={`fixed top-32 sm:top-20 right-3 bottom-3 w-[345px] max-w-[calc(100vw-24px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
           isDrawerOpen ? 'translate-x-0' : 'translate-x-[120%]'
         }`}
       >
-        <div className="neo-card rounded-2xl p-3.5 pointer-events-auto flex flex-col max-h-[48%]">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-black shrink-0">
-            <h2 className="font-[family-name:var(--font-kanit)] font-extrabold text-base flex items-center gap-1.5">
-              <span>📊 อันดับเอวเอส</span>
+        <div className="rpg-panel rounded-2xl p-3.5 pointer-events-auto flex flex-col max-h-[58%]">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-amber-500/40 shrink-0">
+            <h2 className="font-[family-name:var(--font-kanit)] font-extrabold text-base text-amber-300 flex items-center gap-1.5">
+              <span>🏆 อันดับผู้กล้าในสนาม</span>
             </h2>
-            <span className="text-[10px] font-bold bg-[#FFE600] border border-black px-2 py-0.5 rounded-full">
-              วัดจาก % ที่ลดได้
+            <span className="text-[10px] font-extrabold bg-amber-400 text-black px-2 py-0.5 rounded-full">
+              Progress %
             </span>
           </div>
           <div className="overflow-y-auto space-y-2 pr-1">
             {rankedPlayers.length === 0 ? (
-              <p className="text-xs text-center py-4 font-bold text-zinc-500">
-                ยังไม่มีผู้เข้าแข่งขัน กด &quot;+ สมัครลงแข่ง&quot; ได้เลย!
+              <p className="text-xs text-center py-4 font-bold text-amber-100/70">
+                ยังไม่มีผู้กล้าในสนาม กด &quot;+ สร้างผู้กล้า&quot; ได้เลย!
               </p>
             ) : (
               rankedPlayers.map((p, idx) => {
                 const isFirst = idx === 0;
                 const isLast = idx === rankedPlayers.length - 1 && rankedPlayers.length > 1;
-                const pctVal = p.pctLost ?? 0;
-                const sign = pctVal > 0 ? '-' : pctVal < 0 ? '+' : '';
-                const cardBg = isFirst ? 'bg-[#FFE600]' : isLast ? 'bg-[#FF4D8D]/20' : 'bg-white';
+                const pctVal = p.progressPct ?? 0;
+                const gMeta = getGoalTypeMeta(p.goalType);
+                const pBoost = resolvePowerBoostMeta(p.cheerCount ?? 0, p.temptCount ?? 0);
 
                 return (
                   <div
@@ -2418,32 +3423,52 @@ export default function Arena3DPage() {
                       focusOnCharacter(p.id);
                       if (window.innerWidth < 768) setIsDrawerOpen(false);
                     }}
-                    className={`${cardBg} border-2 border-black rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition`}
+                    className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${
+                      isFirst
+                        ? 'bg-amber-500/25 border-amber-300'
+                        : p.isInFoodStall || isLast
+                        ? 'bg-rose-900/40 border-rose-500/60'
+                        : 'bg-slate-900/80 border-slate-700'
+                    }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-6 h-6 rounded-lg bg-black text-white font-[family-name:var(--font-kanit)] font-extrabold text-xs flex items-center justify-center shrink-0">
+                      <span className="w-6 h-6 rounded-lg bg-amber-400 text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs flex items-center justify-center shrink-0">
                         {idx + 1}
                       </span>
                       <span className="text-xl shrink-0">{p.emoji}</span>
                       <div className="min-w-0">
-                        <div className="font-extrabold text-xs text-black truncate">
-                          {p.name} {isFirst ? '👑' : isLast ? '🔥' : ''}
+                        <div className="font-extrabold text-xs text-amber-100 truncate flex items-center gap-1">
+                          <span>{p.name}</span>
+                          <span>{isFirst ? '👑' : isLast ? '💀' : ''}</span>
+                          {p.isInFoodStall && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-600 text-amber-100 border border-amber-300 shrink-0">
+                              🍖 ซุ้มอาหาร
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[10px] font-semibold text-zinc-600">
-                          {p.startWeight} ➔ <strong className="text-black">{p.currentWeight} กก.</strong>
+                        <div className="text-[10px] font-semibold text-amber-200/80 flex flex-wrap items-center gap-1">
+                          <span className="px-1 rounded bg-black/50 border border-amber-500/40">
+                            {gMeta.shortTag}
+                          </span>
+                          {pBoost.netPower !== 0 && (
+                            <span
+                              className={`px-1.5 rounded-full border text-[9px] font-extrabold ${pBoost.badgeBgClass}`}
+                            >
+                              {pBoost.shortLabel}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0">
                       <div
                         className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${
-                          pctVal >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                          pctVal < 0 ? 'text-rose-400' : 'text-emerald-400'
                         }`}
                       >
-                        {sign}
-                        {Math.abs(pctVal)}%
+                        {pctVal}%
                       </div>
-                      <div className="text-[9px] font-bold text-zinc-500">เป้า {p.goalWeight} กก.</div>
+                      <div className="text-[9px] font-bold text-amber-300/80">🪙 {p.points ?? 100}</div>
                     </div>
                   </div>
                 );
@@ -2451,459 +3476,352 @@ export default function Arena3DPage() {
             )}
           </div>
         </div>
-
       </aside>
 
       <div className="fixed bottom-3 left-3 z-20 pointer-events-none hidden sm:block">
-        <div className="neo-card rounded-xl px-3 py-1.5 text-[11px] font-bold text-zinc-700 flex items-center gap-2 bg-white/90">
+        <div className="rpg-panel rounded-xl px-3 py-1.5 text-[11px] font-bold text-amber-200 flex items-center gap-2">
           <span>🖱️ ลากเพื่อหมุนกล้อง</span>
           <span>•</span>
           <span>🔍 สกรอลล์เพื่อซูม</span>
           <span>•</span>
-          <span>👆 คลิกนักแข่งเพื่อส่งกำลังใจ/ของกิน</span>
+          <span>👆 คลิกผู้กล้าเพื่อส่งกำลังใจ/ของกิน</span>
           <span>•</span>
-          <span>🤚 ลูบพุงตัวละครดูอาการ!</span>
+          <span>🤚 ลูบพุงดูอาการ!</span>
         </div>
       </div>
 
+      {/* Bottom-Right RPG Progress Bar HUD for Competitor (matching Reference Image 2) */}
+      {(() => {
+        const me = rankedPlayers.find((pl) => pl.id === currentUserId);
+        if (!me) return null;
+        const pct = me.progressPct ?? 0;
+        const gMeta = getGoalTypeMeta(me.goalType);
+        return (
+          <div className="fixed bottom-3 right-3 z-20 pointer-events-auto hidden md:flex flex-col gap-1.5 w-[320px] rpg-panel rounded-2xl p-3">
+            <div className="flex items-center justify-between text-xs font-extrabold text-amber-200">
+              <span>
+                {me.emoji} {me.name} • {gMeta.shortTag}
+              </span>
+              <span className={pct < 0 ? 'text-rose-400' : 'text-emerald-400'}>{pct}%</span>
+            </div>
+            <div className="w-full h-3.5 bg-slate-950 border-2 border-amber-500 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  pct < 0
+                    ? 'bg-gradient-to-r from-rose-500 to-orange-400'
+                    : 'bg-gradient-to-r from-lime-400 via-emerald-400 to-amber-400'
+                }`}
+                style={{ width: `${Math.max(5, Math.min(100, Math.max(0, pct)))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-bold text-amber-100/80">
+              <span>{me.isInFoodStall ? '🍖 นอนซุ้มอาหาร!' : '0% ร่างเริ่มต้น'}</span>
+              <span>{me.diffLabel}</span>
+              <span className="text-amber-300">100% เส้นชัย! 🏆</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {isLogOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-5 relative">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="rpg-panel rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-5 relative">
             <button
               onClick={() => setIsLogOpen(false)}
-              className="absolute top-3.5 right-3.5 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
+              className="absolute top-3.5 right-3.5 w-8 h-8 bg-rose-600 text-white rounded-lg flex items-center justify-center font-bold cursor-pointer"
             >
               ✕
             </button>
 
-            <div className="flex items-center gap-2.5 mb-4">
-              <span className="text-3xl">⚖️</span>
-              <div>
-                <h3 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold">ขึ้นเขียงชั่งน้ำหนัก 3D</h3>
-                <p className="text-xs text-zinc-600 font-medium">น้ำหนักเปลี่ยน = หุ่น 3D เปลี่ยนทันที!</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleWeightSubmit} className="space-y-3.5">
-              {selectedPlayerObj && (
-                <div className="bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 flex items-center justify-between">
-                  <span className="font-extrabold text-sm">
-                    {selectedPlayerObj.emoji} {selectedPlayerObj.name}
-                  </span>
-                  <span className="text-xs font-bold text-zinc-600">
-                    ล่าสุด {selectedPlayerObj.currentWeight} กก. • เป้า {selectedPlayerObj.goalWeight} กก.
-                  </span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold mb-1">น้ำหนักวันนี้ (กก.)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="30"
-                  max="250"
-                  required
-                  value={newWeightInput}
-                  onChange={(e) => setNewWeightInput(e.target.value)}
-                  className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1.5">4. เลือกสถานะ / ข้อแก้ตัวสุดกวน</label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {EXCUSES.map((ex) => (
-                    <button
-                      type="button"
-                      key={ex.text}
-                      onClick={() => setSelectedExcuse(ex.text)}
-                      className={`${
-                        selectedExcuse === ex.text ? 'bg-[#FFE600]' : 'bg-zinc-100'
-                      } border-2 border-black rounded-lg px-2.5 py-1.5 text-xs font-bold text-left cursor-pointer`}
-                    >
-                      {ex.text}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {modalError && (
-                <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
-                  {modalError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1"
-              >
-                {submitting ? 'กำลังอัปเดต...' : '🚀 อัปเดตลงสนาม 3D!'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isJoinOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-4xl w-full max-h-[90dvh] overflow-y-auto p-5 relative">
-            <button
-              onClick={() => setIsJoinOpen(false)}
-              className="absolute top-3.5 right-3.5 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
-            >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-2.5 mb-4">
-              <span className="text-3xl">{joinMode === 'edit' ? '🎨' : joinRole === 'spectator' ? '👀' : '🔥'}</span>
-              <div>
-                <h3 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold">
-                  {joinMode === 'edit' ? 'แต่งตัว & แก้ไขตัวละคร 3D' : 'ลงทะเบียนเข้าศึก 3D'}
-                </h3>
-                <p className="text-xs text-zinc-600 font-medium">
-                  {joinMode === 'edit'
-                    ? 'ปรับสี เครื่องประดับ หรือท่าออกกำลังกายแล้วใส่ PIN เพื่อบันทึก'
-                    : 'เลือกลงแข่งลดน้ำหนัก หรือเป็นผู้ชมออกกำลังกายข้างสนาม'}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-5 items-stretch">
-              <div className="flex flex-col gap-2">
-                <CharacterPreview3D
-                  colorHex={joinColor}
-                  accessory={joinAccessory}
-                  bandColor={joinBandColor}
-                  isSpectator={joinRole === 'spectator'}
-                  workoutType={joinWorkout}
-                  petType={joinPet}
-                />
-                <div className="bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 flex items-center gap-2 shadow-[2px_2px_0px_#18181B]">
-                  <span className="text-xl">{joinEmoji}</span>
-                  <div className="min-w-0">
-                    <div className="font-[family-name:var(--font-kanit)] font-extrabold text-xs text-black truncate">
-                      {joinName.trim() || (joinRole === 'spectator' ? 'ผู้ชมสายฟิต' : 'นักสู้เอวเอสคนใหม่')}
-                    </div>
-                    <div className="text-[10px] font-semibold text-zinc-600 truncate">
-                      {joinRole === 'spectator'
-                        ? isEatPath(joinWorkout)
-                          ? '🍔 สายกิน (สุ่มกิจกรรมใหม่ทุกวัน 07:00 น.)'
-                          : '💪 สายออกกำลัง (สุ่มกิจกรรมใหม่ทุกวัน 07:00 น.)'
-                        : ACCESSORY_OPTIONS.find((a) => a.id === joinAccessory)?.label}
+            {(() => {
+              const gMeta = getGoalTypeMeta(selectedPlayerObj?.goalType);
+              return (
+                <>
+                  <div className="flex items-center gap-2.5 mb-4">
+                    <span className="text-3xl">{gMeta.icon}</span>
+                    <div>
+                      <h3 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold text-amber-300">
+                        บันทึกผลภารกิจผู้กล้า 3D
+                      </h3>
+                      <p className="text-xs text-amber-100/80 font-medium">
+                        ทุกๆ +1% ความคืบหน้าที่เพิ่มขึ้น รับทันที +25 🪙 แต้มสะสม!
+                      </p>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <form onSubmit={handleJoinSubmit} className="space-y-3.5">
+                  <form onSubmit={handleWeightSubmit} className="space-y-3.5">
+                    {selectedPlayerObj && (
+                      <div className="rpg-panel-wood rounded-xl px-3 py-2 flex items-center justify-between">
+                        <span className="font-extrabold text-sm text-amber-200">
+                          {selectedPlayerObj.emoji} {selectedPlayerObj.name} ({gMeta.shortTag})
+                        </span>
+                        {selectedPlayerObj.id === currentUserId &&
+                        (selectedPlayerObj.currentVal ?? selectedPlayerObj.currentWeight) !== undefined ? (
+                          <span className="text-xs font-bold text-amber-100">
+                            ปัจจุบัน {selectedPlayerObj.currentVal ?? selectedPlayerObj.currentWeight} / เป้า{' '}
+                            {selectedPlayerObj.targetVal ?? selectedPlayerObj.goalWeight} {gMeta.unit}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-bold text-amber-100">
+                            ความคืบหน้า {selectedPlayerObj.progressPct ?? 0}%
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-              {(joinMode === 'create' || (joinMode === 'edit' && editingPlayerId === currentUserId)) && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setJoinRole('competitor')}
-                    className={`border-2 border-black rounded-xl py-2 px-3 text-xs font-extrabold cursor-pointer transition ${
-                      joinRole === 'competitor'
-                        ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]'
-                        : 'bg-zinc-100 text-zinc-600'
-                    }`}
-                  >
-                    🏃 ลงแข่งลดน้ำหนัก
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJoinRole('spectator')}
-                    className={`border-2 border-black rounded-xl py-2 px-3 text-xs font-extrabold cursor-pointer transition ${
-                      joinRole === 'spectator'
-                        ? 'bg-[#FFE600] shadow-[2px_2px_0px_#000]'
-                        : 'bg-zinc-100 text-zinc-600'
-                    }`}
-                  >
-                    👀 ผู้ชมข้างสนาม
-                  </button>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold mb-1">1. เลือกตัวละครประจำตัว</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {AVATARS.map((emo) => (
-                    <button
-                      type="button"
-                      key={emo}
-                      onClick={() => setJoinEmoji(emo)}
-                      className={`text-xl p-2 rounded-xl border-2 border-black cursor-pointer ${
-                        joinEmoji === emo ? 'bg-[#FFE600] scale-110' : 'bg-zinc-100'
-                      }`}
-                    >
-                      {emo}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1">2. สีตัวละคร 3D</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {BODY_COLORS.map((hex) => (
-                    <button
-                      type="button"
-                      key={hex}
-                      onClick={() => setJoinColor(hex)}
-                      aria-label={`เลือกสี ${hex}`}
-                      className={`w-7 h-7 rounded-full border-2 border-black cursor-pointer transition ${
-                        joinColor.toLowerCase() === hex.toLowerCase() ? 'ring-2 ring-black ring-offset-2 scale-110' : ''
-                      }`}
-                      style={{ backgroundColor: hex }}
-                    />
-                  ))}
-                  <label className="flex items-center gap-1 text-[11px] font-bold bg-zinc-100 border-2 border-black rounded-lg px-2 py-1 cursor-pointer">
-                    <span>🎨</span>
-                    <input
-                      type="color"
-                      value={joinColor}
-                      onChange={(e) => setJoinColor(e.target.value)}
-                      className="w-5 h-5 border-0 bg-transparent p-0 cursor-pointer"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1">3. แต่งตัว / เครื่องประดับ</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {ACCESSORY_OPTIONS.map((opt) => (
-                    <button
-                      type="button"
-                      key={opt.id}
-                      onClick={() => setJoinAccessory(opt.id)}
-                      className={`border-2 border-black rounded-xl px-2 py-1.5 text-xs font-bold cursor-pointer transition ${
-                        joinAccessory === opt.id ? 'bg-[#FFE600] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {joinAccessory !== 'none' && joinAccessory !== 'ears' && joinAccessory !== 'cat' && (
-                <div>
-                  <label className="block text-xs font-bold mb-1">สีเครื่องประดับ</label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {BAND_COLORS.map((hex) => (
-                      <button
-                        type="button"
-                        key={hex}
-                        onClick={() => setJoinBandColor(hex)}
-                        aria-label={`เลือกสีเครื่องประดับ ${hex}`}
-                        className={`w-6 h-6 rounded-full border-2 border-black cursor-pointer transition ${
-                          joinBandColor.toLowerCase() === hex.toLowerCase() ? 'ring-2 ring-black ring-offset-2 scale-110' : ''
-                        }`}
-                        style={{ backgroundColor: hex }}
+                    <div>
+                      <label className="block text-xs font-bold text-amber-200 mb-1">
+                        {gMeta.isCumulative
+                          ? `จำนวนที่ทำเพิ่มในครั้งนี้ (+${gMeta.unit})`
+                          : `ค่าล่าสุดวันนี้ (${gMeta.unit})`}
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        required
+                        value={newWeightInput}
+                        onChange={(e) => setNewWeightInput(e.target.value)}
+                        placeholder={gMeta.isCumulative ? `เช่น +50 ${gMeta.unit}` : 'เช่น 62.5'}
+                        className="w-full bg-slate-900 text-amber-300 placeholder:text-slate-500 border-2 border-amber-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
                       />
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
 
-              {joinRole === 'competitor' && (
-                <div>
-                  <label className="block text-xs font-bold mb-1">4. สัตว์คู่กาย (นิสัยเปลี่ยนตามระยะเส้นชัย!)</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                    {PET_OPTIONS.map((pet) => (
-                      <button
-                        type="button"
-                        key={pet.id}
-                        onClick={() => setJoinPet(pet.id)}
-                        className={`border-2 border-black rounded-xl px-2 py-1.5 text-xs font-bold cursor-pointer transition ${
-                          joinPet === pet.id ? 'bg-[#38BDF8] text-black shadow-[2px_2px_0px_#000]' : 'bg-zinc-100'
-                        }`}
-                      >
-                        {pet.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    <div>
+                      <label className="block text-xs font-bold text-amber-200 mb-1.5">
+                        เลือกสถานะ / คำคมผู้กล้า
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {EXCUSES.map((ex) => (
+                          <button
+                            type="button"
+                            key={ex.text}
+                            onClick={() => setSelectedExcuse(ex.text)}
+                            className={`${
+                              selectedExcuse === ex.text
+                                ? 'bg-amber-400 text-black border-white'
+                                : 'bg-slate-900 text-amber-100 border-slate-700'
+                            } border-2 rounded-lg px-2.5 py-1.5 text-xs font-bold text-left cursor-pointer`}
+                          >
+                            {ex.text}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
-              {joinRole === 'spectator' && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold">4. เลือกสายของผู้ชม</label>
-                  <div className="grid grid-cols-2 gap-2">
+                    {modalError && (
+                      <div className="bg-rose-600 text-white border-2 border-amber-300 rounded-xl p-2 text-xs font-bold text-center">
+                        {modalError}
+                      </div>
+                    )}
+
                     <button
-                      type="button"
-                      onClick={() => setJoinWorkout('fit')}
-                      className={`border-2 border-black rounded-xl py-2.5 px-3 text-xs font-extrabold cursor-pointer transition ${
-                        !isEatPath(joinWorkout) ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-700'
-                      }`}
+                      type="submit"
+                      disabled={submitting}
+                      className="w-full rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1"
                     >
-                      💪 สายออกกำลังกาย
+                      {submitting ? 'กำลังอัปเดต...' : '🚀 ส่งผลภารกิจ & รับแต้ม!'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setJoinWorkout('eat')}
-                      className={`border-2 border-black rounded-xl py-2.5 px-3 text-xs font-extrabold cursor-pointer transition ${
-                        isEatPath(joinWorkout) ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-700'
-                      }`}
-                    >
-                      🍔 สายกินยั่วเพื่อน
-                    </button>
-                  </div>
-                  <p className="text-[11px] font-semibold text-zinc-600 bg-[#FEF08A]/70 border border-black rounded-xl px-3 py-2">
-                    ✨ ระบบจะสุ่มกิจกรรมเซอร์ไพรส์ให้ใหม่ทุกวันตอน 7:00 น. (สายละ 30 กิจกรรม + กิจกรรมกลุ่มเมื่อมีเพื่อนสายเดียวกัน!)
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className={joinMode === 'create' || (joinMode === 'edit' && editingPlayerId === currentUserId) ? 'col-span-2' : ''}>
-                  <label className="block text-xs font-bold mb-1">ชื่อเล่น (Username)</label>
-                  <input
-                    type="text"
-                    required
-                    value={joinName}
-                    onChange={(e) => setJoinName(e.target.value)}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm"
-                  />
-                </div>
-                {joinMode === 'edit' && editingPlayerId !== currentUserId && (
-                  <div>
-                    <label className="block text-xs font-bold mb-1">รหัส PIN 4 หลัก (ยืนยัน)</label>
-                    <input
-                      type="password"
-                      maxLength={4}
-                      required
-                      value={joinPin}
-                      onChange={(e) => setJoinPin(e.target.value)}
-                      className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-center tracking-widest"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {joinRole === 'competitor' &&
-                (joinMode === 'create' ||
-                  (editingPlayerId === currentUserId && (!joinStart || Number(joinStart) <= 0))) && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold mb-1">น้ำหนักเริ่มต้น (กก.)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      required
-                      value={joinStart}
-                      onChange={(e) => setJoinStart(e.target.value)}
-                      className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold mb-1">น้ำหนักเป้าหมาย (กก.)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      required
-                      value={joinGoal}
-                      onChange={(e) => setJoinGoal(e.target.value)}
-                      className="w-full bg-[#BEF264]/40 border-2 border-black rounded-xl px-3 py-2 font-extrabold text-center"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {joinMode === 'edit' && (
-                <div>
-                  <label className="block text-xs font-bold mb-1">💬 ข้อความบนหัว (Speech Bubble)</label>
-                  <input
-                    type="text"
-                    maxLength={60}
-                    placeholder="เช่น วันนี้สู้ตาย! / หิวชาบู..."
-                    value={joinStatus}
-                    onChange={(e) => setJoinStatus(e.target.value)}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-semibold text-xs"
-                  />
-                </div>
-              )}
-
-              {joinError && (
-                <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
-                  {joinError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={joining}
-                className="w-full neo-btn bg-[#FFE600] hover:bg-[#fef08a] text-black font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1"
-              >
-                {joining
-                  ? 'กำลังบันทึก...'
-                  : joinMode === 'edit'
-                  ? '✨ บันทึกการแต่งตัว!'
-                  : joinRole === 'spectator'
-                  ? '👀 ส่งตัวละครไปเชียร์ข้างสนาม!'
-                  : '🏁 เข้าสู่สนามแข่ง 3D!'}
-              </button>
-            </form>
-            </div>
+                  </form>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
 
-      {actionTargetPlayer && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-sm w-full p-5 relative">
+      <WardrobeShopModal
+        isOpen={isJoinOpen}
+        onClose={() => setIsJoinOpen(false)}
+        mode={joinMode}
+        editingPlayerId={editingPlayerId}
+        currentUserId={currentUserId}
+        userPoints={
+          players.find((pl) => pl.id === (editingPlayerId || currentUserId))?.points ?? 100
+        }
+        unlockedItems={
+          players.find((pl) => pl.id === (editingPlayerId || currentUserId))?.unlockedItems ?? []
+        }
+        onUnlockOrEquipItem={handleUnlockOrEquipItem}
+        onSpinGacha={handleSpinGacha}
+        initialRightTab={wardrobeInitialTab}
+        joinRole={joinRole}
+        setJoinRole={setJoinRole}
+        joinName={joinName}
+        setJoinName={setJoinName}
+        joinEmoji={joinEmoji}
+        setJoinEmoji={setJoinEmoji}
+        joinColor={joinColor}
+        setJoinColor={setJoinColor}
+        joinBandColor={joinBandColor}
+        setJoinBandColor={setJoinBandColor}
+        joinSpecies={joinSpecies}
+        setJoinSpecies={setJoinSpecies}
+        joinThemeId={joinThemeId}
+        setJoinThemeId={setJoinThemeId}
+        joinEquipHat={joinEquipHat}
+        setJoinEquipHat={setJoinEquipHat}
+        joinEquipFace={joinEquipFace}
+        setJoinEquipFace={setJoinEquipFace}
+        joinEquipArmor={joinEquipArmor}
+        setJoinEquipArmor={setJoinEquipArmor}
+        joinEquipWeapon={joinEquipWeapon}
+        setJoinEquipWeapon={setJoinEquipWeapon}
+        joinEquipWings={joinEquipWings}
+        setJoinEquipWings={setJoinEquipWings}
+        joinEquipAura={joinEquipAura}
+        setJoinEquipAura={setJoinEquipAura}
+        joinEquipPetGear={joinEquipPetGear}
+        setJoinEquipPetGear={setJoinEquipPetGear}
+        joinEquipMount={joinEquipMount}
+        setJoinEquipMount={setJoinEquipMount}
+        joinGoalType={joinGoalType}
+        setJoinGoalType={setJoinGoalType}
+        joinStart={joinStart}
+        setJoinStart={setJoinStart}
+        joinGoal={joinGoal}
+        setJoinGoal={setJoinGoal}
+        joinWorkout={joinWorkout}
+        setJoinWorkout={setJoinWorkout}
+        joinStatus={joinStatus}
+        setJoinStatus={setJoinStatus}
+        joinPin={joinPin}
+        setJoinPin={setJoinPin}
+        joinError={joinError}
+        joining={joining}
+        onSubmit={handleJoinSubmit}
+      />
+
+      {actionTargetPlayer && (() => {
+        const liveTarget =
+          rankedPlayers.find((pl) => pl.id === actionTargetPlayer.id) ||
+          players.find((pl) => pl.id === actionTargetPlayer.id) ||
+          actionTargetPlayer;
+        const pBoost = resolvePowerBoostMeta(
+          liveTarget.cheerCount ?? 0,
+          liveTarget.temptCount ?? 0
+        );
+        const fillPct = Math.abs(pBoost.gaugeRatio) * 50;
+        const thumbLeftPct = 50 + pBoost.gaugeRatio * 50;
+        const netLabel =
+          pBoost.netPower > 0 ? `+${pBoost.netPower}` : String(pBoost.netPower);
+
+        return (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="rpg-panel rounded-2xl max-w-sm w-full p-5 relative">
             <button
               onClick={() => setActionTargetPlayer(null)}
-              className="absolute top-3 right-3 w-8 h-8 bg-[#FF4D8D] text-white neo-btn rounded-lg flex items-center justify-center font-bold cursor-pointer"
+              className="absolute top-3 right-3 w-8 h-8 bg-rose-600 text-white rounded-lg flex items-center justify-center font-bold cursor-pointer"
             >
               ✕
             </button>
 
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-3">
               <div
-                className="w-12 h-12 rounded-2xl border-2 border-black flex items-center justify-center text-2xl shadow-[2px_2px_0px_#000] shrink-0"
-                style={{ backgroundColor: actionTargetPlayer.colorHex }}
+                className="w-12 h-12 rounded-2xl border-2 border-amber-400 flex items-center justify-center text-2xl shrink-0"
+                style={{ backgroundColor: liveTarget.colorHex }}
               >
-                {actionTargetPlayer.emoji}
+                {liveTarget.emoji}
               </div>
               <div className="min-w-0">
-                <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold truncate">
-                  {actionTargetPlayer.name}
+                <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold text-amber-300 truncate">
+                  {liveTarget.name}
                 </h3>
-                <p className="text-xs text-zinc-600 font-semibold">
-                  {actionTargetPlayer.startWeight} ➔ {actionTargetPlayer.currentWeight} กก. (เป้า {actionTargetPlayer.goalWeight} กก.)
+                <p className="text-xs text-amber-100/80 font-semibold">
+                  {getGoalTypeMeta(liveTarget.goalType).shortTag} • ความคืบหน้า{' '}
+                  {liveTarget.progressPct ?? 0}%
                 </p>
               </div>
             </div>
 
-            {actionTargetPlayer.id === currentUserId && (
+            {/* บาร์สมดุลพลัง +/- รายวัน: มารผจญ (คาบิก้อน/จอมมารบู) vs เติมไฟ (ไฟบูสต์/Super Saiyan) */}
+            <div className="bg-slate-950/90 border-2 border-amber-500/60 rounded-xl p-3 mb-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded-full border text-[11px] font-extrabold ${pBoost.badgeBgClass}`}
+                >
+                  {pBoost.title}
+                </span>
+                <span
+                  className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${
+                    pBoost.netPower > 0
+                      ? 'text-amber-300'
+                      : pBoost.netPower < 0
+                      ? 'text-pink-400'
+                      : 'text-slate-300'
+                  }`}
+                >
+                  เกจรวม: {netLabel}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] font-bold">
+                <span className="text-pink-300">😈 มารผจญ (-{pBoost.temptCount})</span>
+                <span className="text-slate-400">ชักเย่อ +/-</span>
+                <span className="text-amber-300">🔥 เติมไฟ (+{pBoost.cheerCount})</span>
+              </div>
+
+              {/* Bi-directional Tug-of-War Gauge (-6 .. 0 .. +6) */}
+              <div className="relative w-full h-4 bg-slate-900 border-2 border-black rounded-full overflow-visible shadow-inner">
+                {/* Left Negative Fill (Food / Kabigon / Majin Buu) */}
+                {pBoost.netPower < 0 && (
+                  <div
+                    className="absolute top-0 bottom-0 rounded-l-full bg-gradient-to-l from-cyan-400 via-pink-500 to-fuchsia-500 transition-all duration-300"
+                    style={{
+                      right: '50%',
+                      width: `${fillPct}%`,
+                    }}
+                  />
+                )}
+                {/* Right Positive Fill (Fire Boost / Super Saiyan) */}
+                {pBoost.netPower > 0 && (
+                  <div
+                    className="absolute top-0 bottom-0 rounded-r-full bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-200 transition-all duration-300"
+                    style={{
+                      left: '50%',
+                      width: `${fillPct}%`,
+                    }}
+                  />
+                )}
+
+                {/* Milestone Ticks: -3 (25%), 0 (50%), +3 (75%) */}
+                <div className="absolute top-0 bottom-0 left-1/4 w-[1.5px] bg-white/30" />
+                <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[2px] bg-white/85 z-10" />
+                <div className="absolute top-0 bottom-0 left-3/4 w-[1.5px] bg-white/30" />
+
+                {/* Thumb Indicator */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-2 border-black shadow z-20 transition-all duration-300"
+                  style={{ left: `${thumbLeftPct}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-[9px] font-extrabold text-amber-100/80 pt-0.5">
+                <span className="text-pink-300">🩷-6 บู</span>
+                <span className="text-cyan-300">💤-3 คาบิก้อน</span>
+                <span className="text-slate-300">0</span>
+                <span className="text-orange-300">🔥+3 บูสต์</span>
+                <span className="text-yellow-300">⚡+6 ไซย่า</span>
+              </div>
+
+              <div className="text-[10px] font-semibold text-amber-100/85 bg-black/40 rounded-lg px-2 py-1 leading-snug">
+                💡 {pBoost.nextHint}
+              </div>
+              <div className="text-[9px] font-bold text-amber-200/65 text-center">
+                ⏰ เกจพลัง +/- รีเซ็ตกลับเป็น 0 ใหม่ทุกวันเวลา 07:00 น. เช้า
+              </div>
+            </div>
+
+            {liveTarget.id === currentUserId && (
               <button
                 type="button"
                 onClick={() => {
-                  const p = actionTargetPlayer;
                   setActionTargetPlayer(null);
-                  setJoinMode('edit');
-                  setEditingPlayerId(p.id);
-                  setJoinRole('competitor');
-                  setJoinWorkout(isEatPath(p.workoutType) ? 'eat' : 'fit');
-                  setJoinPet(p.petType || 'none');
-                  setJoinStart(p.startWeight > 0 ? String(p.startWeight) : '');
-                  setJoinGoal(p.goalWeight > 0 ? String(p.goalWeight) : '');
-                  setJoinName(p.name);
-                  setJoinEmoji(p.emoji);
-                  setJoinColor(p.colorHex || '#38BDF8');
-                  setJoinAccessory(p.accessory || 'headband');
-                  setJoinBandColor(p.bandColor || '#FFE600');
-                  setJoinPin('');
-                  setJoinError('');
-                  setIsJoinOpen(true);
+                  openWardrobeModal(liveTarget);
                 }}
-                className="w-full neo-btn bg-[#38BDF8] text-black font-extrabold text-xs py-2 rounded-xl mb-3 cursor-pointer"
+                className="w-full rpg-btn-blue font-extrabold text-xs py-2 rounded-xl mb-3 cursor-pointer"
               >
-                🎨 แต่งตัว / เปลี่ยนสัตว์คู่กาย / เปลี่ยนสาย
+                🎨 เปิดหน้าต่างแต่งตัว 3D &amp; ร้านค้าแต้ม
               </button>
             )}
 
@@ -2913,19 +3831,23 @@ export default function Arena3DPage() {
                   type="button"
                   onClick={() => setBoardKind('cheer')}
                   className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
-                    boardKind === 'cheer' ? 'bg-[#A3E635] shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                    boardKind === 'cheer'
+                      ? 'bg-gradient-to-r from-[#A3E635] to-[#FACC15] text-black shadow-[2px_2px_0px_#000]'
+                      : 'bg-zinc-100 text-zinc-600'
                   }`}
                 >
-                  🌸 ให้กำลังใจ/ดอกไม้
+                  🔥 เติมไฟบูสต์ (+1)
                 </button>
                 <button
                   type="button"
                   onClick={() => setBoardKind('tempt')}
                   className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
-                    boardKind === 'tempt' ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]' : 'bg-zinc-100 text-zinc-600'
+                    boardKind === 'tempt'
+                      ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]'
+                      : 'bg-zinc-100 text-zinc-600'
                   }`}
                 >
-                  😈 มารผจญ/ส่งของกิน
+                  😈 มารผจญ/ขุนพุง (-1)
                 </button>
               </div>
 
@@ -2935,100 +3857,46 @@ export default function Arena3DPage() {
                 placeholder="พิมพ์ข้อความถึงเพื่อน (ไม่ใส่ก็ได้)"
                 value={boardMessage}
                 onChange={(e) => setBoardMessage(e.target.value)}
-                className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 text-xs font-semibold"
+                className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 text-xs font-semibold text-black placeholder:text-zinc-500"
               />
 
               <button
                 type="submit"
                 disabled={sendingBoard}
-                className="w-full neo-btn bg-[#FFE600] hover:bg-[#fef08a] text-black font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer"
+                className={`w-full neo-btn font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer ${
+                  boardKind === 'cheer'
+                    ? 'bg-[#FFE600] hover:bg-[#fef08a] text-black'
+                    : 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white'
+                }`}
               >
-                {sendingBoard ? 'กำลังส่ง...' : boardKind === 'cheer' ? '🌸 ส่งดอกไม้ให้กำลังใจ!' : '🛵 ส่งไรเดอร์เอาของกินไปล่อ!'}
+                {sendingBoard
+                  ? 'กำลังส่ง...'
+                  : boardKind === 'cheer'
+                  ? '🔥 ยิงลูกไฟเติมพลังให้เพื่อน! (+1)'
+                  : '🍔 ส่งไรเดอร์เอาของกินไปขุน! (-1)'}
               </button>
             </form>
           </div>
         </div>
-      )}
+        );
+      })()}
 
-      {authChecked && currentUserId === null && !isJoinOpen && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-3 border-black shadow-[6px_6px_0px_#18181B] rounded-2xl max-w-sm w-full p-6 relative">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-[#FFE600] border-2 border-black rounded-2xl flex items-center justify-center text-2xl shadow-[2px_2px_0px_#000] shrink-0">
-                🏆
-              </div>
-              <div>
-                <h2 className="font-[family-name:var(--font-kanit)] text-xl font-extrabold leading-tight">
-                  เข้าสู่สนามเอวเอส 3D
-                </h2>
-                <p className="text-xs text-zinc-600 font-medium">
-                  ใส่ชื่อผู้ใช้ (Username) เพื่อเข้าใช้งานได้เลย
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSignInSubmit} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold mb-1">ชื่อผู้ใช้ (Username)</label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={signInUsername}
-                  onChange={(e) => {
-                    setSignInUsername(e.target.value);
-                    if (signInError) setSignInError('');
-                  }}
-                  placeholder="พิมพ์ชื่อ หรือเลือกจากด้านล่าง..."
-                  className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2.5 font-bold text-base"
-                />
-              </div>
-
-              {players.length > 0 && (
-                <div>
-                  <label className="block text-[11px] font-bold text-zinc-600 mb-1">
-                    หรือเลือกจากผู้เล่นที่สร้างไว้แล้ว:
-                  </label>
-                  <select
-                    value={players.some((pl) => pl.name === signInUsername) ? signInUsername : ''}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        setSignInUsername(e.target.value);
-                        setSignInError('');
-                      }
-                    }}
-                    className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 font-bold text-sm cursor-pointer"
-                  >
-                    <option value="">-- เลือกชื่อผู้เล่น ({players.length} คน) --</option>
-                    {players.map((pl) => (
-                      <option key={pl.id} value={pl.name}>
-                        {pl.emoji} {pl.name} ({pl.role === 'spectator' ? 'ผู้ชม' : 'นักแข่ง'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {signInError && (
-                <div className="bg-[#FF4D8D] text-white border-2 border-black rounded-xl p-2 text-xs font-bold text-center">
-                  {signInError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={signingIn}
-                className="w-full neo-btn bg-[#A3E635] hover:bg-[#bef264] text-black font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer"
-              >
-                {signingIn ? 'กำลังตรวจสอบ...' : '🚀 เข้าใช้งาน!'}
-              </button>
-              <p className="text-[11px] text-center text-zinc-500 font-semibold">
-                เข้าครั้งแรกจะให้เลือกเป็น ผู้เข้าแข่งขัน หรือ ผู้ชม (เปลี่ยนทีหลังได้)
-              </p>
-            </form>
-          </div>
-        </div>
-      )}
+      <LoginGateModal
+        isOpen={Boolean(authChecked && currentUserId === null && !isJoinOpen)}
+        players={players}
+        champion={rankedPlayers[0] ?? competitors[0] ?? null}
+        signInUsername={signInUsername}
+        setSignInUsername={setSignInUsername}
+        signInError={signInError}
+        setSignInError={setSignInError}
+        signingIn={signingIn}
+        onSubmitSignIn={handleSignInSubmit}
+        onOpenCreate={() => openCreateModal()}
+        onSpectateGuest={() => {
+          setCurrentUserId(-1);
+          showToast('👀', 'เข้าชมโหมดผู้ชม', 'รับชมการแข่งขันในสนามได้ทันที (กดเข้าสู่ระบบได้ตลอดเวลา)');
+        }}
+      />
 
       {walkingSpectatorId !== null && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[94vw]">
@@ -3063,14 +3931,10 @@ export default function Arena3DPage() {
                             return next;
                           });
                           setIsPairMenuOpen(false);
-                          realtimeChannelRef.current?.send({
-                            type: 'broadcast',
-                            event: 'activity',
-                            payload: {
-                              userId: walkingSpectatorId,
-                              animType: nearMesh.workoutType,
-                              label: nearMesh.activityLabel,
-                            },
+                          broadcastRealtimeEvent('activity', {
+                            userId: walkingSpectatorId,
+                            animType: nearMesh.workoutType,
+                            label: nearMesh.activityLabel,
                           });
                           confetti({ particleCount: 40, spread: 55, origin: { y: 0.7 } });
                           showToast(
@@ -3109,14 +3973,10 @@ export default function Arena3DPage() {
                           return next;
                         });
                         setIsPairMenuOpen(false);
-                        realtimeChannelRef.current?.send({
-                          type: 'broadcast',
-                          event: 'activity',
-                          payload: {
-                            updates: {
-                              [walkingSpectatorId]: { animType: act.animType, label: act.label },
-                              [nearbySpectator.id]: { animType: act.animType, label: act.label },
-                            },
+                        broadcastRealtimeEvent('activity', {
+                          updates: {
+                            [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                            [nearbySpectator.id]: { animType: act.animType, label: act.label },
                           },
                         });
                         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
@@ -3126,7 +3986,7 @@ export default function Arena3DPage() {
                           `${walker?.name || ''} ชวน ${nearbySpectator.name} มา${act.label}`
                         );
                       }}
-                      className="border-2 border-black bg-[#FEF08A] hover:bg-[#FFE600] rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition"
+                      className="border-2 border-black bg-[#FEF08A] hover:bg-[#FFE600] text-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition"
                     >
                       {act.label}
                     </button>
@@ -3155,7 +4015,7 @@ export default function Arena3DPage() {
               placeholder="💬 พิมพ์คำพูดบนหัว..."
               value={quickStatusInput}
               onChange={(e) => handleQuickStatusChange(e.target.value)}
-              className="bg-white text-black border-2 border-white rounded-lg px-2.5 py-1 text-xs font-semibold w-40 sm:w-48"
+              className="bg-white text-black placeholder:text-zinc-500 border-2 border-white rounded-lg px-2.5 py-1 text-xs font-semibold w-40 sm:w-48"
             />
             <button
               type="button"
@@ -3187,7 +4047,7 @@ export default function Arena3DPage() {
               <button
                 type="button"
                 onClick={() => openRadialActivityMenu(radialMenu.x, radialMenu.y)}
-                className="w-16 h-16 rounded-full bg-[#FFE600] border-3 border-black shadow-[3px_3px_0px_#18181B] font-extrabold text-xs flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition z-10"
+                className="w-16 h-16 rounded-full bg-[#FFE600] text-black border-3 border-black shadow-[3px_3px_0px_#18181B] font-extrabold text-xs flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition z-10"
               >
                 <span className="text-lg leading-none">🎲</span>
                 <span className="text-[10px]">สุ่มใหม่</span>

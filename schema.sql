@@ -1,8 +1,8 @@
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  avatar_emoji TEXT NOT NULL DEFAULT '🏃',
-  color_hex TEXT NOT NULL DEFAULT '#38BDF8',
+  avatar_emoji TEXT NOT NULL DEFAULT '🐰',
+  color_hex TEXT NOT NULL DEFAULT '#F8FAFC',
   accessory TEXT DEFAULT 'headband',
   band_color TEXT DEFAULT '#FFE600',
   role TEXT NOT NULL DEFAULT 'competitor',
@@ -10,9 +10,48 @@ CREATE TABLE IF NOT EXISTS users (
   pet_type TEXT DEFAULT 'none',
   status_text TEXT DEFAULT '',
   pin_code TEXT NOT NULL DEFAULT '1234',
-  start_weight REAL NOT NULL,
-  goal_weight REAL NOT NULL,
+  start_weight REAL NOT NULL DEFAULT 0,
+  goal_weight REAL NOT NULL DEFAULT 0,
+  points INTEGER NOT NULL DEFAULT 100,
+  species TEXT DEFAULT 'bunny',
+  theme_id TEXT DEFAULT 'none',
+  equip_hat TEXT DEFAULT 'none',
+  equip_armor TEXT DEFAULT 'armor_none',
+  equip_wings TEXT DEFAULT 'wings_none',
+  equip_pet_gear TEXT DEFAULT 'pet_none',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS seasons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  end_date TEXT DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS season_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  season_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  goal_type TEXT NOT NULL DEFAULT 'weight_loss',
+  start_val REAL NOT NULL DEFAULT 0,
+  current_val REAL NOT NULL DEFAULT 0,
+  target_val REAL NOT NULL DEFAULT 0,
+  max_progress_awarded INTEGER NOT NULL DEFAULT 0,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(season_id, user_id),
+  FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  item_id TEXT NOT NULL,
+  unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, item_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS weight_logs (

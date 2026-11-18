@@ -32,8 +32,6 @@ export async function POST(req: Request) {
         role: u.role === 'spectator' ? 'spectator' : 'competitor',
         workoutType: u.workout_type ? String(u.workout_type) : 'fit',
         petType: u.pet_type ? String(u.pet_type) : 'none',
-        startWeight: Number(u.start_weight),
-        goalWeight: Number(u.goal_weight),
       },
     });
   } catch (error) {

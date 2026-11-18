@@ -1,36 +1,215 @@
 @import "tailwindcss";
 
-* {
-  box-sizing: border-box;
-  user-select: none;
-}
-body, html {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: linear-gradient(135deg, #bae6fd 0%, #e0f2fe 50%, #fef08a 100%);
+:root {
+  --background: #0f172a;
+  --foreground: #f8fafc;
 }
 
-.neo-card {
-  background: rgba(255, 253, 247, 0.94);
-  backdrop-filter: blur(8px);
-  border: 3px solid #18181B;
-  box-shadow: 4px 4px 0px #18181B;
+body {
+  background: linear-gradient(180deg, #38bdf8 0%, #bae6fd 55%, #fef08a 100%);
+  color: var(--foreground);
+  font-family: var(--font-prompt), sans-serif;
+  overflow: hidden;
+  user-select: none;
 }
+
+/* Dragon Nest / Fantasy MMO 3D Beveled RPG Styles */
+.neo-card {
+  background: linear-gradient(180deg, #2d3a54 0%, #172033 100%);
+  color: #fef3c7;
+  border: 3px solid #d97706;
+  box-shadow:
+    inset 0 2px 0 rgba(254, 240, 138, 0.45),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.55),
+    0 4px 0 #451a03,
+    0 10px 20px rgba(0, 0, 0, 0.55);
+}
+
+.rpg-panel {
+  background: linear-gradient(180deg, #1e3a5f 0%, #11223a 52%, #0b1628 100%);
+  border: 3px solid #eab308;
+  box-shadow:
+    inset 0 0 0 2px #78350f,
+    inset 0 2px 6px rgba(186, 230, 253, 0.35),
+    inset 0 -4px 10px rgba(0, 0, 0, 0.7),
+    0 6px 0 #271202,
+    0 14px 30px rgba(0, 0, 0, 0.7);
+  color: #fef3c7;
+}
+
+.rpg-panel-wood {
+  background: linear-gradient(180deg, #524338 0%, #372d26 55%, #231c18 100%);
+  border: 3px solid #d97706;
+  box-shadow:
+    inset 0 0 0 2px #451a03,
+    inset 0 2px 4px rgba(254, 240, 138, 0.3),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.65),
+    0 6px 0 #1c0d02,
+    0 14px 28px rgba(0, 0, 0, 0.65);
+  color: #fef3c7;
+}
+
+.rpg-stone-frame {
+  position: relative;
+  background:
+    radial-gradient(circle at 20% 8%, rgba(255, 255, 255, 0.06) 0%, transparent 45%),
+    linear-gradient(180deg, #2b3038 0%, #20242b 45%, #171a20 100%);
+  border: 7px solid #525966;
+  outline: 2.5px solid #13161b;
+  box-shadow:
+    inset 0 0 0 2.5px #15181e,
+    inset 0 4px 12px rgba(0, 0, 0, 0.85),
+    0 2px 0 #707988,
+    0 7px 0 #181b21,
+    0 18px 36px rgba(0, 0, 0, 0.72);
+  color: #fef3c7;
+}
+
+.rpg-hero-row {
+  position: relative;
+  background: linear-gradient(180deg, #4b525e 0%, #373d47 47%, #262b33 51%, #1f232b 100%);
+  border: 2px solid #13161b;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(148, 163, 184, 0.28),
+    0 3px 0 #101217,
+    0 5px 10px rgba(0, 0, 0, 0.45);
+}
+.rpg-hero-row:hover {
+  background: linear-gradient(180deg, #565e6c 0%, #404753 47%, #2d333d 51%, #242932 100%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.32),
+    0 0 0 1.5px #fbbf24,
+    0 3px 0 #101217,
+    0 6px 12px rgba(0, 0, 0, 0.5);
+}
+.rpg-hero-row-active {
+  position: relative;
+  background: linear-gradient(180deg, #9c7936 0%, #7d5d24 48%, #5e4417 52%, #46310f 100%);
+  border: 2.5px solid #fde047;
+  box-shadow:
+    inset 0 1.5px 0 rgba(254, 249, 195, 0.55),
+    inset 0 -2px 0 rgba(41, 24, 4, 0.65),
+    0 0 15px rgba(250, 204, 21, 0.55),
+    0 3px 0 #261805;
+}
+
+.rpg-gold-title {
+  background: linear-gradient(180deg, #fffbeb 0%, #fde047 45%, #d97706 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: 3px #1c1917;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 4px 0 #291804) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.7));
+}
+
+.rpg-banner {
+  background: linear-gradient(180deg, #1d4ed8 0%, #1e3a8a 60%, #172554 100%);
+  border: 2.5px solid #facc15;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.45),
+    0 3px 0 #422006,
+    0 6px 14px rgba(0, 0, 0, 0.5);
+  color: #fef08a;
+}
+
+.rpg-ribbon-header {
+  background: linear-gradient(180deg, #434a57 0%, #2a2f38 55%, #1d2128 100%);
+  border: 2px solid #d4a23a;
+  box-shadow:
+    inset 0 1px 0 rgba(254, 240, 138, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.65),
+    0 3px 0 #1f1606,
+    0 5px 12px rgba(0, 0, 0, 0.45);
+  color: #fef3c7;
+}
+
+.rpg-card-item {
+  background: linear-gradient(180deg, #2d333d 0%, #21252d 100%);
+  border: 2px solid #475569;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.rpg-card-item:hover {
+  border-color: #fbbf24;
+}
+.rpg-card-item-active {
+  background: linear-gradient(180deg, #42351a 0%, #292212 100%);
+  border: 2px solid #fde047;
+  box-shadow:
+    inset 0 1px 0 rgba(254, 240, 138, 0.45),
+    0 0 14px rgba(250, 204, 21, 0.65);
+}
+
 .neo-btn {
-  border: 2.5px solid #18181B;
-  box-shadow: 3px 3px 0px #18181B;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  border: 2px solid #facc15;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 3px 0 #422006,
+    0 6px 12px rgba(0, 0, 0, 0.45);
+  transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.15s ease;
 }
 .neo-btn:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 4px 4px 0px #18181B;
+  filter: brightness(1.09);
 }
 .neo-btn:active {
-  transform: translate(2px, 2px);
-  box-shadow: 1px 1px 0px #18181B;
+  transform: translate(0, 2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 1px 0 #422006;
+}
+
+.rpg-btn-gold {
+  background: linear-gradient(180deg, #fef08a 0%, #facc15 45%, #ca8a04 100%);
+  color: #1c1917;
+  border: 2px solid #fef9c3;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    inset 0 -2px 0 rgba(113, 63, 18, 0.5),
+    0 4px 0 #713f12,
+    0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.rpg-btn-blue {
+  background: linear-gradient(180deg, #3b82f6 0%, #0284c7 52%, #0369a1 100%);
+  color: #ffffff;
+  text-shadow: 0 1.5px 2px rgba(0, 0, 0, 0.72);
+  border: 2px solid #fde047;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(7, 89, 133, 0.65),
+    0 4px 0 #422006,
+    0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.rpg-btn-green {
+  background: linear-gradient(180deg, #84cc16 0%, #4d7c0f 55%, #365314 100%);
+  color: #ffffff;
+  text-shadow: 0 1.5px 2px rgba(0, 0, 0, 0.78);
+  border: 2px solid #fde047;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 0 rgba(20, 83, 45, 0.6),
+    0 4px 0 #422006,
+    0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.rpg-slot {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 2px solid #ca8a04;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.75),
+    0 2px 0 #422006;
+}
+.rpg-slot-active {
+  background: linear-gradient(180deg, #78350f 0%, #451a03 100%);
+  border: 2px solid #fde047;
+  box-shadow:
+    0 0 14px rgba(250, 204, 21, 0.65),
+    inset 0 1px 4px rgba(254, 240, 138, 0.45);
 }
 
 .player-tag {
@@ -45,6 +224,33 @@ body, html {
   transform: translate(-50%, -104%) scale(1.05);
 }
 
+@keyframes thoughtFloat {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -85%) scale(0.85);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -115%) scale(1.03);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -145%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -165%) scale(0.94);
+  }
+}
+
+.thought-bubble {
+  position: absolute;
+  width: max-content;
+  pointer-events: none;
+  z-index: 16;
+  animation: thoughtFloat 1.4s ease-out forwards;
+}
+
 @keyframes screenShake {
   0%, 100% { transform: translate(0, 0) rotate(0deg); }
   20% { transform: translate(-8px, 6px) rotate(-0.8deg); }
@@ -56,27 +262,6 @@ body, html {
   animation: screenShake 0.45s cubic-bezier(.36,.07,.19,.97) both;
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #18181B; border-radius: 3px; }
-
-@keyframes floatThought {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, 0) scale(0.7);
-  }
-  20% {
-    opacity: 1;
-    transform: translate(-50%, -14px) scale(1.05);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -72px) scale(0.95);
-  }
-}
-.thought-bubble {
-  position: absolute;
-  pointer-events: none;
-  animation: floatThought 1.35s ease-out forwards;
-  z-index: 40;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
+::-webkit-scrollbar-thumb { background: #d97706; border-radius: 9999px; }

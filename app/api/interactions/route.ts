@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 
 const CHEER_GIFTS = [
-  '🌸 ดอกไม้ให้กำลังใจ',
-  '💐 ช่อดอกไม้สุดสวย',
-  '🎁 กล่องของขวัญ',
-  '🏆 ถ้วยกำลังใจ',
-  '🌻 ดอกทานตะวัน',
+  '🔥 เชื้อเพลิงเติมไฟแรงกล้า',
+  '⚡ พลังงานบูสต์เทอร์โบ',
+  '🌟 ถั่วเซียนปลุกพลังไซย่า',
+  '💥 ลูกไฟฮึดสู้ทะลุขีดจำกัด',
+  '❤️‍🔥 หัวใจเพลิงนักสู้',
+  '🚀 ไอพ่นไฟความเร็วแสง',
 ];
 
 const TEMPT_FOODS = [
@@ -18,6 +19,8 @@ const TEMPT_FOODS = [
   '🍜 หมูกระทะร้อนๆ',
   '🍩 โดนัทเคลือบน้ำตาล',
   '🍟 เฟรนช์ฟรายส์ชีส',
+  '🍱 ข้าวกล่องยักษ์คาบิก้อน',
+  '🍫 ช็อกโกแลตเสกของจอมมารบู',
 ];
 
 export async function POST(req: Request) {
@@ -59,6 +62,23 @@ export async function POST(req: Request) {
       args: [senderName, senderEmoji, Number(targetUserId), finalKind, giftItem, cleanMsg],
     });
 
+    // คำนวณแต้มเติมไฟ (+) และมารผจญ (-) รายวัน (รีเซ็ตทุก 07:00 น. เวลาไทย = 00:00 UTC)
+    const dailyRes = await turso.execute({
+      sql: `
+        SELECT kind, COUNT(*) AS cnt
+        FROM interactions
+        WHERE target_user_id = ? AND date(created_at) = date('now')
+        GROUP BY kind
+      `,
+      args: [Number(targetUserId)],
+    });
+    let cheerCount = 0;
+    let temptCount = 0;
+    for (const r of dailyRes.rows) {
+      if (r.kind === 'tempt') temptCount = Number(r.cnt);
+      else cheerCount = Number(r.cnt);
+    }
+
     return NextResponse.json({
       success: true,
       interaction: {
@@ -71,6 +91,9 @@ export async function POST(req: Request) {
         kind: finalKind,
         giftItem,
         message: cleanMsg,
+        cheerCount,
+        temptCount,
+        netPower: cheerCount - temptCount,
       },
     });
   } catch (error) {
