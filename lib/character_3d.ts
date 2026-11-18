@@ -6,7 +6,7 @@ import {
 } from '@/lib/glb_loader';
 import { buildChubbyPlushOutfitRig } from '@/lib/plush_rig';
 import { buildMountMesh, animateMountFrame, type MountMeshParts } from '@/lib/mount_3d';
-import { resolveBreedOption, type SpeciesOption } from '@/lib/rpg_catalog';
+import { resolveBreedOption, SHOP_ITEMS, type PropColorMap, type SpeciesOption } from '@/lib/rpg_catalog';
 import { resolvePowerBoostMeta, type PowerFormType } from '@/lib/power_boost';
 
 export type CharacterAnimMode = 'idle' | 'run' | 'cheer' | 'spectator';
@@ -82,6 +82,7 @@ export interface BuildCharacterOptions {
   equipWings?: string;
   equipAura?: string;
   equipMount?: string;
+  propColors?: PropColorMap;
   animMode?: CharacterAnimMode;
   animSeed?: number;
   useProceduralOnly?: boolean;
@@ -790,77 +791,93 @@ function buildHeroHead3D(
   primaryHex: THREE.ColorRepresentation,
   accentHex: THREE.ColorRepresentation
 ): { hideStandardEyes: boolean; hideStandardMouth: boolean } {
-  const style = breedMeta.heroStyle || 'spiky_saiyan';
+  const style = breedMeta.heroStyle || 'snow_bob_bow';
   headMesh.scale.set(0.95, 0.96, 0.98);
-
-  const isMetallicPrimary = [
-    'knight_crest',
-    'viking_horns',
-    'samurai_kabuto',
-    'mecha_visor',
-    'thor_helm',
-    'sentai_helmet',
-    'rider_helmet',
-  ].includes(style);
 
   const primaryMat = new THREE.MeshStandardMaterial({
     color: primaryHex,
-    roughness: isMetallicPrimary ? 0.26 : 0.48,
-    metalness: isMetallicPrimary ? 0.58 : 0.06,
+    roughness: 0.44,
+    metalness: 0.06,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: accentHex,
-    roughness: 0.3,
-    metalness: 0.42,
+    roughness: 0.34,
+    metalness: 0.25,
   });
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.35 });
   const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32 });
   const goldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.68, roughness: 0.24 });
-  const cyanGlowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-  const fullEnclosedStyles = [
-    'mecha_visor',
-    'spider_mask',
-    'sentai_helmet',
-    'astro_helmet',
-    'rider_helmet',
-  ];
+  const hideHumanEars = [
+    'mickey_ears',
+    'minnie_bow_ears',
+    'donald_sailor_beak',
+    'stitch_alien_ears',
+    'buzz_space_dome',
+    'three_eye_alien',
+    'baymax_eyes',
+    'mike_cyclops',
+    'sulley_horns',
+    'olaf_snowman',
+    'maleficent_horns',
+    'queen_crown_veil',
+    'anime_boar_mask',
+    'anime_doraemon_bell',
+    'anime_pikachu_ears',
+    'anime_chopper_hat',
+    'anime_chainsaw_head',
+    'anime_korosensei_smile',
+    'anime_elf_twintails',
+  ].includes(style);
+
   const hideStandardEyes = [
-    'mecha_visor',
-    'bat_cowl',
-    'spider_mask',
-    'sentai_helmet',
-    'blindfold_white',
-  ].includes(style);
-  const hideStandardMouth = [
-    'ninja_mask',
-    'mecha_visor',
-    'spider_mask',
-    'sentai_helmet',
+    'three_eye_alien',
+    'baymax_eyes',
+    'mike_cyclops',
+    'anime_boar_mask',
+    'anime_blindfold_spiky',
+    'anime_chainsaw_head',
   ].includes(style);
 
-  // 1. หูมนุษย์จิบิ หรือ หูเอลฟ์ยาวแหลม (ซ่อนเมื่อใส่หมวกครอบเต็มใบ)
-  if (!fullEnclosedStyles.includes(style)) {
-    if (style === 'elf_circlet') {
-      [-1, 1].forEach((side) => {
-        const elfEar = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.48, 10), skinMat);
-        elfEar.position.set(-0.04, 0.08, side * 0.68);
-        elfEar.rotation.x = side * 1.18;
-        elfEar.rotation.z = 0.28;
-        headGroup.add(elfEar);
-      });
-    } else {
-      [-0.56, 0.56].forEach((ez) => {
-        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), skinMat);
-        ear.scale.set(0.55, 1.05, 0.75);
-        ear.position.set(0.0, 0.02, ez);
-        headGroup.add(ear);
-      });
-    }
+  const hideStandardMouth = [
+    'donald_sailor_beak',
+    'baymax_eyes',
+    'anime_boar_mask',
+    'anime_bamboo_muzzle',
+    'anime_ninja_mask_silver',
+    'anime_chainsaw_head',
+  ].includes(style);
+
+  const hideHumanNose = [
+    'donald_sailor_beak',
+    'stitch_alien_ears',
+    'pinocchio_hat_nose',
+    'baymax_eyes',
+    'mike_cyclops',
+    'olaf_snowman',
+    'mickey_ears',
+    'minnie_bow_ears',
+    'anime_boar_mask',
+    'anime_doraemon_bell',
+    'anime_pikachu_ears',
+    'anime_chopper_hat',
+    'anime_ninja_mask_silver',
+    'anime_chainsaw_head',
+    'anime_korosensei_smile',
+  ].includes(style);
+
+  // 1. หูมนุษย์จิบิ (หรือหูแหลมเอเลี่ยนสามตา)
+  if (!hideHumanEars) {
+    [-0.56, 0.56].forEach((ez) => {
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), skinMat);
+      ear.scale.set(0.55, 1.05, 0.75);
+      ear.position.set(0.0, 0.02, ez);
+      headGroup.add(ear);
+    });
   }
 
-  // 2. จมูกปุ่มเล็กๆ น่ารักแบบมนุษย์จิบิ (ไม่ใช้จมูกดำสัตว์!)
-  if (!hideStandardMouth) {
+  // 2. จมูกมนุษย์จิบิปุ่มเล็กๆ น่ารัก
+  if (!hideHumanNose) {
     const noseColor = new THREE.Color(breedMeta.skinHex || '#FAD6B8').multiplyScalar(0.88);
     const chibiNose = new THREE.Mesh(
       new THREE.SphereGeometry(0.036, 10, 10),
@@ -871,7 +888,7 @@ function buildHeroHead3D(
     headGroup.add(chibiNose);
   }
 
-  // Helper: ฐานทรงผมครึ่งหัวด้านหลัง & จอนข้างแก้มสำหรับตัวละครโชว์เส้นผม
+  // Helper: ฐานทรงผมครึ่งหัวด้านหลัง & จอนข้างแก้ม
   const addBaseHairCap = (mat: THREE.Material = primaryMat, withSidebangs = true) => {
     const backCap = new THREE.Mesh(
       new THREE.SphereGeometry(0.595, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.58),
@@ -888,7 +905,6 @@ function buildHeroHead3D(
         lock.position.set(0.32, 0.04, sz);
         headGroup.add(lock);
       });
-      // ปอยหน้าม้าเฉียงคิวท์ๆ
       [-0.16, 0.02, 0.18].forEach((bz, bi) => {
         const bang = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.26, 8), mat);
         bang.rotation.x = Math.PI;
@@ -899,546 +915,816 @@ function buildHeroHead3D(
     }
   };
 
-  // 3. ปั้นทรงผม หมวกเกราะ หน้ากากฮีโร่ และพรอพศีรษะทั้ง 31 สไตล์!
+  // Helper: สร้างโบว์ริบบิ้น 3D สุดคิวท์
+  const makeRibbonBow = (mat: THREE.Material, scale = 1) => {
+    const bow = new THREE.Group();
+    [-1, 1].forEach((side) => {
+      const wing = new THREE.Mesh(new THREE.ConeGeometry(0.15 * scale, 0.32 * scale, 10), mat);
+      wing.rotation.x = side * (Math.PI / 2);
+      wing.position.z = side * 0.14 * scale;
+      bow.add(wing);
+    });
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.08 * scale, 10, 10), mat);
+    bow.add(knot);
+    return bow;
+  };
+
+  // 3. ปั้นทรงผม มงกุฎ และคาแรกเตอร์ดิสนีย์ & พิกซาร์ทั้ง 35 สไตล์!
   switch (style) {
-    case 'knight_crest': {
-      const helm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.62, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.62),
-        primaryMat
-      );
-      helm.rotation.z = 0.22;
-      helm.position.y = 0.04;
-      [-0.48, 0.48].forEach((cz) => {
-        const cheekGuard = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 0.1), primaryMat);
-        cheekGuard.position.set(0.22, -0.06, cz);
-        headGroup.add(cheekGuard);
-      });
-      const browRim = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.045, 8, 22, Math.PI), goldMat);
-      browRim.rotation.z = -Math.PI / 2;
-      browRim.rotation.x = 0.2;
-      browRim.position.set(0.12, 0.24, 0);
-      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.16, 0.1), goldMat);
-      ridge.position.set(-0.05, 0.64, 0);
-      const plume = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.68, 10), accentMat);
-      plume.rotation.z = 1.08;
-      plume.position.set(-0.38, 0.72, 0);
-      headGroup.add(helm, browRim, ridge, plume);
-      break;
-    }
-
-    case 'wizard_hat': {
-      addBaseHairCap(accentMat, true);
-      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.88, 0.06, 24), primaryMat);
-      brim.position.set(-0.02, 0.42, 0);
-      brim.rotation.z = 0.08;
-      const coneLower = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.48, 0.52, 18), primaryMat);
-      coneLower.position.set(-0.04, 0.68, 0);
-      const coneTip = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.56, 14), primaryMat);
-      coneTip.position.set(-0.18, 1.08, 0);
-      coneTip.rotation.z = 0.52;
-      const ribbon = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.49, 0.1, 18), accentMat);
-      ribbon.position.set(-0.04, 0.48, 0);
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), goldMat);
-      star.position.set(0.42, 0.52, 0);
-      headGroup.add(brim, coneLower, coneTip, ribbon, star);
-      break;
-    }
-
-    case 'viking_horns': {
-      const helm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.61, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
-        primaryMat
-      );
-      helm.position.y = 0.1;
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.615, 0.615, 0.11, 20), goldMat);
-      band.position.y = 0.18;
-      const hornMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.35 });
-      [-0.56, 0.56].forEach((hz) => {
-        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.54, 10), hornMat);
-        horn.position.set(0.02, 0.48, hz);
-        horn.rotation.x = hz < 0 ? -0.68 : 0.68;
-        headGroup.add(horn);
-      });
-      // เคราเปียไวกิ้ง 2 ข้างคาง
-      [-0.22, 0.22].forEach((bz) => {
-        const braid = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.28, 6, 10), accentMat);
-        braid.position.set(0.4, -0.38, bz);
-        braid.rotation.z = 0.2;
-        headGroup.add(braid);
-      });
-      headGroup.add(helm, band);
-      break;
-    }
-
-    case 'ninja_mask': {
-      const hood = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.62),
-        primaryMat
-      );
-      hood.rotation.z = 0.25;
-      const lowerMask = new THREE.Mesh(
-        new THREE.SphereGeometry(0.595, 20, 14, 0, Math.PI * 2, Math.PI * 0.52, Math.PI * 0.48),
-        primaryMat
-      );
-      const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.605, 0.605, 0.12, 20), accentMat);
-      headband.position.y = 0.24;
-      const metalPlate = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 0.11, 0.34),
-        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.78, roughness: 0.2 })
-      );
-      metalPlate.position.set(0.59, 0.24, 0);
-      [-0.1, 0.1].forEach((tz) => {
-        const tail = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.07, 0.05), accentMat);
-        tail.position.set(-0.68, 0.18, tz);
-        tail.rotation.z = 0.35;
-        tail.rotation.y = tz * 1.4;
-        headGroup.add(tail);
-      });
-      headGroup.add(hood, lowerMask, headband, metalPlate);
-      break;
-    }
-
-    case 'kunoichi_ponytail': {
+    case 'snow_bob_bow': {
+      // 🍎 สโนว์ไวท์ / อลิซ: ผมบ๊อบพองลอนกลมข้างแก้ม + ที่คาดผมโบว์ผูกด้านบน
       addBaseHairCap(primaryMat, true);
-      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.04, 8, 14), accentMat);
-      tie.position.set(-0.34, 0.54, 0);
-      tie.rotation.y = Math.PI / 2;
-      const ponytail = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.74, 12), primaryMat);
-      ponytail.position.set(-0.62, 0.48, 0);
-      ponytail.rotation.z = 1.15;
-      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.52, 6), goldMat);
-      pin.rotation.x = Math.PI / 2;
-      pin.position.set(-0.32, 0.56, 0);
-      headGroup.add(tie, ponytail, pin);
-      break;
-    }
-
-    case 'samurai_kabuto': {
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.61, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
-        primaryMat
-      );
-      dome.position.y = 0.1;
-      const shikoro = new THREE.Mesh(
-        new THREE.ConeGeometry(0.78, 0.42, 18, 1, true, Math.PI * 0.22, Math.PI * 1.56),
-        primaryMat
-      );
-      shikoro.position.set(-0.08, 0.04, 0);
-      // เขาพระจันทร์เสี้ยวทอง (Kuwagata) ด้านหน้า
-      const crescent = new THREE.Mesh(
-        new THREE.TorusGeometry(0.32, 0.048, 8, 20, Math.PI * 1.25),
+      [-0.48, 0.48].forEach((bz) => {
+        const bobRoll = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 14), primaryMat);
+        bobRoll.scale.set(0.95, 1.15, 0.85);
+        bobRoll.position.set(-0.02, -0.14, bz);
+        headGroup.add(bobRoll);
+      });
+      const headband = new THREE.Mesh(
+        new THREE.TorusGeometry(0.585, 0.038, 8, 22, Math.PI * 1.1),
         accentMat
       );
-      crescent.rotation.y = Math.PI / 2;
-      crescent.rotation.z = -Math.PI * 0.12;
-      crescent.position.set(0.48, 0.58, 0);
-      headGroup.add(dome, shikoro, crescent);
+      headband.rotation.y = Math.PI / 2;
+      headband.position.set(0.04, 0.04, 0);
+      const bow = makeRibbonBow(accentMat, 1.05);
+      bow.position.set(0.14, 0.62, 0);
+      headGroup.add(headband, bow);
       break;
     }
 
-    case 'elf_circlet': {
+    case 'elsa_side_braid': {
+      // ❄️ ราชินีเอลซ่า: ผมบลอนด์เงินแสกข้างพองสวย + เปียยาวพาดไหล่ซ้ายมาด้านหน้า + มงกุฎน้ำแข็ง
       addBaseHairCap(primaryMat, true);
-      // ผมยาวสลวยด้านหลัง
-      const longHair = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.52, 0.62, 16), primaryMat);
-      longHair.position.set(-0.24, -0.18, 0);
-      longHair.rotation.z = -0.22;
-      const circlet = new THREE.Mesh(new THREE.TorusGeometry(0.575, 0.032, 8, 24), goldMat);
-      circlet.rotation.x = Math.PI / 2;
-      circlet.position.y = 0.28;
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), accentMat);
-      gem.position.set(0.58, 0.28, 0);
-      headGroup.add(longHair, circlet, gem);
+      const topSweep = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 14), primaryMat);
+      topSweep.scale.set(1.15, 0.68, 1.05);
+      topSweep.position.set(0.14, 0.48, -0.06);
+      headGroup.add(topSweep);
+      for (let b = 0; b < 5; b++) {
+        const bead = new THREE.Mesh(new THREE.SphereGeometry(0.14 - b * 0.012, 12, 10), primaryMat);
+        bead.position.set(0.1 + b * 0.08, -0.06 - b * 0.14, -0.48 + b * 0.02);
+        headGroup.add(bead);
+      }
+      // มงกุฎคริสตัลน้ำแข็ง
+      [-0.14, 0, 0.14].forEach((cz, ci) => {
+        const shard = new THREE.Mesh(
+          new THREE.OctahedronGeometry(ci === 1 ? 0.12 : 0.085, 0),
+          accentMat
+        );
+        shard.scale.set(0.45, ci === 1 ? 1.55 : 1.15, 0.8);
+        shard.position.set(0.4, 0.56 + (ci === 1 ? 0.06 : 0), cz);
+        headGroup.add(shard);
+      });
       break;
     }
 
-    case 'valkyrie_wings': {
+    case 'anna_twin_braids': {
+      // 🌷 เจ้าหญิงอันนา: ผมถักเปียคู่ยาวสองข้างผูกริบบิ้นบานเย็น
       addBaseHairCap(primaryMat, true);
-      const circlet = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.035, 8, 24), goldMat);
-      circlet.rotation.x = Math.PI / 2;
-      circlet.position.y = 0.26;
-      [-1, 1].forEach((side) => {
-        for (let f = 0; f < 3; f++) {
-          const feather = new THREE.Mesh(
-            new THREE.ConeGeometry(0.09, 0.52 - f * 0.08, 8),
-            accentMat
-          );
-          feather.position.set(-0.08 - f * 0.06, 0.36 + f * 0.1, side * 0.58);
-          feather.rotation.z = 0.85 + f * 0.15;
-          feather.rotation.x = side * 0.28;
-          headGroup.add(feather);
+      [-0.48, 0.48].forEach((sideZ) => {
+        for (let b = 0; b < 4; b++) {
+          const seg = new THREE.Mesh(new THREE.SphereGeometry(0.115 - b * 0.01, 10, 10), primaryMat);
+          seg.position.set(0.12, -0.1 - b * 0.14, sideZ);
+          headGroup.add(seg);
         }
+        const tie = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.025, 6, 12), accentMat);
+        tie.rotation.x = Math.PI / 2;
+        tie.position.set(0.12, -0.56, sideZ);
+        headGroup.add(tie);
       });
-      headGroup.add(circlet);
       break;
     }
 
-    case 'demon_lord': {
+    case 'cinderella_updo': {
+      // 👠 ซินเดอเรลล่า / เบลล์ / เทียน่า: มวยผมเกล้ากลมสูงสง่างาม + ที่คาดผมรัดเกล้า
       addBaseHairCap(primaryMat, true);
-      [-0.28, 0, 0.28].forEach((sz, idx) => {
-        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.45, 8), primaryMat);
-        spike.position.set(-0.08, 0.64 + (idx === 1 ? 0.08 : 0), sz);
-        spike.rotation.z = 0.35;
-        spike.rotation.x = sz * 0.7;
-        headGroup.add(spike);
-      });
-      [-0.34, 0.34].forEach((hz) => {
-        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.54, 10), accentMat);
-        horn.position.set(0.14, 0.62, hz);
-        horn.rotation.x = hz < 0 ? -0.45 : 0.45;
-        horn.rotation.z = -0.25;
-        headGroup.add(horn);
-      });
-      break;
-    }
-
-    case 'pirate_captain': {
-      const bandana = new THREE.Mesh(
-        new THREE.SphereGeometry(0.595, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.46),
+      const highBun = new THREE.Mesh(new THREE.SphereGeometry(0.32, 18, 16), primaryMat);
+      highBun.scale.set(0.95, 0.92, 1.05);
+      highBun.position.set(-0.1, 0.68, 0);
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(0.585, 0.042, 8, 22, Math.PI * 1.15),
         accentMat
       );
-      bandana.position.y = 0.12;
-      const triHat = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.46, 0.28, 3), primaryMat);
-      triHat.rotation.y = Math.PI / 6;
-      triHat.position.set(0.02, 0.54, 0);
-      const goldTrim = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.76, 0.05, 3), goldMat);
-      goldTrim.rotation.y = Math.PI / 6;
-      goldTrim.position.set(0.02, 0.66, 0);
-      // ผ้าปิดตาโจรสลัดข้างซ้าย
-      const eyePatch = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), darkMat);
-      eyePatch.scale.set(0.4, 0.9, 1.05);
-      eyePatch.position.set(0.53, 0.06, -0.19);
-      const patchStrap = new THREE.Mesh(new THREE.TorusGeometry(0.57, 0.018, 6, 22), darkMat);
-      patchStrap.rotation.z = 0.45;
-      patchStrap.rotation.x = 0.38;
-      headGroup.add(bandana, triHat, goldTrim, eyePatch, patchStrap);
+      band.rotation.y = Math.PI / 2;
+      band.position.set(0.06, 0.08, 0);
+      const bunRibbon = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.032, 8, 18), accentMat);
+      bunRibbon.rotation.x = Math.PI / 2;
+      bunRibbon.position.set(-0.1, 0.5, 0);
+      headGroup.add(highBun, band, bunRibbon);
       break;
     }
 
-    case 'twintail_princess': {
+    case 'ariel_wave_flower': {
+      // 🐚 แอเรียล / โมอาน่า / ลีโล่: ผมลอนยาวหนาแสกปัดหน้าผากฟูสวย + ดอกไม้/ปลาดาวทัดหู
+      addBaseHairCap(primaryMat, false);
+      const swoopBang = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 14), primaryMat);
+      swoopBang.scale.set(0.92, 0.68, 1.18);
+      swoopBang.position.set(0.34, 0.42, 0.12);
+      swoopBang.rotation.x = 0.25;
+      const backWaves = new THREE.Mesh(new THREE.SphereGeometry(0.56, 18, 16), primaryMat);
+      backWaves.scale.set(0.95, 1.22, 1.15);
+      backWaves.position.set(-0.26, -0.18, 0);
+      // ดอกไม้/ปลาดาวทัดหูขวา
+      const flower = new THREE.Group();
+      for (let p = 0; p < 5; p++) {
+        const pa = (p / 5) * Math.PI * 2;
+        const petal = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), accentMat);
+        petal.position.set(Math.cos(pa) * 0.09, Math.sin(pa) * 0.09, 0);
+        flower.add(petal);
+      }
+      const center = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), goldMat);
+      flower.add(center);
+      flower.rotation.y = Math.PI / 2;
+      flower.position.set(0.18, 0.24, 0.58);
+      headGroup.add(swoopBang, backWaves, flower);
+      break;
+    }
+
+    case 'rapunzel_floral_long': {
+      // 🌸 ราพันเซล: ผมทองถักเปียใหญ่มหึมาด้านหลัง + ดอกไม้พาสเทลประดับเต็มผม
       addBaseHairCap(primaryMat, true);
-      [-0.58, 0.58].forEach((tz) => {
-        const ribbon = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), accentMat);
-        ribbon.position.set(-0.06, 0.36, tz);
-        const tail = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.78, 12), primaryMat);
-        tail.rotation.x = Math.PI + (tz < 0 ? 0.38 : -0.38);
-        tail.position.set(-0.1, 0.02, tz * 1.18);
-        headGroup.add(ribbon, tail);
+      const flowerCols: number[] = [0xf472b6, 0xc084fc, 0x38bdf8, 0xfef08a, 0x4ade80];
+      for (let b = 0; b < 6; b++) {
+        const plait = new THREE.Mesh(new THREE.SphereGeometry(0.28 - b * 0.022, 14, 12), primaryMat);
+        plait.position.set(-0.42 - b * 0.04, 0.14 - b * 0.18, Math.sin(b * 0.8) * 0.06);
+        headGroup.add(plait);
+        const fl = new THREE.Mesh(
+          new THREE.SphereGeometry(0.07, 8, 8),
+          new THREE.MeshStandardMaterial({ color: flowerCols[b % flowerCols.length], roughness: 0.4 })
+        );
+        fl.position.set(-0.38, 0.22 - b * 0.16, (b % 2 === 0 ? 1 : -1) * 0.22);
+        headGroup.add(fl);
+      }
+      [-0.36, 0, 0.36].forEach((fz, fi) => {
+        const crownBloom = new THREE.Mesh(
+          new THREE.SphereGeometry(0.085, 10, 10),
+          fi === 1 ? accentMat : new THREE.MeshStandardMaterial({ color: 0xc084fc, roughness: 0.4 })
+        );
+        crownBloom.position.set(0.36, 0.48, fz);
+        headGroup.add(crownBloom);
       });
-      // มงกุฎเพชรน้อยบนหัว
-      const tiara = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.2, 0.16, 14), accentMat);
-      tiara.position.set(0.12, 0.6, 0);
-      headGroup.add(tiara);
       break;
     }
 
-    case 'shaolin_monk': {
-      // จุดธูปศักดิ์สิทธิ์ 6 จุดบนหน้าผากหลวงจีนเส้าหลิน + คิ้วเข้ม
-      [-0.1, 0, 0.1].forEach((dz) => {
-        [0.34, 0.43].forEach((dy) => {
-          const dot = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), accentMat);
-          dot.position.set(0.49 - (dy - 0.34) * 0.5, dy, dz);
+    case 'jasmine_ponytail_gem': {
+      // 🪔 เจ้าหญิงจัสมิน: ผมดำมัดปล้องพองยาว + รัดเกล้าทองพลอยฟ้า + ต่างหูห่วงทองใหญ่
+      addBaseHairCap(primaryMat, true);
+      for (let s = 0; s < 4; s++) {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.24 - s * 0.025, 14, 12), primaryMat);
+        puff.position.set(-0.46 - s * 0.06, 0.16 - s * 0.22, 0);
+        const bandTie = new THREE.Mesh(new THREE.TorusGeometry(0.16 - s * 0.018, 0.028, 8, 14), accentMat);
+        bandTie.rotation.x = Math.PI / 2;
+        bandTie.position.set(-0.46 - s * 0.06, 0.04 - s * 0.22, 0);
+        headGroup.add(puff, bandTie);
+      }
+      const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.595, 0.595, 0.1, 22), accentMat);
+      headband.position.y = 0.28;
+      const gemRim = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), goldMat);
+      gemRim.scale.set(0.5, 1.25, 0.9);
+      gemRim.position.set(0.59, 0.31, 0);
+      const sapphire = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), accentMat);
+      sapphire.scale.set(0.55, 1.15, 0.8);
+      sapphire.position.set(0.61, 0.31, 0);
+      [-0.58, 0.58].forEach((ez) => {
+        const earring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.022, 8, 14), goldMat);
+        earring.position.set(0.02, -0.14, ez);
+        headGroup.add(earring);
+      });
+      headGroup.add(headband, gemRim, sapphire);
+      break;
+    }
+
+    case 'mulan_jade_bun': {
+      // 🗡️ มู่หลาน: ผมดำเกล้ามวยปักปิ่นหยกและดอกเหมยชมพู
+      addBaseHairCap(primaryMat, true);
+      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 14), primaryMat);
+      bun.position.set(-0.14, 0.64, 0);
+      const jadePin = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.62, 8), accentMat);
+      jadePin.rotation.x = Math.PI / 2 + 0.18;
+      jadePin.position.set(-0.14, 0.65, 0);
+      const blossom = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0xf472b6, roughness: 0.4 })
+      );
+      blossom.position.set(0.18, 0.48, 0.38);
+      headGroup.add(bun, jadePin, blossom);
+      break;
+    }
+
+    case 'royal_tiara_curls': {
+      // 👑 เจ้าหญิงออโรร่า: ผมทองดัดลอนยาวสลวย + มงกุฎทองคำสามยอดทรงแหลม
+      addBaseHairCap(primaryMat, true);
+      const longCurls = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.58, 0.58, 18), primaryMat);
+      longCurls.position.set(-0.22, -0.18, 0);
+      const crownBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.26, 0.12, 18), goldMat);
+      crownBase.position.set(0.08, 0.58, 0);
+      [-0.16, 0, 0.16].forEach((cz, ci) => {
+        const spire = new THREE.Mesh(
+          new THREE.ConeGeometry(0.065, ci === 1 ? 0.28 : 0.2, 8),
+          goldMat
+        );
+        spire.position.set(0.26, 0.7 + (ci === 1 ? 0.04 : 0), cz);
+        headGroup.add(spire);
+      });
+      headGroup.add(longCurls, crownBase);
+      break;
+    }
+
+    case 'merida_wild_curls': {
+      // 🏹 เมอริด้า / ทาร์ซาน / มาวอิ: ผมหยิกฟูก้อนลอนใหญ่รอบหัวสุดมีพลัง!
+      addBaseHairCap(primaryMat, false);
+      const curlOffsets: [number, number, number, number][] = [
+        [0.12, 0.58, -0.28, 0.24],
+        [0.12, 0.58, 0.28, 0.24],
+        [-0.12, 0.64, 0, 0.28],
+        [-0.1, 0.36, -0.52, 0.26],
+        [-0.1, 0.36, 0.52, 0.26],
+        [-0.22, 0.06, -0.54, 0.26],
+        [-0.22, 0.06, 0.54, 0.26],
+        [-0.38, 0.28, -0.32, 0.28],
+        [-0.38, 0.28, 0.32, 0.28],
+        [-0.44, -0.08, 0, 0.34],
+      ];
+      curlOffsets.forEach(([cx, cy, cz, cr]) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(cr, 12, 12), primaryMat);
+        puff.position.set(cx, cy, cz);
+        headGroup.add(puff);
+      });
+      break;
+    }
+
+    case 'tinker_pom_bun': {
+      // ✨ ทิงเกอร์เบลล์ / ลั้ลลา (Joy): ผมซอยสั้นหน้าม้าเฉียง + จุกกลมสูงผูกริบบิ้น
+      addBaseHairCap(primaryMat, true);
+      const pomBun = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 14), primaryMat);
+      pomBun.position.set(-0.08, 0.72, 0);
+      const ribbon = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.038, 8, 16), accentMat);
+      ribbon.rotation.x = Math.PI / 2;
+      ribbon.position.set(-0.08, 0.54, 0);
+      headGroup.add(pomBun, ribbon);
+      break;
+    }
+
+    case 'aladdin_fez': {
+      // 🧞‍♂️ อะลาดิน: ผมดำแสกพองเท่ + หมวกเฟซสีแดงจิ๋ววางเอียงบนหัว
+      addBaseHairCap(primaryMat, true);
+      const fez = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.24, 16), accentMat);
+      fez.position.set(-0.04, 0.68, 0.08);
+      fez.rotation.x = 0.18;
+      const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.025, 0.18, 6), goldMat);
+      tassel.position.set(-0.08, 0.72, 0.24);
+      tassel.rotation.x = 0.65;
+      headGroup.add(fez, tassel);
+      break;
+    }
+
+    case 'genie_topknot_beard': {
+      // 💨 ยักษ์จินนี่: มัดจุกหางม้าโค้งบนหัว + เคราแพะม้วนงอนที่คาง + ต่างหูทอง
+      const goldBand = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.028, 8, 14), goldMat);
+      goldBand.rotation.x = Math.PI / 2;
+      goldBand.position.set(-0.04, 0.58, 0);
+      const topknot = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.48, 12), primaryMat);
+      topknot.position.set(-0.14, 0.8, 0);
+      topknot.rotation.z = 0.45;
+      const goatee = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.24, 10), primaryMat);
+      goatee.rotation.x = Math.PI;
+      goatee.rotation.z = -0.35;
+      goatee.position.set(0.52, -0.34, 0);
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.02, 8, 14), goldMat);
+      hoop.position.set(0, -0.1, 0.58);
+      headGroup.add(goldBand, topknot, goatee, hoop);
+      break;
+    }
+
+    case 'peter_robin_cap':
+    case 'pinocchio_hat_nose': {
+      // 🪶 ปีเตอร์แพน / 🤥 พินอคคิโอ: หมวกทรงแหลมปักขนนกแดงสด (+ จมูกไม้ยื่นยาวสำหรับพินอคคิโอ!)
+      const hairColor = style === 'pinocchio_hat_nose' ? 0x18181b : 0xc2410c;
+      addBaseHairCap(new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.5 }), true);
+      const capBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.64, 0.12, 20), primaryMat);
+      capBrim.position.set(0, 0.42, 0);
+      capBrim.rotation.z = -0.1;
+      const capCone = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.52, 16), primaryMat);
+      capCone.position.set(-0.06, 0.68, 0);
+      capCone.rotation.z = 0.28;
+      const feather = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.48, 8), accentMat);
+      feather.position.set(-0.12, 0.76, -0.42);
+      feather.rotation.x = -0.45;
+      feather.rotation.z = 0.35;
+      headGroup.add(capBrim, capCone, feather);
+
+      if (style === 'pinocchio_hat_nose') {
+        const longWoodenNose = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.032, 0.052, 0.46, 12),
+          skinMat
+        );
+        longWoodenNose.rotation.z = -Math.PI / 2;
+        longWoodenNose.position.set(0.74, -0.01, 0);
+        headGroup.add(longWoodenNose);
+      }
+      break;
+    }
+
+    case 'mickey_ears':
+    case 'minnie_bow_ears': {
+      // 🐭 มิกกี้ / 🎀 มินนี่ / 🍓 หมีล็อตโซ่: หูกลมใหญ่คู่เอกลักษณ์ระดับโลก!
+      const isLotso = breedMeta.id === 'disney_lotso';
+      if (!isLotso) {
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.59, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.56),
+          primaryMat
+        );
+        cap.rotation.z = 0.42;
+        headGroup.add(cap);
+      }
+      const snoutMuzzle = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 14, 12),
+        isLotso ? whiteMat : skinMat
+      );
+      snoutMuzzle.scale.set(0.85, 0.72, 1.15);
+      snoutMuzzle.position.set(0.48, -0.12, 0);
+      const buttonNose = new THREE.Mesh(
+        new THREE.SphereGeometry(isLotso ? 0.11 : 0.075, 12, 10),
+        isLotso ? accentMat : darkMat
+      );
+      buttonNose.scale.set(0.85, 0.75, 1.2);
+      buttonNose.position.set(0.64, -0.06, 0);
+      headGroup.add(snoutMuzzle, buttonNose);
+
+      [-0.48, 0.48].forEach((ez) => {
+        const mouseEar = new THREE.Mesh(
+          new THREE.CylinderGeometry(isLotso ? 0.22 : 0.34, isLotso ? 0.22 : 0.34, 0.1, 22),
+          primaryMat
+        );
+        mouseEar.rotation.z = Math.PI / 2;
+        mouseEar.position.set(-0.04, isLotso ? 0.56 : 0.66, ez);
+        headGroup.add(mouseEar);
+      });
+
+      if (style === 'minnie_bow_ears') {
+        const bigBow = makeRibbonBow(accentMat, 1.55);
+        bigBow.position.set(0.08, 0.68, 0);
+        // จุดขาว Polka-dots บนโบว์มินนี่!
+        [-0.22, -0.1, 0.1, 0.22].forEach((dz, di) => {
+          const dot = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 8), whiteMat);
+          dot.position.set(0.16, 0.68 + (di % 2 === 0 ? 0.05 : -0.05), dz);
           headGroup.add(dot);
         });
+        headGroup.add(bigBow);
+      }
+      break;
+    }
+
+    case 'donald_sailor_beak': {
+      // ⚓ โดนัลด์ดั๊ก: ปากเป็ดสีส้มยื่นก๊าบๆ + หมวกกะลาสีเรือสีน้ำเงินแถบดำริบบิ้นพริ้ว
+      const beakMat = accentMat;
+      const upperBill = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.1, 18), beakMat);
+      upperBill.scale.set(1.28, 1, 1.15);
+      upperBill.position.set(0.56, -0.06, 0);
+      const lowerBill = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.06, 16), beakMat);
+      lowerBill.scale.set(1.15, 1, 1.05);
+      lowerBill.position.set(0.53, -0.14, 0);
+      const sailorBand = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.3, 0.12, 18), darkMat);
+      sailorBand.position.set(0.02, 0.56, 0.08);
+      sailorBand.rotation.x = 0.22;
+      const sailorTop = new THREE.Mesh(new THREE.SphereGeometry(0.38, 18, 12), primaryMat);
+      sailorTop.scale.set(1.1, 0.42, 1.15);
+      sailorTop.position.set(-0.02, 0.68, 0.1);
+      sailorTop.rotation.x = 0.22;
+      const tailRibbon = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.08), darkMat);
+      tailRibbon.position.set(-0.34, 0.5, 0.08);
+      tailRibbon.rotation.z = 0.45;
+      headGroup.add(upperBill, lowerBill, sailorBand, sailorTop, tailRibbon);
+      break;
+    }
+
+    case 'stitch_alien_ears': {
+      // 🛸 สติทช์ (Experiment 626): หูเอเลี่ยนใบยาวใหญ่กางออกสองข้างด้านในสีชมพู + จมูกน้ำเงินเข้มก้อนโต
+      const bigNose = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 12), primaryMat);
+      bigNose.scale.set(0.85, 0.82, 1.18);
+      bigNose.position.set(0.56, 0.0, 0);
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 8), skinMat);
+      tuft.position.set(0.08, 0.64, 0);
+      headGroup.add(bigNose, tuft);
+      [-1, 1].forEach((side) => {
+        const earGrp = new THREE.Group();
+        const outerEar = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.92, 12), skinMat);
+        outerEar.scale.set(0.45, 1, 1);
+        const innerEar = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.76, 10), accentMat);
+        innerEar.scale.set(0.48, 1, 0.92);
+        innerEar.position.x = 0.04;
+        earGrp.add(outerEar, innerEar);
+        earGrp.position.set(-0.04, 0.42, side * 0.72);
+        earGrp.rotation.x = side * 1.05;
+        earGrp.rotation.z = 0.18;
+        headGroup.add(earGrp);
       });
       break;
     }
 
-    case 'bard_feather': {
-      addBaseHairCap(new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.55 }), true);
-      const beret = new THREE.Mesh(new THREE.SphereGeometry(0.56, 18, 14), primaryMat);
-      beret.scale.set(1.12, 0.46, 1.18);
-      beret.position.set(-0.04, 0.5, 0.1);
-      beret.rotation.x = 0.22;
-      const feather = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.68, 8), accentMat);
-      feather.position.set(-0.22, 0.78, -0.34);
-      feather.rotation.z = 0.78;
-      feather.rotation.x = -0.35;
-      headGroup.add(beret, feather);
+    case 'cowboy_hat': {
+      // 🤠 นายอำเภอวู้ดดี้ / คาวเกิร์ลเจสซี่ / รัสเซล: หมวกคาวบอยปีกโค้งเท่!
+      const underHairMat = new THREE.MeshStandardMaterial({
+        color: breedMeta.id === 'disney_jessie' ? 0xc2410c : 0x78350f,
+        roughness: 0.5,
+      });
+      addBaseHairCap(underHairMat, true);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.92, 0.06, 24), primaryMat);
+      brim.scale.set(1.05, 1, 0.92);
+      brim.position.set(0, 0.44, 0);
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.36, 20), primaryMat);
+      crown.position.set(0, 0.62, 0);
+      const hatBand = new THREE.Mesh(new THREE.CylinderGeometry(0.485, 0.49, 0.075, 20), accentMat);
+      hatBand.position.set(0, 0.49, 0);
+      headGroup.add(brim, crown, hatBand);
       break;
     }
 
-    case 'super_curl': {
-      addBaseHairCap(primaryMat, false);
-      // ปอยผมม้วนตัว S กลางหน้าผากซุปเปอร์แมน!
-      const sCurl = new THREE.Mesh(
-        new THREE.TorusGeometry(0.095, 0.032, 8, 16, Math.PI * 1.45),
+    case 'buzz_space_dome': {
+      // 👨‍🚀 บัซ ไลท์เยียร์: ฮู้ดอวกาศสีม่วงคลุมศีรษะโชว์ใบหน้า + โดมแก้วอวกาศใสครอบรอบหัว!
+      const purpleCowl = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 22, 18, -Math.PI * 0.25, Math.PI * 1.5, 0, Math.PI * 0.78),
         primaryMat
       );
-      sCurl.rotation.y = Math.PI / 2;
-      sCurl.position.set(0.55, 0.26, 0.02);
-      headGroup.add(sCurl);
+      purpleCowl.rotation.y = Math.PI / 2;
+      const chinStrap = new THREE.Mesh(
+        new THREE.TorusGeometry(0.56, 0.055, 8, 20, Math.PI * 0.9),
+        primaryMat
+      );
+      chinStrap.rotation.z = -Math.PI * 0.95;
+      chinStrap.rotation.y = Math.PI / 2;
+      const collarRing = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.08, 10, 24), accentMat);
+      collarRing.rotation.x = Math.PI / 2;
+      collarRing.position.y = -0.44;
+      const spaceDome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.74, 24, 20),
+        new THREE.MeshPhysicalMaterial({
+          color: 0xe0f2fe,
+          transparent: true,
+          opacity: 0.3,
+          roughness: 0.06,
+          metalness: 0.1,
+        })
+      );
+      headGroup.add(purpleCowl, chinStrap, collarRing, spaceDome);
       break;
     }
 
-    case 'wonder_tiara': {
-      addBaseHairCap(primaryMat, true);
-      const wavyBack = new THREE.Mesh(new THREE.SphereGeometry(0.52, 16, 14), primaryMat);
-      wavyBack.scale.set(0.9, 1.1, 1.12);
-      wavyBack.position.set(-0.26, -0.14, 0);
-      const tiaraBand = new THREE.Mesh(new THREE.CylinderGeometry(0.585, 0.585, 0.11, 20), accentMat);
-      tiaraBand.position.y = 0.25;
-      const redStar = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.085, 0),
-        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
-      );
-      redStar.position.set(0.59, 0.26, 0);
-      headGroup.add(wavyBack, tiaraBand, redStar);
-      break;
-    }
-
-    case 'mecha_visor': {
-      const shell = new THREE.Mesh(new THREE.SphereGeometry(0.605, 24, 20), primaryMat);
-      const facePlate = new THREE.Mesh(
-        new THREE.SphereGeometry(0.59, 20, 16, -Math.PI * 0.32, Math.PI * 0.64, Math.PI * 0.22, Math.PI * 0.62),
-        accentMat
-      );
-      facePlate.position.x = 0.04;
-      [-0.19, 0.19].forEach((ez) => {
-        const ledEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.065, 0.16), cyanGlowMat);
-        ledEye.position.set(0.57, 0.08, ez);
-        ledEye.rotation.x = ez < 0 ? 0.15 : -0.15;
-        headGroup.add(ledEye);
+    case 'three_eye_alien': {
+      // 👽 เอเลี่ยนสามตา (Toy Story LGM): ตากลมโต 3 ดวงเรียงกัน + หูแหลม + เสาอากาศบนหัว!
+      headMesh.scale.set(0.92, 0.86, 1.12);
+      [-0.24, 0, 0.24].forEach((ez, ei) => {
+        const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12), whiteMat);
+        const ex = ei === 1 ? 0.54 : 0.49;
+        sclera.position.set(ex, 0.1, ez);
+        const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 10), darkMat);
+        pupil.position.set(ex + 0.085, 0.1, ez);
+        headGroup.add(sclera, pupil);
       });
-      const mouthSlit = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.24), darkMat);
-      mouthSlit.position.set(0.57, -0.16, 0);
-      headGroup.add(shell, facePlate, mouthSlit);
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.036, 0.32, 8), skinMat);
+      stem.position.set(0.04, 0.64, 0);
+      const antBall = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), skinMat);
+      antBall.position.set(0.04, 0.82, 0);
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.065, 8, 22), accentMat);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = -0.42;
+      [-0.64, 0.64].forEach((ez) => {
+        const alienEar = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 10), skinMat);
+        alienEar.position.set(0, 0.08, ez);
+        alienEar.rotation.x = ez < 0 ? -1.15 : 1.15;
+        headGroup.add(alienEar);
+      });
+      headGroup.add(stem, antBall, collar);
       break;
     }
 
-    case 'bat_cowl': {
-      // หน้ากากอัศวินค้างคาวคลุมครึ่งบน โชว์ปากและคางมนุษย์!
+    case 'baymax_eyes': {
+      // 🤍 เบย์แมกซ์ (Big Hero 6): หัวมาร์ชเมลโลว์ขาวกลมมน ตาจุดดำคู่เชื่อมด้วยเส้นตรงกลางเป๊ะ!
+      headMesh.scale.set(0.92, 0.84, 1.06);
+      [-0.19, 0.19].forEach((ez) => {
+        const bEye = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 12), darkMat);
+        bEye.scale.set(0.45, 1, 1);
+        bEye.position.set(0.53, 0.06, ez);
+        headGroup.add(bEye);
+      });
+      const connectorLine = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.026, 0.38), darkMat);
+      connectorLine.position.set(0.54, 0.06, 0);
+      headGroup.add(connectorLine);
+      break;
+    }
+
+    case 'mike_cyclops': {
+      // 👁️ ไมค์ วาซาวสกี้: ตายักษ์ดวงเดียวกลางหน้าผากพร้อมม่านตาสีเขียวมรกต + เขาจิ๋วคู่!
+      const bigSclera = new THREE.Mesh(new THREE.SphereGeometry(0.26, 20, 18), whiteMat);
+      bigSclera.scale.set(0.55, 1, 1);
+      bigSclera.position.set(0.46, 0.12, 0);
+      const iris = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 16, 14),
+        new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.25 })
+      );
+      iris.scale.set(0.45, 1, 1);
+      iris.position.set(0.55, 0.12, 0);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), darkMat);
+      pupil.scale.set(0.45, 1, 1);
+      pupil.position.set(0.59, 0.12, 0);
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 8), whiteMat);
+      shine.position.set(0.62, 0.18, -0.05);
+      [-0.32, 0.32].forEach((hz) => {
+        const miniHorn = new THREE.Mesh(
+          new THREE.ConeGeometry(0.065, 0.22, 8),
+          new THREE.MeshStandardMaterial({ color: 0xd6d3d1, roughness: 0.45 })
+        );
+        miniHorn.position.set(0.04, 0.58, hz);
+        miniHorn.rotation.x = hz < 0 ? -0.35 : 0.35;
+        headGroup.add(miniHorn);
+      });
+      headGroup.add(bigSclera, iris, pupil, shine);
+      break;
+    }
+
+    case 'sulley_horns': {
+      // 💙 ซัลลี่ มอนสเตอร์ขนฟู: เขาโค้งคู่สีเทาฟ้า + จุดม่วงพาสเทล + คิ้วหนาใจดี
+      const hornMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.38 });
+      [-0.38, 0.38].forEach((hz) => {
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.46, 10), hornMat);
+        horn.position.set(0.04, 0.6, hz);
+        horn.rotation.x = hz < 0 ? -0.48 : 0.48;
+        const brow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.065, 0.18), primaryMat);
+        brow.position.set(0.52, 0.22, hz * 0.55);
+        headGroup.add(horn, brow);
+      });
+      [-0.32, 0.28].forEach((sz, si) => {
+        const spot = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), accentMat);
+        spot.scale.set(0.4, 0.9, 1.1);
+        spot.position.set(-0.22, 0.28 - si * 0.22, sz);
+        headGroup.add(spot);
+      });
+      break;
+    }
+
+    case 'olaf_snowman': {
+      // ⛄ โอลาฟ ตุ๊กตาหิมะ: จมูกแครอทสีส้มยื่นยาว + ฟันกระต่ายซี่โต + กิ่งไม้ 3 แฉกบนหัว!
+      const carrotNose = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.46, 12), accentMat);
+      carrotNose.rotation.z = -Math.PI / 2;
+      carrotNose.position.set(0.74, -0.02, 0);
+      const buckTooth = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.095, 0.12), whiteMat);
+      buckTooth.position.set(0.55, -0.19, 0);
+      [-0.22, 0, 0.22].forEach((tz, ti) => {
+        const twig = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.022, 0.38, 6), primaryMat);
+        twig.position.set(0.02, 0.72, tz * 0.5);
+        twig.rotation.x = tz * 1.3;
+        twig.rotation.z = ti === 1 ? -0.12 : 0.18;
+        headGroup.add(twig);
+      });
+      headGroup.add(carrotNose, buckTooth);
+      break;
+    }
+
+    case 'maleficent_horns': {
+      // 🖤 มาเลฟิเซนต์: หมวกคลุมดำกรอบหน้ารูปตัว V พร้อมเขาปีศาจโค้งสูงคู่ใหญ่สง่างาม!
       const cowl = new THREE.Mesh(
         new THREE.SphereGeometry(0.605, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.58),
         primaryMat
       );
-      [-0.34, 0.34].forEach((ez) => {
-        const batEar = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.52, 6), primaryMat);
-        batEar.position.set(0.04, 0.68, ez);
-        batEar.rotation.x = ez < 0 ? -0.08 : 0.08;
-        headGroup.add(batEar);
-      });
-      [-0.19, 0.19].forEach((ez) => {
-        const whiteSlit = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.065, 0.15), whiteMat);
-        whiteSlit.position.set(0.57, 0.08, ez);
-        whiteSlit.rotation.x = ez < 0 ? 0.22 : -0.22;
-        headGroup.add(whiteSlit);
-      });
-      headGroup.add(cowl);
-      break;
-    }
-
-    case 'spider_mask': {
-      const fullMask = new THREE.Mesh(new THREE.SphereGeometry(0.595, 24, 20), primaryMat);
-      [-0.2, 0.2].forEach((ez) => {
-        const rim = new THREE.Mesh(new THREE.SphereGeometry(0.155, 14, 12), darkMat);
-        rim.scale.set(0.35, 1.12, 1.25);
-        rim.rotation.x = ez < 0 ? 0.28 : -0.28;
-        rim.position.set(0.53, 0.08, ez);
-        const lens = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), whiteMat);
-        lens.scale.set(0.38, 1.05, 1.18);
-        lens.rotation.x = ez < 0 ? 0.28 : -0.28;
-        lens.position.set(0.55, 0.08, ez);
-        headGroup.add(rim, lens);
-      });
-      headGroup.add(fullMask);
-      break;
-    }
-
-    case 'flash_wings': {
-      const cowl = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        primaryMat
-      );
+      const vPeak = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.24, 6), primaryMat);
+      vPeak.rotation.x = Math.PI;
+      vPeak.position.set(0.55, 0.28, 0);
       [-1, 1].forEach((side) => {
-        const bolt = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.48, 4), accentMat);
-        bolt.position.set(-0.08, 0.2, side * 0.62);
-        bolt.rotation.z = 1.15;
-        bolt.rotation.x = side * 0.22;
-        headGroup.add(bolt);
+        const hornLower = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.15, 0.48, 12), primaryMat);
+        hornLower.position.set(-0.02, 0.66, side * 0.36);
+        hornLower.rotation.x = side * 0.42;
+        const hornUpper = new THREE.Mesh(new THREE.ConeGeometry(0.095, 0.54, 12), primaryMat);
+        hornUpper.position.set(-0.08, 1.04, side * 0.44);
+        hornUpper.rotation.x = -side * 0.24;
+        hornUpper.rotation.z = 0.22;
+        headGroup.add(hornLower, hornUpper);
       });
-      headGroup.add(cowl);
+      headGroup.add(cowl, vPeak);
       break;
     }
 
-    case 'thor_helm': {
+    case 'cruella_half_hair': {
+      // 🐾 ครูเอลล่า เดอ วิล: ผมบ๊อบฟูแบ่งครึ่งสองสีชัดเจน ขาวซีกซ้าย - ดำซีกขวา!
+      const leftWhiteMat = whiteMat;
+      const rightBlackMat = darkMat;
+      [-1, 1].forEach((side) => {
+        const halfMat = side < 0 ? leftWhiteMat : rightBlackMat;
+        const halfDome = new THREE.Mesh(
+          new THREE.SphereGeometry(
+            0.62,
+            16,
+            14,
+            side < 0 ? Math.PI : 0,
+            Math.PI,
+            0,
+            Math.PI * 0.62
+          ),
+          halfMat
+        );
+        halfDome.rotation.z = 0.28;
+        const sidePuff = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), halfMat);
+        sidePuff.position.set(-0.06, 0.04, side * 0.48);
+        const topPuff = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 12), halfMat);
+        topPuff.position.set(0.04, 0.48, side * 0.24);
+        headGroup.add(halfDome, sidePuff, topPuff);
+      });
+      break;
+    }
+
+    case 'hades_flame_hair': {
+      // 🔥 ฮาเดส (ไฟฟ้า) / ฉุนเฉียว Anger (ไฟส้มแดง): เปลวไฟเรืองแสงลุกโชนพริ้วบนหัว!
+      const outerFireMat = new THREE.MeshBasicMaterial({ color: primaryHex });
+      const innerFireMat = new THREE.MeshBasicMaterial({ color: accentHex });
+      const flameSpecs: [number, number, number, number, number][] = [
+        [0.02, 0.82, 0, 0.26, 0.68],
+        [0.06, 0.72, -0.24, 0.2, 0.54],
+        [0.06, 0.72, 0.24, 0.2, 0.54],
+        [-0.16, 0.74, -0.14, 0.2, 0.56],
+        [-0.16, 0.74, 0.14, 0.2, 0.56],
+        [0.22, 0.64, 0, 0.16, 0.42],
+      ];
+      flameSpecs.forEach(([fx, fy, fz, fr, fh], fi) => {
+        const tongue = new THREE.Mesh(
+          new THREE.ConeGeometry(fr, fh, 9),
+          fi % 2 === 0 ? outerFireMat : innerFireMat
+        );
+        tongue.position.set(fx, fy, fz);
+        tongue.rotation.z = (fi % 2 === 0 ? 1 : -1) * 0.12;
+        tongue.rotation.x = fz * 0.55;
+        headGroup.add(tongue);
+      });
+      break;
+    }
+
+    case 'queen_crown_veil': {
+      // 🪞 ราชินีใจร้าย / 🐙 เออร์ซูล่า / ♥️ ราชินีโพแดง: ผมพองหรือผ้าคลุมพร้อมมงกุฎทองยอดแหลม!
       addBaseHairCap(primaryMat, false);
-      const longLocks = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.54, 0.48, 16), primaryMat);
-      longLocks.position.set(-0.2, -0.18, 0);
-      const helm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.61, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
-        new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.72, roughness: 0.24 })
-      );
-      helm.position.y = 0.12;
-      [-1, 1].forEach((side) => {
-        const wing = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.56, 8), accentMat);
-        wing.scale.set(1.1, 1, 0.35);
-        wing.position.set(0.02, 0.46, side * 0.62);
-        wing.rotation.z = 0.55;
-        wing.rotation.x = side * 0.35;
-        headGroup.add(wing);
-      });
-      headGroup.add(longLocks, helm);
-      break;
-    }
-
-    case 'captain_cowl': {
-      const cowl = new THREE.Mesh(
-        new THREE.SphereGeometry(0.605, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.54),
-        primaryMat
-      );
-      const starBadge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.11), accentMat);
-      starBadge.position.set(0.59, 0.28, 0);
-      [-1, 1].forEach((side) => {
-        const miniWing = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.26, 6), accentMat);
-        miniWing.position.set(0.1, 0.28, side * 0.6);
-        miniWing.rotation.z = 1.05;
-        headGroup.add(miniWing);
-      });
-      headGroup.add(cowl, starBadge);
-      break;
-    }
-
-    case 'sentai_helmet': {
-      const rangerHelm = new THREE.Mesh(new THREE.SphereGeometry(0.605, 24, 20), primaryMat);
-      const blackVisor = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.615, 0.615, 0.2, 22, 1, false, -Math.PI * 0.35, Math.PI * 0.7),
-        new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.1, metalness: 0.85 })
-      );
-      blackVisor.rotation.y = Math.PI / 2;
-      blackVisor.position.y = 0.08;
-      const mouthPlate = new THREE.Mesh(
-        new THREE.SphereGeometry(0.24, 12, 10),
-        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.7, roughness: 0.25 })
-      );
-      mouthPlate.scale.set(0.45, 0.65, 1.1);
-      mouthPlate.position.set(0.51, -0.16, 0);
-      [-0.22, 0.22].forEach((vz) => {
-        const vFin = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.36, 6), accentMat);
-        vFin.position.set(0.48, 0.36, vz);
-        vFin.rotation.x = vz < 0 ? -0.55 : 0.55;
-        vFin.rotation.z = -0.35;
-        headGroup.add(vFin);
-      });
-      headGroup.add(rangerHelm, blackVisor, mouthPlate);
-      break;
-    }
-
-    case 'cyber_mohawk': {
-      for (let i = 0; i < 6; i++) {
-        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.44, 6), primaryMat);
-        const ang = -0.55 + i * 0.26;
-        fin.position.set(Math.sin(ang) * 0.52, Math.cos(ang) * 0.66, 0);
-        fin.rotation.z = -ang;
-        headGroup.add(fin);
+      if (breedMeta.id === 'disney_ursula') {
+        // ผมขาวเซ็ตตั้งพริ้วของเออร์ซูล่า
+        [-0.2, 0, 0.2].forEach((uz, ui) => {
+          const wave = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.54, 10), primaryMat);
+          wave.position.set(0.04, 0.68 + (ui === 1 ? 0.08 : 0), uz);
+          wave.rotation.z = -0.22;
+          headGroup.add(wave);
+        });
+      } else if (breedMeta.id === 'disney_queen_hearts') {
+        [-0.26, 0.26].forEach((hz) => {
+          const heartLobe = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 14), primaryMat);
+          heartLobe.position.set(0.02, 0.48, hz);
+          headGroup.add(heartLobe);
+        });
       }
-      // แว่นสแกนเนอร์ไซเบอร์ 1 ข้าง
-      const scouter = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 0.14, 0.22),
-        new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.8 })
-      );
-      scouter.position.set(0.58, 0.06, 0.18);
-      headGroup.add(scouter);
+      const crownRing = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.27, 0.16, 18), goldMat);
+      crownRing.position.set(0.08, 0.64, 0);
+      for (let s = 0; s < 5; s++) {
+        const sa = (s / 5) * Math.PI * 2;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.24, 6), goldMat);
+        spike.position.set(0.08 + Math.cos(sa) * 0.26, 0.82, Math.sin(sa) * 0.26);
+        headGroup.add(spike);
+      }
+      headGroup.add(crownRing);
       break;
     }
 
-    case 'astro_helmet': {
-      addBaseHairCap(new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.55 }), false);
-      const collarRing = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.085, 10, 24), accentMat);
-      collarRing.rotation.x = Math.PI / 2;
-      collarRing.position.y = -0.44;
-      const glassBubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.72, 24, 20),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xe0f2fe,
-          transparent: true,
-          opacity: 0.34,
-          roughness: 0.08,
-          metalness: 0.1,
-        })
-      );
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.28, 8), primaryMat);
-      antenna.position.set(0, 0.82, 0);
-      const antBall = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), accentMat);
-      antBall.position.set(0, 0.98, 0);
-      headGroup.add(collarRing, glassBubble, antenna, antBall);
+    case 'villain_tophat_plume': {
+      // 🪝 กัปตันฮุก / 🐍 จาฟาร์ / 🧪 อิซม่า / 🎩 ดร.ฟาซิเลียร์: หมวกทรงสูงประดับแถบและขนนกอลังการ!
+      addBaseHairCap(darkMat, true);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.78, 0.06, 22), primaryMat);
+      brim.position.set(0, 0.44, 0);
+      const tallCylinder = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.38, 0.54, 20), primaryMat);
+      tallCylinder.position.set(0, 0.72, 0);
+      const ribbon = new THREE.Mesh(new THREE.CylinderGeometry(0.405, 0.395, 0.1, 20), accentMat);
+      ribbon.position.set(0, 0.52, 0);
+      const plume = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.62, 10), accentMat);
+      plume.position.set(-0.18, 0.96, -0.28);
+      plume.rotation.z = 0.55;
+      plume.rotation.x = -0.35;
+      headGroup.add(brim, tallCylinder, ribbon, plume);
       break;
     }
 
-    case 'esper_clips': {
+    case 'mirabel_glasses_curls': {
+      // 🦋 มิราเบล / 💧 ซึมเศร้า (Sadness): ผมบ๊อบสั้นน่ารัก + แว่นตากลมโตสุดไอคอนิก!
       addBaseHairCap(primaryMat, true);
-      [-0.36, 0.36].forEach((cz) => {
-        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.28, 8), whiteMat);
-        stem.position.set(0.06, 0.62, cz);
-        stem.rotation.x = cz < 0 ? -0.35 : 0.35;
-        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), accentMat);
-        orb.position.set(0.06, 0.76, cz * 1.25);
-        headGroup.add(stem, orb);
+      [-0.46, 0.46].forEach((cz) => {
+        const bobSide = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 12), primaryMat);
+        bobSide.position.set(-0.04, -0.06, cz);
+        headGroup.add(bobSide);
       });
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.03, 0.14), accentMat);
+      bridge.position.set(0.58, 0.06, 0);
+      [-0.2, 0.2].forEach((gz) => {
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.022, 8, 20), accentMat);
+        rim.rotation.y = Math.PI / 2;
+        rim.position.set(0.58, 0.05, gz);
+        headGroup.add(rim);
+      });
+      headGroup.add(bridge);
       break;
     }
 
-    case 'jedi_hood': {
-      const hoodOuter = new THREE.Mesh(
-        new THREE.SphereGeometry(0.65, 20, 16, -Math.PI * 0.25, Math.PI * 1.5, 0, Math.PI * 0.72),
-        primaryMat
+    case 'boo_twintails': {
+      // 👧 น้องบู / 🍬 วาเนลโลปี้: มัดแกละสองข้างสูงผูกยางสีสดใส (+ ลูกกวาดติดผมสำหรับวาเนลโลปี้!)
+      addBaseHairCap(primaryMat, true);
+      [-0.52, 0.52].forEach((tz) => {
+        const scrunchie = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.035, 8, 14), accentMat);
+        scrunchie.rotation.x = Math.PI / 2;
+        scrunchie.position.set(-0.04, 0.44, tz * 0.92);
+        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.44, 10), primaryMat);
+        tuft.position.set(-0.06, 0.56, tz * 1.15);
+        tuft.rotation.x = tz < 0 ? -0.75 : 0.75;
+        headGroup.add(scrunchie, tuft);
+      });
+      if (breedMeta.id === 'disney_vanellope') {
+        const candyColors = [0xf43f5e, 0x38bdf8, 0xfacc15, 0x4ade80];
+        candyColors.forEach((cc, ci) => {
+          const candy = new THREE.Mesh(
+            new THREE.SphereGeometry(0.052, 8, 8),
+            new THREE.MeshStandardMaterial({ color: cc, roughness: 0.3 })
+          );
+          candy.position.set(0.38, 0.38 - (ci % 2) * 0.12, (ci < 2 ? -1 : 1) * (0.24 + (ci % 2) * 0.14));
+          headGroup.add(candy);
+        });
+      }
+      break;
+    }
+
+    case 'incredible_mask': {
+      // 🦸‍♂️ มิสเตอร์อินเครดิเบิ้ล / ⚡ เฮอร์คิวลิส / 💪 แกสตัน
+      addBaseHairCap(primaryMat, false);
+      const quiff = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.42, 10), primaryMat);
+      quiff.position.set(0.22, 0.62, 0.06);
+      quiff.rotation.z = -0.45;
+      headGroup.add(quiff);
+      if (breedMeta.id === 'disney_mr_incredible') {
+        const dominoMask = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.16, 0.62),
+          darkMat
+        );
+        dominoMask.position.set(0.53, 0.08, 0);
+        headGroup.add(dominoMask);
+      } else if (breedMeta.id === 'disney_hercules') {
+        const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.11, 22), accentMat);
+        headband.position.y = 0.28;
+        headGroup.add(headband);
+      }
+      break;
+    }
+
+    case 'pirate_dreads_tricorne': {
+      // 🏴‍☠️ กัปตันแจ็ค สแปร์โรว์: ผ้าโพกหัวสีแดง + หมวกโจรสลัดสามมุม + ผมเดรดล็อกร้อยลูกปัด!
+      const bandana = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.46),
+        accentMat
       );
-      hoodOuter.rotation.y = Math.PI / 2;
-      hoodOuter.position.set(-0.04, 0.04, 0);
-      const braid = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 0.44, 8), accentMat);
-      braid.position.set(0.28, -0.26, 0.44);
-      headGroup.add(hoodOuter, braid);
-      break;
-    }
-
-    case 'secret_agent': {
-      addBaseHairCap(primaryMat, false);
-      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.48), darkMat);
-      bridge.position.set(0.58, 0.08, 0);
-      [-0.18, 0.18].forEach((sz) => {
-        const shade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.13, 0.2), darkMat);
-        shade.position.set(0.58, 0.06, sz);
-        headGroup.add(shade);
+      bandana.position.y = 0.12;
+      const triHat = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.46, 0.28, 3), primaryMat);
+      triHat.rotation.y = Math.PI / 6;
+      triHat.position.set(0.02, 0.54, 0);
+      [-0.46, -0.32, 0.32, 0.46].forEach((dz, di) => {
+        const dread = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.028, 0.56, 8), primaryMat);
+        dread.position.set(-0.08, -0.14, dz);
+        const bead = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), di % 2 === 0 ? goldMat : whiteMat);
+        bead.position.set(-0.06, -0.24, dz);
+        headGroup.add(dread, bead);
       });
-      const earpiece = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), accentMat);
-      earpiece.position.set(0.02, 0.02, 0.62);
-      headGroup.add(bridge, earpiece);
+      headGroup.add(bandana, triHat);
       break;
     }
 
-    case 'spiky_saiyan':
-    case 'spiky_headband': {
+    // =========================================================================
+    // 🎌 ANIME HEAD & HAIR SCULPTS (21 Iconic Anime Styles)
+    // =========================================================================
+    case 'anime_spiky_shonen': {
+      // 🐉 โงกุน / เบจิต้า / อิจิโกะ / คิรัวร์ / กอร์น / เร็นโกคุ / เซ็นอิตสึ / อิตาโดริ
       addBaseHairCap(primaryMat, false);
+      const hasTwoToneTips = ['anime_rengoku', 'anime_zenitsu', 'anime_gon'].includes(breedMeta.id);
       const spikes: [number, number, number, number, number, number, number][] = [
-        [0.04, 0.86, 0.0, 0.2, 0.78, 0.12, 0],
-        [0.0, 0.78, -0.28, 0.18, 0.72, 0.18, -0.42],
-        [0.0, 0.78, 0.28, 0.18, 0.72, 0.18, 0.42],
-        [-0.08, 0.62, -0.48, 0.16, 0.66, 0.26, -0.78],
-        [-0.08, 0.62, 0.48, 0.16, 0.66, 0.26, 0.78],
-        [-0.28, 0.72, 0.0, 0.18, 0.68, 0.62, 0],
-        [0.24, 0.72, -0.14, 0.14, 0.52, -0.22, -0.18],
+        [0.04, 0.88, 0.0, 0.21, 0.8, 0.1, 0],
+        [0.0, 0.78, -0.3, 0.18, 0.72, 0.16, -0.45],
+        [0.0, 0.78, 0.3, 0.18, 0.72, 0.16, 0.45],
+        [-0.08, 0.62, -0.5, 0.16, 0.66, 0.26, -0.82],
+        [-0.08, 0.62, 0.5, 0.16, 0.66, 0.26, 0.82],
+        [-0.28, 0.74, 0.0, 0.18, 0.68, 0.6, 0],
+        [0.26, 0.7, -0.14, 0.14, 0.5, -0.24, -0.18],
       ];
       spikes.forEach(([sx, sy, sz, rad, h, rz, rx]) => {
         const sp = new THREE.Mesh(new THREE.ConeGeometry(rad, h, 8), primaryMat);
         sp.position.set(sx, sy, sz);
         sp.rotation.set(rx, 0, rz);
+        if (hasTwoToneTips) {
+          const tip = new THREE.Mesh(new THREE.ConeGeometry(rad * 0.52, h * 0.45, 8), accentMat);
+          tip.position.y = h * 0.28;
+          sp.add(tip);
+        }
         headGroup.add(sp);
       });
-      if (style === 'spiky_headband') {
-        const band = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 20), accentMat);
-        band.position.y = 0.26;
-        const plate = new THREE.Mesh(
-          new THREE.BoxGeometry(0.06, 0.1, 0.32),
-          new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.78, roughness: 0.22 })
-        );
-        plate.position.set(0.58, 0.26, 0);
-        headGroup.add(band, plate);
-      }
       break;
     }
 
-    case 'straw_hat': {
+    case 'anime_straw_hat': {
+      // 👒 ลูฟี่ หมวกฟาง: ผมดำยุ่ง + หมวกฟางปีกกว้างคาดริบบิ้นแดง + รอยแผลใต้ตาซ้าย!
       addBaseHairCap(darkMat, true);
-      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.9, 0.055, 24), primaryMat);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.92, 0.055, 24), primaryMat);
       brim.position.y = 0.44;
       const dome = new THREE.Mesh(
         new THREE.SphereGeometry(0.52, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
@@ -1447,37 +1733,104 @@ function buildHeroHead3D(
       dome.position.y = 0.44;
       const ribbon = new THREE.Mesh(new THREE.CylinderGeometry(0.525, 0.525, 0.11, 20), accentMat);
       ribbon.position.y = 0.5;
-      // รอยแผลใต้ตาซ้ายสุดเท่
-      const scar = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.022, 0.12), darkMat);
+      const scar = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.12), darkMat);
       scar.position.set(0.55, -0.06, -0.2);
       headGroup.add(brim, dome, ribbon, scar);
       break;
     }
 
-    case 'slayer_scar': {
-      addBaseHairCap(primaryMat, true);
-      [-0.22, 0.18].forEach((sz) => {
-        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.48, 8), primaryMat);
-        tuft.position.set(-0.08, 0.66, sz);
-        tuft.rotation.z = 0.38;
-        headGroup.add(tuft);
+    case 'anime_headband_spiky': {
+      // 🍥 นารูโตะ / ⚔️ โซโล: ผมตั้งแหลมคาดผ้าหน้าผาก (+ รอยหนวดแมว 3 ขีดข้างแก้มสำหรับนารูโตะ!)
+      addBaseHairCap(primaryMat, false);
+      [-0.28, 0, 0.28].forEach((sz, si) => {
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.58, 8), primaryMat);
+        sp.position.set(0.02, 0.72 + (si === 1 ? 0.08 : 0), sz);
+        sp.rotation.x = sz * 0.65;
+        headGroup.add(sp);
       });
-      // ปานไฟหน้าผาก + ต่างหูไพ่คู่ซ้าย-ขวา
-      const mark = new THREE.Mesh(new THREE.OctahedronGeometry(0.075, 0), accentMat);
-      mark.scale.set(0.4, 1.1, 1.2);
-      mark.position.set(0.5, 0.28, -0.22);
-      [-0.56, 0.56].forEach((ez) => {
-        const card = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 0.11), whiteMat);
-        card.position.set(0.02, -0.18, ez);
-        const sunDot = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 8), accentMat);
-        sunDot.position.set(0.03, -0.16, ez);
-        headGroup.add(card, sunDot);
-      });
-      headGroup.add(mark);
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 22), accentMat);
+      band.position.y = 0.26;
+      headGroup.add(band);
+
+      if (breedMeta.id === 'anime_naruto') {
+        const plate = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.1, 0.34),
+          new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.78, roughness: 0.2 })
+        );
+        plate.position.set(0.58, 0.26, 0);
+        headGroup.add(plate);
+        [-1, 1].forEach((side) => {
+          [-0.04, 0.01, 0.06].forEach((wy) => {
+            const whisker = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.014, 0.12), darkMat);
+            whisker.position.set(0.51, -0.08 + wy, side * 0.3);
+            whisker.rotation.y = side * 0.35;
+            headGroup.add(whisker);
+          });
+        });
+      } else if (breedMeta.id === 'anime_zoro') {
+        // ต่างหูทอง 3 ตุ้มข้างซ้ายของโซโล
+        [-0.08, -0.14, -0.2].forEach((ey) => {
+          const drop = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), goldMat);
+          drop.position.set(0.02, ey, -0.6);
+          headGroup.add(drop);
+        });
+      }
       break;
     }
 
-    case 'blindfold_white': {
+    case 'anime_slayer_earrings': {
+      // 🎴 ทันจิโร่ / ⚡ ซาสึเกะ / 👹 สุคุนะ / 🌙 เส็ตโชมารู
+      addBaseHairCap(primaryMat, true);
+      [-0.24, 0, 0.24].forEach((sz) => {
+        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.48, 8), primaryMat);
+        tuft.position.set(-0.06, 0.66, sz);
+        tuft.rotation.z = 0.32;
+        headGroup.add(tuft);
+      });
+      const mark = new THREE.Mesh(new THREE.OctahedronGeometry(0.075, 0), accentMat);
+      mark.scale.set(0.4, 1.1, 1.15);
+      mark.position.set(0.54, 0.28, breedMeta.id === 'anime_tanjiro' ? -0.2 : 0);
+      headGroup.add(mark);
+
+      if (breedMeta.id === 'anime_tanjiro') {
+        [-0.56, 0.56].forEach((ez) => {
+          const card = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.11), whiteMat);
+          card.position.set(0.02, -0.18, ez);
+          const sunDot = new THREE.Mesh(new THREE.SphereGeometry(0.034, 8, 8), accentMat);
+          sunDot.position.set(0.03, -0.16, ez);
+          headGroup.add(card, sunDot);
+        });
+      }
+      break;
+    }
+
+    case 'anime_boar_mask': {
+      // 🐗 อิโนะสุเกะ: หน้ากากหัวหมูป่าสีเทา จมูกชมพู เขี้ยวหมูป่าสีขาวโค้งคู่ ตาสีฟ้า!
+      const boarHead = new THREE.Mesh(new THREE.SphereGeometry(0.62, 22, 20), primaryMat);
+      const snout = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.24, 0.24, 16),
+        new THREE.MeshStandardMaterial({ color: 0xf9a8d4, roughness: 0.5 })
+      );
+      snout.rotation.z = Math.PI / 2;
+      snout.position.set(0.58, -0.06, 0);
+      headGroup.add(boarHead, snout);
+      [-0.24, 0.24].forEach((sideZ) => {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.38, 10), primaryMat);
+        ear.position.set(0, 0.64, sideZ * 1.35);
+        ear.rotation.x = sideZ < 0 ? -0.35 : 0.35;
+        const tusk = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.28, 8), whiteMat);
+        tusk.position.set(0.56, -0.02, sideZ * 1.15);
+        tusk.rotation.z = -0.35;
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), accentMat);
+        eye.scale.set(0.45, 0.85, 1.15);
+        eye.position.set(0.54, 0.14, sideZ);
+        headGroup.add(ear, tusk, eye);
+      });
+      break;
+    }
+
+    case 'anime_blindfold_spiky': {
+      // 🤞 โกโจ ซาโตรุ: ผมขาวเงินชี้ตั้งฟู 7 แฉก + ผ้าปิดตาสีดำเท่สุดขีด!
       addBaseHairCap(primaryMat, false);
       for (let i = 0; i < 7; i++) {
         const a = (i / 7) * Math.PI * 2;
@@ -1487,346 +1840,562 @@ function buildHeroHead3D(
         upSpike.rotation.z = -Math.cos(a) * 0.22;
         headGroup.add(upSpike);
       }
-      const blindfold = new THREE.Mesh(new THREE.CylinderGeometry(0.595, 0.595, 0.22, 22), accentMat);
+      const blindfold = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.22, 22), accentMat);
       blindfold.position.y = 0.08;
       headGroup.add(blindfold);
       break;
     }
 
+    case 'anime_bald_shine':
     case 'bald_hero': {
-      // หัวล้านเงาวับ ไม่เติมผม ปล่อยให้แสงตกกระทบศีรษะสะท้อนวิบวับสุดฮา!
+      // 🥊 ไซตามะ / 💡 อิกคิวซัง: ศีรษะเกลี้ยงเงาวับสะท้อนแสงวิบวับ!
       const shineSpot = new THREE.Mesh(
         new THREE.SphereGeometry(0.11, 10, 10),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.58 })
       );
       shineSpot.scale.set(0.5, 0.4, 1.0);
       shineSpot.position.set(0.32, 0.44, -0.2);
       headGroup.add(shineSpot);
+      if (breedMeta.id === 'anime_ikkyu') {
+        [-0.19, 0.19].forEach((bz) => {
+          const brow = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.045, 0.16), darkMat);
+          brow.position.set(0.54, 0.2, bz);
+          headGroup.add(brow);
+        });
+      }
       break;
     }
 
-    case 'monkey_king_band': {
+    case 'anime_sailor_odango': {
+      // 🌙 เซเลอร์มูน: ผมบลอนด์มัดซาลาเปาคู่ Odango ประดับทับทิมแดง + ทวินเทลยาว + รัดเกล้าทอง!
       addBaseHairCap(primaryMat, true);
-      const fillet = new THREE.Mesh(new THREE.TorusGeometry(0.575, 0.04, 8, 24), accentMat);
-      fillet.rotation.x = Math.PI / 2;
-      fillet.position.y = 0.26;
-      const heartCurl = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.028, 8, 14), accentMat);
-      heartCurl.rotation.y = Math.PI / 2;
-      heartCurl.position.set(0.58, 0.31, 0);
-      [-0.18, 0.18].forEach((fz) => {
-        const plume = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.03, 1.05, 8), accentMat);
-        plume.position.set(-0.42, 0.88, fz);
-        plume.rotation.z = 0.65;
-        plume.rotation.x = fz * 0.65;
-        headGroup.add(plume);
+      [-0.44, 0.44].forEach((oz) => {
+        const odango = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 14), primaryMat);
+        odango.position.set(-0.02, 0.58, oz);
+        const ruby = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), accentMat);
+        ruby.position.set(0.14, 0.58, oz);
+        const longTail = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.92, 12), primaryMat);
+        longTail.rotation.x = Math.PI + (oz < 0 ? 0.28 : -0.28);
+        longTail.position.set(-0.08, 0.04, oz * 1.32);
+        headGroup.add(odango, ruby, longTail);
       });
-      headGroup.add(fillet, heartCurl);
+      const tiaraV = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.028, 8, 20, Math.PI * 0.7), goldMat);
+      tiaraV.rotation.y = Math.PI / 2;
+      tiaraV.position.set(0.06, 0.26, 0);
+      const redGem = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), accentMat);
+      redGem.position.set(0.59, 0.24, 0);
+      headGroup.add(tiaraV, redGem);
       break;
     }
 
-    case 'pharaoh_nemes': {
-      const nemesTop = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.72, 0.54, 6), primaryMat);
-      nemesTop.position.set(-0.06, 0.28, 0);
-      [-0.48, 0.48].forEach((fz) => {
-        const lappet = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.58, 0.14), accentMat);
-        lappet.position.set(0.18, -0.22, fz);
-        headGroup.add(lappet);
-      });
-      const browBand = new THREE.Mesh(new THREE.CylinderGeometry(0.59, 0.59, 0.1, 20), accentMat);
-      browBand.position.y = 0.28;
-      const cobra = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.24, 8), goldMat);
-      cobra.position.set(0.58, 0.4, 0);
-      headGroup.add(nemesTop, browBand, cobra);
-      break;
-    }
-
-    case 'spartan_plume': {
-      const helm = new THREE.Mesh(
-        new THREE.SphereGeometry(0.61, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        accentMat
-      );
-      [-0.46, 0.46].forEach((cz) => {
-        const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.36, 0.1), accentMat);
-        cheek.position.set(0.26, -0.08, cz);
-        headGroup.add(cheek);
-      });
-      // แผงพู่ขนม้าโค้งใหญ่พาดยาวจากหน้าไปหลัง!
-      const crestHolder = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.14, 0.08), goldMat);
-      crestHolder.position.set(-0.04, 0.64, 0);
-      const crestPlume = new THREE.Mesh(
-        new THREE.TorusGeometry(0.54, 0.16, 10, 20, Math.PI * 1.15),
-        primaryMat
-      );
-      crestPlume.position.set(-0.04, 0.42, 0);
-      headGroup.add(helm, crestHolder, crestPlume);
-      break;
-    }
-
-    case 'laurel_god': {
+    case 'anime_bamboo_muzzle': {
+      // 🎋 เนซึโกะ: ผมดำยาวปลายส้มผูกโบว์ชมพู + คาบกระบอกไม้ไผ่สีเขียวผูกเชือกแดง!
       addBaseHairCap(primaryMat, true);
-      // หนวดเคราเทพเจ้าฟูนุ่มดั่งก้อนเมฆ
-      [-0.22, 0, 0.22].forEach((bz, bi) => {
-        const puff = new THREE.Mesh(
-          new THREE.SphereGeometry(bi === 1 ? 0.22 : 0.17, 12, 12),
-          primaryMat
-        );
-        puff.position.set(0.42, -0.28 - (bi === 1 ? 0.06 : 0), bz);
-        headGroup.add(puff);
-      });
-      // มงกุฎช่อมะกอกทอง
-      const wreath = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.045, 8, 22), accentMat);
-      wreath.rotation.x = Math.PI / 2 + 0.08;
-      wreath.position.y = 0.3;
-      headGroup.add(wreath);
-      break;
-    }
-
-    case 'vampire_slick': {
-      addBaseHairCap(primaryMat, false);
-      const widowPeak = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.24, 6), primaryMat);
-      widowPeak.rotation.x = Math.PI;
-      widowPeak.position.set(0.54, 0.3, 0);
-      // เขี้ยวแวมไพร์น้อย 2 ซี่สุดคิวท์
-      [-0.08, 0.08].forEach((fz) => {
-        const fang = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.08, 6), whiteMat);
-        fang.rotation.x = Math.PI;
-        fang.position.set(0.57, -0.15, fz);
-        headGroup.add(fang);
-      });
-      headGroup.add(widowPeak);
-      break;
-    }
-
-    case 'jiangshi_talisman': {
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.58, 0.28, 20), primaryMat);
-      cap.position.y = 0.46;
-      const redKnob = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 10, 10),
-        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
+      const backHair = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.54, 0.52, 16), primaryMat);
+      backHair.position.set(-0.22, -0.16, 0);
+      const orangeTips = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.58, 0.2, 16), accentMat);
+      orangeTips.position.set(-0.22, -0.44, 0);
+      const pinkRibbon = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.12, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0xf472b6, roughness: 0.4 })
       );
-      redKnob.position.y = 0.64;
-      // ยันต์เหลืองสะกดความหิวแปะห้อยกลางหน้าผาก!
-      const talisman = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.42, 0.18), accentMat);
-      talisman.position.set(0.61, 0.14, 0);
-      talisman.rotation.z = -0.08;
-      const rune = new THREE.Mesh(
-        new THREE.BoxGeometry(0.025, 0.26, 0.04),
-        new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+      pinkRibbon.position.set(0.28, 0.48, -0.36);
+      // กระบอกไม้ไผ่สีเขียวคาบที่ปาก!
+      const bambooMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.38 });
+      const bamboo = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.48, 14), bambooMat);
+      bamboo.rotation.x = Math.PI / 2;
+      bamboo.position.set(0.55, -0.16, 0);
+      const redCord = new THREE.Mesh(
+        new THREE.TorusGeometry(0.56, 0.02, 6, 20),
+        new THREE.MeshBasicMaterial({ color: 0xef4444 })
       );
-      rune.position.set(0.62, 0.14, 0);
-      headGroup.add(cap, redKnob, talisman, rune);
+      redCord.rotation.x = Math.PI / 2;
+      redCord.position.y = -0.16;
+      headGroup.add(backHair, orangeTips, pinkRibbon, bamboo, redCord);
       break;
     }
 
-    case 'double_buns': {
+    case 'anime_anya_cones': {
+      // 🥜 อาเนีย ฟอร์เจอร์ (กรวยแหลมดำทองคู่) / 🩸 พาวเวอร์ (เขาสีแดงสดคู่)
       addBaseHairCap(primaryMat, true);
       [-0.46, 0.46].forEach((bz) => {
-        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 14), accentMat);
-        bun.position.set(-0.04, 0.54, bz);
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.035, 8, 16), whiteMat);
-        ring.position.set(-0.04, 0.42, bz * 0.88);
-        ring.rotation.x = Math.PI / 2 + (bz < 0 ? -0.45 : 0.45);
-        headGroup.add(bun, ring);
+        const bobFluff = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), primaryMat);
+        bobFluff.position.set(-0.04, -0.08, bz);
+        headGroup.add(bobFluff);
       });
-      break;
-    }
-
-    case 'muaythai_mongkhon': {
-      addBaseHairCap(primaryMat, false);
-      const mongkhon = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.068, 10, 24), accentMat);
-      mongkhon.rotation.x = Math.PI / 2;
-      mongkhon.position.y = 0.3;
-      const tailRope = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 0.56, 8), accentMat);
-      tailRope.rotation.z = Math.PI / 2 - 0.18;
-      tailRope.position.set(-0.82, 0.36, 0);
-      headGroup.add(mongkhon, tailRope);
-      break;
-    }
-
-    case 'sport_headband': {
-      addBaseHairCap(primaryMat, true);
-      const topTuft = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.42, 10), primaryMat);
-      topTuft.position.set(0.08, 0.68, 0);
-      topTuft.rotation.z = -0.25;
-      const sweatband = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.13, 22), accentMat);
-      sweatband.position.y = 0.25;
-      headGroup.add(topTuft, sweatband);
-      break;
-    }
-
-    case 'top_bun': {
-      addBaseHairCap(primaryMat, true);
-      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 14), primaryMat);
-      bun.position.set(-0.06, 0.68, 0);
-      const scrunchie = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.045, 8, 18), accentMat);
-      scrunchie.rotation.x = Math.PI / 2;
-      scrunchie.position.set(-0.06, 0.52, 0);
-      headGroup.add(bun, scrunchie);
-      break;
-    }
-
-    case 'runner_visor': {
-      addBaseHairCap(primaryMat, true);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.595, 0.595, 0.11, 22), accentMat);
-      band.position.y = 0.24;
-      const visorBrim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.46, 0.46, 0.045, 18, 1, false, -Math.PI * 0.4, Math.PI * 0.8),
-        accentMat
-      );
-      visorBrim.rotation.y = Math.PI / 2;
-      visorBrim.position.set(0.32, 0.22, 0);
-      headGroup.add(band, visorBrim);
-      break;
-    }
-
-    case 'sumo_topknot': {
-      addBaseHairCap(primaryMat, false);
-      const knotStem = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.22, 10), primaryMat);
-      knotStem.position.set(-0.08, 0.6, 0);
-      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.025, 8, 14), accentMat);
-      tie.rotation.x = Math.PI / 2;
-      tie.position.set(-0.08, 0.58, 0);
-      const foldedTop = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.34, 8, 12), primaryMat);
-      foldedTop.rotation.z = Math.PI / 2;
-      foldedTop.position.set(0.1, 0.68, 0);
-      headGroup.add(knotStem, tie, foldedTop);
-      break;
-    }
-
-    case 'lifeguard_cap': {
-      addBaseHairCap(new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.5 }), false);
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.595, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
-        primaryMat
-      );
-      dome.position.y = 0.12;
-      const visor = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.44, 0.44, 0.05, 16, 1, false, -Math.PI * 0.38, Math.PI * 0.76),
-        primaryMat
-      );
-      visor.rotation.y = Math.PI / 2;
-      visor.position.set(0.3, 0.18, 0);
-      const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.16), accentMat);
-      crossH.position.set(0.57, 0.34, 0);
-      const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.05), accentMat);
-      crossV.position.set(0.57, 0.34, 0);
-      headGroup.add(dome, visor, crossH, crossV);
-      break;
-    }
-
-    case 'chef_toque': {
-      addBaseHairCap(darkMat, false);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.4, 0.26, 20), primaryMat);
-      band.position.y = 0.56;
-      const trim = new THREE.Mesh(new THREE.CylinderGeometry(0.41, 0.405, 0.06, 20), accentMat);
-      trim.position.y = 0.46;
-      for (let i = 0; i < 6; i++) {
-        const ca = (i / 6) * Math.PI * 2;
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), primaryMat);
-        puff.position.set(Math.cos(ca) * 0.22, 0.82, Math.sin(ca) * 0.22);
-        headGroup.add(puff);
+      if (breedMeta.id === 'anime_power_horns') {
+        [-0.22, 0.22].forEach((hz) => {
+          const redHorn = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.38, 8), accentMat);
+          redHorn.position.set(0.12, 0.68, hz);
+          headGroup.add(redHorn);
+        });
+      } else {
+        [-0.36, 0.36].forEach((cz) => {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 10), accentMat);
+          cone.position.set(0.04, 0.62, cz);
+          cone.rotation.x = cz < 0 ? -0.32 : 0.32;
+          const goldTrim = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 6, 14), goldMat);
+          goldTrim.rotation.x = Math.PI / 2 + (cz < 0 ? -0.32 : 0.32);
+          goldTrim.position.set(0.04, 0.49, cz * 0.92);
+          headGroup.add(cone, goldTrim);
+        });
       }
-      const topPuff = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 12), primaryMat);
-      topPuff.position.y = 0.88;
-      headGroup.add(band, trim, topPuff);
       break;
     }
 
-    case 'rider_helmet': {
-      const shell = new THREE.Mesh(
-        new THREE.SphereGeometry(0.64, 22, 18, -Math.PI * 0.28, Math.PI * 1.56, 0, Math.PI * 0.78),
+    case 'anime_elf_twintails': {
+      // 🪄 ฟรีเรน (หูเอลฟ์ยาวแหลม + ทวินเทลขาว) / 🎤 มิกุ (หูฟังไฮเทค + ทวินเทลฟ้าเทอร์ควอยซ์ยาว)
+      addBaseHairCap(primaryMat, true);
+      [-0.58, 0.58].forEach((tz) => {
+        const tie = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), accentMat);
+        tie.position.set(-0.06, 0.38, tz);
+        const longTail = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.95, 12), primaryMat);
+        longTail.rotation.x = Math.PI + (tz < 0 ? 0.35 : -0.35);
+        longTail.position.set(-0.1, -0.08, tz * 1.22);
+        headGroup.add(tie, longTail);
+      });
+      if (breedMeta.id === 'anime_frieren') {
+        [-1, 1].forEach((side) => {
+          const elfEar = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.52, 10), skinMat);
+          elfEar.position.set(-0.04, 0.08, side * 0.68);
+          elfEar.rotation.x = side * 1.18;
+          elfEar.rotation.z = 0.22;
+          const redDrop = new THREE.Mesh(
+            new THREE.SphereGeometry(0.045, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0xef4444 })
+          );
+          redDrop.position.set(-0.04, -0.14, side * 0.68);
+          headGroup.add(elfEar, redDrop);
+        });
+      } else {
+        [-0.6, 0.6].forEach((hz) => {
+          const headset = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.1, 14), darkMat);
+          headset.rotation.x = Math.PI / 2;
+          headset.position.set(0.02, 0.04, hz);
+          headGroup.add(headset);
+        });
+      }
+      break;
+    }
+
+    case 'anime_maid_bob': {
+      // 💙 เรม / 🧣 มิคาสะ / 💜 ฮินาตะ / 🦋 เฟิร์น & ชิโนบุ
+      addBaseHairCap(primaryMat, true);
+      [-0.46, 0.46].forEach((bz) => {
+        const sideLock = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 12), primaryMat);
+        sideLock.scale.set(0.9, 1.2, 0.85);
+        sideLock.position.set(-0.04, -0.1, bz);
+        headGroup.add(sideLock);
+      });
+      if (breedMeta.id === 'anime_rem') {
+        const maidFrill = new THREE.Mesh(
+          new THREE.TorusGeometry(0.59, 0.055, 8, 22, Math.PI * 1.1),
+          whiteMat
+        );
+        maidFrill.rotation.y = Math.PI / 2;
+        maidFrill.position.set(0.04, 0.08, 0);
+        headGroup.add(maidFrill);
+      } else if (breedMeta.id === 'anime_mikasa') {
+        const redScarf = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.14, 10, 22), accentMat);
+        redScarf.rotation.x = Math.PI / 2;
+        redScarf.position.y = -0.48;
+        headGroup.add(redScarf);
+      } else if (breedMeta.id === 'anime_shinobu' || breedMeta.id === 'anime_fern') {
+        const butterfly = makeRibbonBow(accentMat, 1.15);
+        butterfly.position.set(-0.28, 0.56, 0.28);
+        headGroup.add(butterfly);
+      }
+      break;
+    }
+
+    case 'anime_doraemon_bell': {
+      // 🔔 โดราเอมอน: หัวกลมสีฟ้า หน้าขาว จมูกกลมสีแดงสด หนวด 6 เส้น ปลอกคอแดงกระดิ่งทอง!
+      const blueDome = new THREE.Mesh(new THREE.SphereGeometry(0.595, 24, 20), primaryMat);
+      const whiteFace = new THREE.Mesh(new THREE.SphereGeometry(0.52, 20, 18), whiteMat);
+      whiteFace.position.set(0.14, -0.06, 0);
+      const redNose = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 14, 12),
+        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.25 })
+      );
+      redNose.position.set(0.64, 0.12, 0);
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.065, 10, 24), accentMat);
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = -0.48;
+      const bell = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 12), goldMat);
+      bell.position.set(0.52, -0.5, 0);
+      headGroup.add(blueDome, whiteFace, redNose, collar, bell);
+      [-1, 1].forEach((side) => {
+        [-0.08, 0, 0.08].forEach((wy) => {
+          const whisker = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.016, 0.24), darkMat);
+          whisker.position.set(0.56, -0.04 + wy, side * 0.34);
+          whisker.rotation.x = wy * side * 1.4;
+          headGroup.add(whisker);
+        });
+      });
+      break;
+    }
+
+    case 'anime_shinchan_brows': {
+      // 🖍️ ชินจัง จอมแก่น: ผมดำตัดเกรียน + คิ้วดำหนาสองเส้นโค้งกวนโอ๊ยเหนือตา!
+      const buzzCut = new THREE.Mesh(
+        new THREE.SphereGeometry(0.59, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
         primaryMat
       );
-      shell.rotation.y = Math.PI / 2;
-      const clearVisor = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.65, 0.65, 0.32, 18, 1, false, -Math.PI * 0.34, Math.PI * 0.68),
-        new THREE.MeshPhysicalMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.36, roughness: 0.1 })
-      );
-      clearVisor.rotation.y = Math.PI / 2;
-      clearVisor.position.y = 0.08;
-      [-0.36, 0.36].forEach((cz) => {
-        const catEar = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.28, 8), accentMat);
-        catEar.position.set(0.02, 0.68, cz);
-        catEar.rotation.x = cz < 0 ? -0.2 : 0.2;
-        headGroup.add(catEar);
+      buzzCut.rotation.z = 0.25;
+      headGroup.add(buzzCut);
+      [-0.2, 0.2].forEach((bz) => {
+        const thickBrow = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 8, 10), darkMat);
+        thickBrow.rotation.x = Math.PI / 2;
+        thickBrow.rotation.z = bz < 0 ? 0.18 : -0.18;
+        thickBrow.position.set(0.54, 0.25, bz);
+        headGroup.add(thickBrow);
       });
-      headGroup.add(shell, clearVisor);
       break;
     }
 
-    case 'office_glasses': {
+    case 'anime_glasses_detective': {
+      // 🕵️ โคนัน (หูกระต่ายแดง) / 👓 โนบิตะ / 🪽 อาราเล่ (หมวกแก๊ปชมพูติดปีกขาว!)
       addBaseHairCap(primaryMat, true);
-      const tieBand = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.1, 20), accentMat);
-      tieBand.position.y = 0.28;
-      const tieKnot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), accentMat);
-      tieKnot.position.set(0.58, 0.28, -0.18);
-      const tieTail = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.28, 0.1), accentMat);
-      tieTail.position.set(0.58, 0.14, -0.28);
-      tieTail.rotation.x = -0.35;
-      [-0.18, 0.18].forEach((gz) => {
-        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.018, 8, 18), darkMat);
+      const frameMat = breedMeta.id === 'anime_arale' ? darkMat : darkMat;
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.03, 0.14), frameMat);
+      bridge.position.set(0.58, 0.06, 0);
+      [-0.2, 0.2].forEach((gz) => {
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.024, 8, 20), frameMat);
         rim.rotation.y = Math.PI / 2;
         rim.position.set(0.58, 0.05, gz);
         headGroup.add(rim);
       });
-      headGroup.add(tieBand, tieKnot, tieTail);
-      break;
-    }
+      headGroup.add(bridge);
 
-    case 'doctor_mirror': {
-      addBaseHairCap(primaryMat, true);
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.595, 0.595, 0.08, 20), darkMat);
-      strap.position.y = 0.28;
-      const mirror = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.15, 0.15, 0.04, 18),
-        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.88, roughness: 0.12 })
-      );
-      mirror.rotation.z = Math.PI / 2;
-      mirror.position.set(0.59, 0.3, 0);
-      const centerHole = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), accentMat);
-      centerHole.position.set(0.61, 0.3, 0);
-      headGroup.add(strap, mirror, centerHole);
-      break;
-    }
-
-    case 'disco_afro': {
-      const afro = new THREE.Mesh(new THREE.SphereGeometry(0.84, 24, 20), primaryMat);
-      afro.position.set(-0.08, 0.38, 0);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.605, 0.605, 0.1, 20), accentMat);
-      band.position.y = 0.24;
-      headGroup.add(afro, band);
-      break;
-    }
-
-    case 'gamer_headset': {
-      addBaseHairCap(primaryMat, true);
-      const arch = new THREE.Mesh(
-        new THREE.TorusGeometry(0.64, 0.045, 8, 22, Math.PI),
-        darkMat
-      );
-      arch.rotation.y = Math.PI / 2;
-      arch.position.y = 0.06;
-      [-0.62, 0.62].forEach((hz) => {
-        const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 16), darkMat);
-        cup.rotation.x = Math.PI / 2;
-        cup.position.set(0.02, 0.04, hz);
-        const rgbRing = new THREE.Mesh(
-          new THREE.TorusGeometry(0.15, 0.022, 8, 16),
-          new THREE.MeshBasicMaterial({ color: accentHex })
+      if (breedMeta.id === 'anime_conan') {
+        const cowlick = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 8), primaryMat);
+        cowlick.position.set(-0.22, 0.68, 0);
+        cowlick.rotation.z = 0.55;
+        const bowTie = makeRibbonBow(accentMat, 0.85);
+        bowTie.position.set(0.46, -0.5, 0);
+        headGroup.add(cowlick, bowTie);
+      } else if (breedMeta.id === 'anime_arale') {
+        const capDome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.61, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48),
+          accentMat
         );
-        rgbRing.position.set(0.02, 0.04, hz * 1.08);
-        headGroup.add(cup, rgbRing);
+        capDome.position.y = 0.14;
+        const visor = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.46, 0.46, 0.05, 16, 1, false, -Math.PI * 0.38, Math.PI * 0.76),
+          accentMat
+        );
+        visor.rotation.y = Math.PI / 2;
+        visor.position.set(0.32, 0.22, 0);
+        [-1, 1].forEach((side) => {
+          const wing = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.42, 8), whiteMat);
+          wing.scale.set(1.1, 1, 0.35);
+          wing.position.set(0, 0.44, side * 0.62);
+          wing.rotation.z = 0.55;
+          wing.rotation.x = side * 0.35;
+          headGroup.add(wing);
+        });
+        headGroup.add(capDome, visor);
+      }
+      break;
+    }
+
+    case 'anime_pikachu_ears': {
+      // ⚡ ปิกาจู (หูยาวปลายดำ + แก้มแดง) / 🐾 อินุยาฉะ (ผมเงินยาว + หูสุนัขขาว)
+      if (breedMeta.id === 'anime_inuyasha') {
+        addBaseHairCap(primaryMat, true);
+        const longSilver = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.56, 0.58, 16), primaryMat);
+        longSilver.position.set(-0.22, -0.18, 0);
+        [-0.32, 0.32].forEach((ez) => {
+          const dogEar = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.46, 10), whiteMat);
+          dogEar.position.set(0.04, 0.64, ez);
+          dogEar.rotation.x = ez < 0 ? -0.28 : 0.28;
+          headGroup.add(dogEar);
+        });
+        headGroup.add(longSilver);
+      } else {
+        const noseDot = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 8), darkMat);
+        noseDot.position.set(0.58, 0.0, 0);
+        headGroup.add(noseDot);
+        [-0.34, 0.34].forEach((ez) => {
+          const earGrp = new THREE.Group();
+          const earBase = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.48, 8, 12), primaryMat);
+          const blackTip = new THREE.Mesh(new THREE.ConeGeometry(0.115, 0.26, 10), darkMat);
+          blackTip.position.y = 0.32;
+          earGrp.add(earBase, blackTip);
+          earGrp.position.set(-0.02, 0.72, ez);
+          earGrp.rotation.x = ez < 0 ? -0.35 : 0.35;
+          const redCheek = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), accentMat);
+          redCheek.scale.set(0.45, 0.95, 1.05);
+          redCheek.position.set(0.49, -0.1, ez * 1.05);
+          headGroup.add(earGrp, redCheek);
+        });
+      }
+      break;
+    }
+
+    case 'anime_chopper_hat': {
+      // 🌸 โทนี่ โทนี่ ช็อปเปอร์: จมูกสีฟ้า + หมวกทรงสูงสีชมพูลายกากบาทขาว X + เขากวางคู่!
+      const blueNose = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), accentMat);
+      blueNose.position.set(0.59, -0.02, 0);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.76, 0.78, 0.08, 24), primaryMat);
+      brim.position.y = 0.42;
+      const topCyl = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.5, 0.54, 22), primaryMat);
+      topCyl.position.y = 0.7;
+      // ลายกากบาทขาว X ด้านหน้าหมวกช็อปเปอร์!
+      [-0.78, 0.78].forEach((rotX) => {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.32, 0.08), whiteMat);
+        bar.position.set(0.51, 0.7, 0);
+        bar.rotation.x = rotX;
+        headGroup.add(bar);
       });
-      const micArm = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.36, 6), darkMat);
-      micArm.rotation.z = Math.PI / 2 + 0.25;
-      micArm.rotation.y = -0.45;
-      micArm.position.set(0.34, -0.14, 0.48);
-      headGroup.add(arch, micArm);
+      const antlerMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.5 });
+      [-0.68, 0.68].forEach((az) => {
+        const antler = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.42, 8), antlerMat);
+        antler.position.set(0, 0.64, az);
+        antler.rotation.x = az < 0 ? -1.05 : 1.05;
+        const prong = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.22, 8), antlerMat);
+        prong.position.set(0.08, 0.76, az * 1.1);
+        headGroup.add(antler, prong);
+      });
+      headGroup.add(blueNose, brim, topCyl);
+      break;
+    }
+
+    case 'anime_ninja_mask_silver': {
+      // 📖 คาคาชิ (ผมเงินปัดเฉียง + หน้ากากกรมท่า) / ⚔️ รีไวล์ (ผมดำแสกกลางอันเดอร์คัท + ผ้าพันคอขาว)
+      addBaseHairCap(primaryMat, true);
+      if (breedMeta.id === 'anime_kakashi') {
+        [-0.15, 0.05, 0.22].forEach((sz, si) => {
+          const sweep = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.58, 8), primaryMat);
+          sweep.position.set(-0.08, 0.72 + si * 0.04, sz - 0.14);
+          sweep.rotation.x = -0.42;
+          sweep.rotation.z = 0.22;
+          headGroup.add(sweep);
+        });
+        const lowerMask = new THREE.Mesh(
+          new THREE.SphereGeometry(0.595, 20, 14, 0, Math.PI * 2, Math.PI * 0.48, Math.PI * 0.52),
+          accentMat
+        );
+        const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.605, 0.605, 0.12, 20), accentMat);
+        headband.position.y = 0.24;
+        headband.rotation.x = -0.18;
+        headGroup.add(lowerMask, headband);
+      } else {
+        const cravat = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.26, 0.28), whiteMat);
+        cravat.position.set(0.38, -0.5, 0);
+        headGroup.add(cravat);
+      }
+      break;
+    }
+
+    case 'anime_chainsaw_head': {
+      // 🪚 เดนจิ มนุษย์เลื่อยยนต์: หัวเกราะสีส้มดุดัน + ใบเลื่อยเหล็กยาวฟันใบเลื่อยกลางหน้าผาก!
+      const helm = new THREE.Mesh(new THREE.SphereGeometry(0.6, 20, 18), primaryMat);
+      const metalMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.78, roughness: 0.22 });
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.22, 0.07), metalMat);
+      blade.position.set(0.68, 0.26, 0);
+      blade.rotation.z = -0.14;
+      for (let t = 0; t < 6; t++) {
+        const toothTop = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.1, 4), whiteMat);
+        toothTop.position.set(-0.34 + t * 0.14, 0.15, 0);
+        const toothBot = toothTop.clone();
+        toothBot.rotation.x = Math.PI;
+        toothBot.position.y = -0.15;
+        blade.add(toothTop, toothBot);
+      }
+      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 8, 14, Math.PI), darkMat);
+      handle.position.set(-0.18, 0.62, 0);
+      [-0.2, 0.2].forEach((ez) => {
+        const visorEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.18), accentMat);
+        visorEye.position.set(0.56, 0.08, ez);
+        headGroup.add(visorEye);
+      });
+      headGroup.add(helm, blade, handle);
+      break;
+    }
+
+    case 'anime_korosensei_smile': {
+      // 🟡 อาจารย์โคโระ / 🟣 ฟรีเซอร์ / ⭐ สิบโทเคโรโระ / 🍬 จอมมารบู
+      if (breedMeta.id === 'anime_korosensei') {
+        const mortarBoard = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.06, 0.92), primaryMat);
+        mortarBoard.position.y = 0.62;
+        const capBase = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.42, 0.18, 16), primaryMat);
+        capBase.position.y = 0.52;
+        const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.34, 6), goldMat);
+        tassel.position.set(0.28, 0.46, 0.42);
+        const wideSmile = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.59, 0.59, 0.18, 20, 1, false, -Math.PI * 0.36, Math.PI * 0.72),
+          whiteMat
+        );
+        wideSmile.rotation.y = Math.PI / 2;
+        wideSmile.position.y = -0.14;
+        headGroup.add(mortarBoard, capBase, tassel, wideSmile);
+      } else if (breedMeta.id === 'anime_frieza') {
+        const purpleGemDome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.42, 18, 14),
+          new THREE.MeshStandardMaterial({ color: primaryHex, metalness: 0.45, roughness: 0.18 })
+        );
+        purpleGemDome.scale.set(1.05, 0.68, 1.0);
+        purpleGemDome.position.set(0.04, 0.44, 0);
+        [-0.56, 0.56].forEach((ez) => {
+          const earCup = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.12, 14), whiteMat);
+          earCup.rotation.x = Math.PI / 2;
+          earCup.position.set(0, 0.04, ez);
+          headGroup.add(earCup);
+        });
+        headGroup.add(purpleGemDome);
+      } else if (breedMeta.id === 'anime_keroro') {
+        const pilotCap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.61, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.54),
+          primaryMat
+        );
+        [-0.54, 0.54].forEach((fz) => {
+          const flap = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.36, 0.1), primaryMat);
+          flap.position.set(0.12, -0.12, fz);
+          headGroup.add(flap);
+        });
+        const redStar = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), accentMat);
+        redStar.position.set(0.6, 0.32, 0);
+        headGroup.add(pilotCap, redStar);
+      } else {
+        // จอมมารบูอ้วน: หงอนเสาอากาศชมพูโค้งพับด้านบนหัว!
+        const antStem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.11, 0.44, 10), primaryMat);
+        antStem.position.set(-0.04, 0.72, 0);
+        antStem.rotation.z = 0.32;
+        const antTip = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.36, 10), primaryMat);
+        antTip.position.set(-0.24, 0.88, 0);
+        antTip.rotation.z = 1.45;
+        headGroup.add(antStem, antTip);
+      }
+      break;
+    }
+
+    case 'anime_jotaro_cap': {
+      // ⭐ โจทาโร่ / 🔴 ซาโตชิ: หมวกแก๊ปทรงเท่พร้อมปีกหมวกและตราสัญลักษณ์ด้านหน้า!
+      addBaseHairCap(darkMat, true);
+      const capCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.59, 0.32, 22), primaryMat);
+      capCrown.position.y = 0.38;
+      const visor = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.48, 0.48, 0.055, 18, 1, false, -Math.PI * 0.4, Math.PI * 0.8),
+        breedMeta.id === 'anime_jotaro' ? primaryMat : primaryMat
+      );
+      visor.rotation.y = Math.PI / 2;
+      visor.position.set(0.34, 0.24, 0);
+      const badge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.18), accentMat);
+      badge.position.set(0.58, 0.38, 0);
+      headGroup.add(capCrown, visor, badge);
       break;
     }
   }
 
   return { hideStandardEyes, hideStandardMouth };
+}
+
+/**
+ * ย้อมสีพรอพ 3D (หมวก แว่น ของถือ กระเป๋า ออร่า สัตว์เลี้ยง สัตว์ขี่) ด้วยเฉดสีที่ผู้เล่นเลือก
+ * โดยโคลน Material แยกเฉพาะของพรอพชิ้นนั้น ไม่ให้สีรั่วไปที่ดวงตาสีดำหรือผิวกายตัวละคร
+ */
+export function applyCustomDyeToGroup(
+  root: THREE.Object3D,
+  customHex?: string,
+  itemBaseHex?: number
+) {
+  if (!customHex || !/^#[0-9A-Fa-f]{6}$/.test(customHex)) return;
+
+  const targetColor = new THREE.Color(customHex);
+  const targetHSL = { h: 0, s: 0, l: 0 };
+  targetColor.getHSL(targetHSL);
+
+  const baseColor =
+    itemBaseHex !== undefined && itemBaseHex > 0 ? new THREE.Color(itemBaseHex) : null;
+  const baseHSL = { h: 0, s: 0, l: 0 };
+  if (baseColor) baseColor.getHSL(baseHSL);
+
+  const baseIsWhite = baseColor ? baseHSL.l > 0.86 && baseHSL.s < 0.24 : false;
+  const baseIsDark = baseColor ? baseHSL.l < 0.18 : false;
+
+  const clonedMap = new Map<THREE.Material, THREE.Material>();
+
+  const dyeOneMaterial = (mat: THREE.Material): THREE.Material => {
+    const cached = clonedMap.get(mat);
+    if (cached) return cached;
+
+    const anyMat = mat as THREE.MeshStandardMaterial & {
+      color?: THREE.Color;
+      emissive?: THREE.Color;
+    };
+    if (!anyMat.color) return mat;
+
+    const orig = anyMat.color;
+    const origHSL = { h: 0, s: 0, l: 0 };
+    orig.getHSL(origHSL);
+
+    // 1. รักษาสีดวงตา รูม่านตา ด้ามจับสีดำสนิท (ยกเว้นตัวไอเทมมีสีพื้นเป็นสีดำ เช่น แว่นกันแดดดำ)
+    if (origHSL.l < 0.14 && !baseIsDark) {
+      return mat;
+    }
+
+    // 2. รักษาแก้มชมพูโปร่งแสงน่ารักบนสัตว์ขี่
+    if (mat.transparent && mat.opacity < 0.72 && orig.getHex() === 0xf472b6) {
+      return mat;
+    }
+
+    // 3. รักษาไฮไลท์สีขาว/จานรองสีขาว (ยกเว้นไอเทมที่มีสีหลักเป็นสีขาว เช่น เมฆขาว ยูนิคอร์นขาว หมวกเชฟ)
+    if (origHSL.l > 0.91 && origHSL.s < 0.15 && !baseIsWhite) {
+      return mat;
+    }
+
+    const cloned = mat.clone() as THREE.MeshStandardMaterial & {
+      color: THREE.Color;
+      emissive?: THREE.Color;
+    };
+
+    const rgbDist = baseColor
+      ? Math.hypot(orig.r - baseColor.r, orig.g - baseColor.g, orig.b - baseColor.b)
+      : 0;
+
+    const isPrimarySurface =
+      !baseColor ||
+      rgbDist < 0.56 ||
+      (baseIsWhite && origHSL.l > 0.84) ||
+      (baseIsDark && origHSL.l < 0.22);
+
+    if (isPrimarySurface) {
+      const shadeOffset = baseColor ? (origHSL.l - baseHSL.l) * 0.32 : 0;
+      cloned.color.setHSL(
+        targetHSL.h,
+        targetHSL.s,
+        Math.max(0.08, Math.min(0.95, targetHSL.l + shadeOffset))
+      );
+    } else if (!baseIsWhite && origHSL.s > 0.22) {
+      // ชิ้นส่วนสีรอง (เช่น วงแหวนหลายสีของออร่า/ลูกโป่ง): เลื่อน Hue ให้เข้าคู่กับโทนสีที่เลือก
+      const hueShift = targetHSL.h - (baseColor ? baseHSL.h : origHSL.h);
+      const nextHue = (((origHSL.h + hueShift) % 1) + 1) % 1;
+      cloned.color.setHSL(nextHue, Math.max(0.35, targetHSL.s * 0.9), origHSL.l);
+    } else {
+      return mat;
+    }
+
+    if (
+      cloned.emissive &&
+      cloned.emissive.r + cloned.emissive.g + cloned.emissive.b > 0.02
+    ) {
+      cloned.emissive.copy(cloned.color).multiplyScalar(0.55);
+    }
+
+    clonedMap.set(mat, cloned);
+    return cloned;
+  };
+
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material || mesh.userData?.noDye) return;
+    if (Array.isArray(mesh.material)) {
+      mesh.material = mesh.material.map((m) => dyeOneMaterial(m));
+    } else {
+      mesh.material = dyeOneMaterial(mesh.material);
+    }
+  });
 }
 
 export function buildCharacterMesh({
@@ -1845,6 +2414,7 @@ export function buildCharacterMesh({
   equipWings = 'wings_none',
   equipAura = 'aura_none',
   equipMount = 'mount_none',
+  propColors,
   animMode,
   animSeed = 0,
   useProceduralOnly = false,
@@ -1900,14 +2470,18 @@ export function buildCharacterMesh({
       mountParts.mountGroup.position.set(0, 0, 0);
       riderGroup.position.set(0, Math.max(0.18, mountParts.saddleY - 0.34), 0);
     }
+    if (propColors?.mount) {
+      const mountShopItem = SHOP_ITEMS.find((it) => it.id === equipMount);
+      applyCustomDyeToGroup(mountParts.mountGroup, propColors.mount, mountShopItem?.colorHex);
+    }
     rootGroup.add(mountParts.mountGroup);
   }
 
   const bodyMat = new THREE.MeshPhysicalMaterial({
     color: effectiveColorHex,
-    roughness: isHeroChar && breedMeta.heroStyle === 'bald_hero' ? 0.24 : 0.56,
+    roughness: isHeroChar && breedMeta.heroStyle === 'baymax_eyes' ? 0.32 : 0.56,
     metalness: 0.02,
-    sheen: isHeroChar ? 0.25 : 0.78,
+    sheen: isHeroChar ? 0.28 : 0.78,
     sheenRoughness: 0.62,
     sheenColor: new THREE.Color(0xffffff),
   });
@@ -1931,9 +2505,17 @@ export function buildCharacterMesh({
   // Casual Shirt & Pants Layer on Fallback Body (เสื้อ & กางเกง ไม่ใช่ชุดเกราะต่อสู้)
   {
     const outfitGroup = new THREE.Group();
+    const customShirtNum =
+      propColors?.shirt && /^#[0-9A-Fa-f]{6}$/.test(propColors.shirt)
+        ? new THREE.Color(propColors.shirt).getHex()
+        : null;
+    const customPantsNum =
+      propColors?.pants && /^#[0-9A-Fa-f]{6}$/.test(propColors.pants)
+        ? new THREE.Color(propColors.pants).getHex()
+        : null;
     if (equipArmor === 'armor_snow_dress' || equipArmor === 'armor_princess') {
-      const topColor = equipArmor === 'armor_snow_dress' ? 0x2563eb : 0x60a5fa;
-      const skirtColor = equipArmor === 'armor_snow_dress' ? 0xfacc15 : 0xf8fafc;
+      const topColor = customShirtNum ?? (equipArmor === 'armor_snow_dress' ? 0x2563eb : 0x60a5fa);
+      const skirtColor = customPantsNum ?? (equipArmor === 'armor_snow_dress' ? 0xfacc15 : 0xf8fafc);
       const topMesh = new THREE.Mesh(
         new THREE.CylinderGeometry(0.64, 0.72, 0.56, 20),
         new THREE.MeshStandardMaterial({ color: topColor, roughness: 0.48 })
@@ -1945,9 +2527,10 @@ export function buildCharacterMesh({
       );
       tennisSkirt.position.y = -0.22;
       outfitGroup.add(topMesh, tennisSkirt);
-    } else if (equipArmor !== 'armor_chibi_animal') {
+    } else if (equipArmor !== 'armor_chibi_animal' && equipArmor !== 'armor_bare') {
       const shirtColor =
-        equipArmor === 'armor_gold_paladin'
+        customShirtNum ??
+        (equipArmor === 'armor_gold_paladin'
           ? 0xfacc15
           : equipArmor === 'armor_silver_knight'
           ? 0x64748b
@@ -1955,15 +2538,16 @@ export function buildCharacterMesh({
           ? 0x38bdf8
           : equipArmor === 'armor_vest'
           ? 0x16a34a
-          : 0x3b82f6;
+          : 0x3b82f6);
       const pantsColor =
-        equipArmor === 'armor_gold_paladin'
+        customPantsNum ??
+        (equipArmor === 'armor_gold_paladin'
           ? 0x18181b
           : equipArmor === 'armor_silver_knight'
           ? 0x1e3a8a
           : equipArmor === 'armor_vest'
           ? 0xb45309
-          : 0x334155;
+          : 0x334155);
       const shirt = new THREE.Mesh(
         new THREE.CylinderGeometry(0.68, 0.75, 0.62, 20),
         new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.55 })
@@ -2158,6 +2742,11 @@ export function buildCharacterMesh({
         teddy.add(tEar, eye, hugArm);
       });
       backGroup.add(teddy);
+    }
+
+    if (propColors?.wings) {
+      const wingsShopItem = SHOP_ITEMS.find((it) => it.id === equipWings);
+      applyCustomDyeToGroup(backGroup, propColors.wings, wingsShopItem?.colorHex);
     }
 
     bounceGroup.add(backGroup);
@@ -3596,6 +4185,10 @@ export function buildCharacterMesh({
     capDome.position.y = 0.12;
     hatSlotGroup.add(capDome);
   }
+  if (propColors?.hat && hatSlotGroup.children.length > 0) {
+    const hatShopItem = SHOP_ITEMS.find((it) => it.id === equipHat);
+    applyCustomDyeToGroup(hatSlotGroup, propColors.hat, hatShopItem?.colorHex);
+  }
 
   // Face / Glasses Slot (แว่นตา & แอคเซสเซอรี่หน้า)
   const faceSlotGroup = new THREE.Group();
@@ -3714,6 +4307,10 @@ export function buildCharacterMesh({
       hTip.position.set(0.56 + faceXOffset, -0.1, cz);
       faceSlotGroup.add(glow, hL, hR, hTip);
     });
+  }
+  if (propColors?.face && faceSlotGroup.children.length > 0) {
+    const faceShopItem = SHOP_ITEMS.find((it) => it.id === equipFace);
+    applyCustomDyeToGroup(faceSlotGroup, propColors.face, faceShopItem?.colorHex);
   }
 
   const legGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.45, 12);
@@ -3942,6 +4539,12 @@ export function buildCharacterMesh({
     umbGroup.rotation.z = -0.15;
     armR.add(umbGroup);
   }
+  if (!activityUsesHands && propColors?.weapon && armR.children.length > 0) {
+    const weaponShopItem = SHOP_ITEMS.find((it) => it.id === equipWeapon);
+    armR.children.forEach((wpChild) =>
+      applyCustomDyeToGroup(wpChild, propColors.weapon, weaponShopItem?.colorHex)
+    );
+  }
 
   // Aura / Effect Slot (ออร่าเรืองแสงใต้เท้าและรอบตัว — หมุนวนแบบ Real-time!)
   const auraSpinGroup = new THREE.Group();
@@ -4067,6 +4670,10 @@ export function buildCharacterMesh({
       leafGroup.rotation.set(0.35, -ang, 0.25);
       auraSpinGroup.add(leafGroup);
     }
+  }
+  if (propColors?.aura && auraSpinGroup.children.length > 0) {
+    const auraShopItem = SHOP_ITEMS.find((it) => it.id === equipAura);
+    applyCustomDyeToGroup(auraSpinGroup, propColors.aura, auraShopItem?.colorHex);
   }
 
   const isGoldPaladin = equipArmor === 'armor_gold_paladin';
@@ -4401,12 +5008,18 @@ export function buildCharacterMesh({
         // หากโหลดไฟล์ไม่สำเร็จ ใช้ร่าง Procedural สำรองอัตโนมัติ
       });
   } else {
-    // โหมด B: ตัวละครลำตัวทรงกลมตุ้ยนุ้ย (Plush Round Mochi Body) สวมเสื้อ & กางเกง/กระโปรง + หัวสัตว์หรือหัวฮีโร่มนุษย์จิบิ
+    // โหมด B: ตัวละครลำตัวทรงกลมตุ้ยนุ้ย (Plush Round Mochi Body) สวมเสื้อ & กางเกง/กระโปรง + หัวสัตว์หรือหัวดิสนีย์จิบิ
+    const useHeroDefaultOutfitColors =
+      isHeroChar && effectiveEquipArmor === (breedMeta.defaultArmor || 'armor_none');
     const rig = buildChubbyPlushOutfitRig({
       equipArmor: effectiveEquipArmor,
       furColor: effectiveColorHex,
       animPatterns,
       animTimeOffset: animSeed * 0.37,
+      customShirtHex:
+        propColors?.shirt || (useHeroDefaultOutfitColors ? breedMeta.defaultShirtHex : undefined),
+      customPantsHex:
+        propColors?.pants || (useHeroDefaultOutfitColors ? breedMeta.defaultPantsHex : undefined),
     });
 
     fallbackGroup.visible = false;
@@ -5039,7 +5652,7 @@ const PET_COLORS: Record<string, { body: number; accent: number; baseSpecies: st
   pet_pig_chef: { body: 0xf472b6, accent: 0xfacc15, baseSpecies: 'pig' },
 };
 
-export function buildPetMesh(petType: string): PetMeshParts | null {
+export function buildPetMesh(petType: string, customHex?: string): PetMeshParts | null {
   if (!petType || petType === 'none' || petType === 'pet_none' || !PET_COLORS[petType]) return null;
   const palette = PET_COLORS[petType];
   const baseType = palette.baseSpecies;
@@ -5183,12 +5796,20 @@ export function buildPetMesh(petType: string): PetMeshParts | null {
 
   const petParts: PetMeshParts = { petGroup, tailMesh, leashMesh, mixer: null };
 
+  if (customHex && /^#[0-9A-Fa-f]{6}$/.test(customHex)) {
+    applyCustomDyeToGroup(petGearOverlay, customHex, palette.accent);
+    applyCustomDyeToGroup(fallbackPetBody, customHex, palette.body);
+  }
+
   const petGlbUrl = PET_GLB_MAP[petType];
   if (petGlbUrl) {
     loadNormalizedGLB(petGlbUrl, 0.92, true)
       .then((res) => {
         if (petGroup.userData.disposed) return;
         fallbackPetBody.visible = false;
+        if (customHex && /^#[0-9A-Fa-f]{6}$/.test(customHex)) {
+          applyCustomDyeToGroup(res.group, customHex, palette.body);
+        }
         petGroup.add(res.group);
         petParts.mixer = res.mixer;
       })

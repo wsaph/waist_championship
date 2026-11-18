@@ -39,16 +39,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'ไม่พบผู้เข้าแข่งขันปลายทาง' }, { status: 404 });
     }
 
+    let validSenderId: number | null = null;
     let senderName = 'ผู้หวังดีทางบ้าน';
     let senderEmoji = '📣';
-    if (senderId) {
+    let senderPoints = 0;
+    if (senderId && Number(senderId) > 0) {
       const senderRes = await turso.execute({
-        sql: 'SELECT name, avatar_emoji FROM users WHERE id = ?',
-        args: [senderId],
+        sql: 'SELECT id, name, avatar_emoji, points FROM users WHERE id = ?',
+        args: [Number(senderId)],
       });
       if (senderRes.rows.length > 0) {
+        validSenderId = Number(senderRes.rows[0].id);
         senderName = String(senderRes.rows[0].name);
         senderEmoji = String(senderRes.rows[0].avatar_emoji);
+        senderPoints = Number(senderRes.rows[0].points ?? 100);
       }
     }
 
@@ -58,9 +62,57 @@ export async function POST(req: Request) {
     const cleanMsg = typeof message === 'string' ? message.trim().slice(0, 120) : '';
 
     const insertRes = await turso.execute({
-      sql: 'INSERT INTO interactions (sender_name, sender_emoji, target_user_id, kind, gift_item, message) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [senderName, senderEmoji, Number(targetUserId), finalKind, giftItem, cleanMsg],
+      sql: 'INSERT INTO interactions (sender_id, sender_name, sender_emoji, target_user_id, kind, gift_item, message, dividend_claimed) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+      args: [validSenderId, senderName, senderEmoji, Number(targetUserId), finalKind, giftItem, cleanMsg],
     });
+
+    // 1) โบนัสคนกดส่ง: ส่งไฟเชียร์หรือแกล้งเพื่อนคนอื่น รับทันที +2 🪙 (สูงสุด 5 ครั้ง/วัน = +10 🪙)
+    let senderBonusEarned = 0;
+    let dailyBonusRemaining = 0;
+    if (validSenderId && validSenderId !== Number(targetUserId)) {
+      const sentTodayRes = await turso.execute({
+        sql: `
+          SELECT COUNT(*) AS cnt
+          FROM interactions
+          WHERE sender_id = ? AND target_user_id != ? AND date(created_at) = date('now')
+        `,
+        args: [validSenderId, validSenderId],
+      });
+      const sentCount = Number(sentTodayRes.rows[0]?.cnt ?? 0);
+      if (sentCount <= 5) {
+        senderBonusEarned = 2;
+        senderPoints += senderBonusEarned;
+        await turso.execute({
+          sql: 'UPDATE users SET points = ? WHERE id = ?',
+          args: [senderPoints, validSenderId],
+        });
+      }
+      dailyBonusRemaining = Math.max(0, 5 - sentCount);
+    }
+
+    // 2) โบนัสคนได้รับไฟเชียร์: เพื่อนส่งไฟให้ คนได้รับไฟก็ได้แต้มกำลังใจทันที +2 🪙 ด้วย! (สูงสุดรับจากเพื่อนวันละ 5 ครั้ง = +10 🪙)
+    let receiverBonusEarned = 0;
+    if (finalKind === 'cheer' && (!validSenderId || validSenderId !== Number(targetUserId))) {
+      const recvTodayRes = await turso.execute({
+        sql: `
+          SELECT COUNT(*) AS cnt
+          FROM interactions
+          WHERE target_user_id = ?
+            AND kind = 'cheer'
+            AND (sender_id IS NULL OR sender_id != ?)
+            AND date(created_at) = date('now')
+        `,
+        args: [Number(targetUserId), Number(targetUserId)],
+      });
+      const recvCount = Number(recvTodayRes.rows[0]?.cnt ?? 0);
+      if (recvCount <= 5) {
+        receiverBonusEarned = 2;
+        await turso.execute({
+          sql: 'UPDATE users SET points = points + ? WHERE id = ?',
+          args: [receiverBonusEarned, Number(targetUserId)],
+        });
+      }
+    }
 
     // คำนวณแต้มเติมไฟ (+) และมารผจญ (-) รายวัน (รีเซ็ตทุก 07:00 น. เวลาไทย = 00:00 UTC)
     const dailyRes = await turso.execute({
@@ -94,6 +146,11 @@ export async function POST(req: Request) {
         cheerCount,
         temptCount,
         netPower: cheerCount - temptCount,
+        senderId: validSenderId,
+        senderBonusEarned,
+        receiverBonusEarned,
+        senderPoints,
+        dailyBonusRemaining,
       },
     });
   } catch (error) {

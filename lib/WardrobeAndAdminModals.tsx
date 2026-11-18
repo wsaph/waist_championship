@@ -13,18 +13,26 @@ import {
   SPECIES_LIST,
   HERO_CATEGORIES,
   HERO_LIST,
+  ANIME_CATEGORIES,
+  ANIME_LIST,
   SHOP_ITEMS,
   GACHA_EXCLUSIVE_ITEMS,
   GACHA_SPIN_COST,
   FREE_DEFAULT_ITEMS,
   type GoalType,
+  type GenderType,
   type ShopCategory,
   type ShopItem,
+  type PropColorKey,
+  type PropColorMap,
   type SpeciesCategoryId,
   type HeroCategoryId,
+  type AnimeCategoryId,
   type SpeciesOption,
+  computeBmiMeta,
   getGoalTypeMeta,
   isHeroSpecies,
+  isAnimeSpecies,
   resolveBreedOption,
 } from '@/lib/rpg_catalog';
 import {
@@ -77,12 +85,20 @@ interface WardrobeModalProps {
   setJoinEquipPetGear: (v: string) => void;
   joinEquipMount?: string;
   setJoinEquipMount?: (v: string) => void;
+  joinPropColors?: PropColorMap;
+  setJoinPropColors?: React.Dispatch<React.SetStateAction<PropColorMap>>;
   joinGoalType: GoalType;
   setJoinGoalType: (v: GoalType) => void;
   joinStart: string;
   setJoinStart: (v: string) => void;
   joinGoal: string;
   setJoinGoal: (v: string) => void;
+  joinBodyWeight?: string;
+  setJoinBodyWeight?: (v: string) => void;
+  joinHeightCm?: string;
+  setJoinHeightCm?: (v: string) => void;
+  joinGender?: GenderType;
+  setJoinGender?: (v: GenderType) => void;
   joinWorkout: 'fit' | 'eat';
   setJoinWorkout: (v: 'fit' | 'eat') => void;
   joinStatus: string;
@@ -216,17 +232,18 @@ function ChibiHeroBustSvg({
   if (species.isHero) {
     const skin = species.skinHex || '#FAD6B8';
     const primary = species.colorHex || '#18181B';
-    const secondary = outfitHex || species.bandColor || '#FACC15';
-    const hs = species.heroStyle || 'spiky_saiyan';
-    const isFullMask = ['mecha_visor', 'spider_mask', 'sentai_helmet'].includes(hs);
+    const shirtFill = species.defaultShirtHex || outfitHex || species.bandColor || '#38BDF8';
+    const secondary = species.bandColor || '#FACC15';
+    const hs = species.heroStyle || 'snow_bob_bow';
+    const isLotso = species.id === 'disney_lotso';
 
     return (
       <div className="relative w-12 h-12 -my-1 shrink-0 flex items-center justify-center drop-shadow-[0_3px_3px_rgba(0,0,0,0.85)]">
         <svg viewBox="0 0 64 64" className="w-12 h-12 overflow-visible">
-          {/* Chibi Hero Shoulders / Cape Bust */}
+          {/* Disney Chibi Outfit Bust */}
           <path
             d="M13 58 C13 43, 51 43, 51 58 Z"
-            fill={secondary}
+            fill={shirtFill}
             stroke="#14171c"
             strokeWidth="2.8"
             strokeLinejoin="round"
@@ -234,192 +251,358 @@ function ChibiHeroBustSvg({
           <path
             d="M23 46 Q32 52 41 46"
             fill="none"
-            stroke={accentHex}
+            stroke={species.defaultPantsHex || accentHex}
             strokeWidth="2.8"
             strokeLinecap="round"
           />
 
-          {/* Back Hair / Afro / Twintails / Plumes behind head */}
-          {hs === 'disco_afro' && (
-            <circle cx="32" cy="27" r="22" fill={primary} stroke="#14171c" strokeWidth="2.6" />
+          {/* Back Hair / Ears / Braids behind head */}
+          {hs === 'merida_wild_curls' && (
+            <circle cx="32" cy="29" r="22" fill={primary} stroke="#14171c" strokeWidth="2.5" />
           )}
-          {hs === 'twintail_princess' && (
+          {(hs === 'ariel_wave_flower' || hs === 'rapunzel_floral_long' || hs === 'royal_tiara_curls') && (
+            <path d="M13 28 C11 46, 53 46, 51 28 Z" fill={primary} stroke="#14171c" strokeWidth="2.3" />
+          )}
+          {hs === 'elsa_side_braid' && (
+            <path d="M40 36 Q48 46 44 56 Q37 52 38 40 Z" fill={primary} stroke="#14171c" strokeWidth="2" />
+          )}
+          {hs === 'anna_twin_braids' && (
             <>
-              <ellipse cx="12" cy="36" rx="5.5" ry="12" transform="rotate(16 12 36)" fill={primary} stroke="#14171c" strokeWidth="2.4" />
-              <ellipse cx="52" cy="36" rx="5.5" ry="12" transform="rotate(-16 52 36)" fill={primary} stroke="#14171c" strokeWidth="2.4" />
+              <rect x="14" y="36" width="5" height="16" rx="2.5" fill={primary} stroke="#14171c" strokeWidth="2" />
+              <rect x="45" y="36" width="5" height="16" rx="2.5" fill={primary} stroke="#14171c" strokeWidth="2" />
             </>
           )}
-          {hs === 'kunoichi_ponytail' && (
-            <path d="M40 16 Q56 12 53 34 Q46 28 43 22 Z" fill={primary} stroke="#14171c" strokeWidth="2.4" />
+          {hs === 'boo_twintails' && (
+            <>
+              <circle cx="13" cy="24" r="6" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="51" cy="24" r="6" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+            </>
           )}
-          {(hs === 'spartan_plume' || hs === 'knight_crest') && (
-            <path
-              d="M22 14 Q32 1 46 14"
-              fill="none"
-              stroke={hs === 'spartan_plume' ? primary : secondary}
-              strokeWidth="7"
-              strokeLinecap="round"
-            />
+          {(hs === 'mickey_ears' || hs === 'minnie_bow_ears') && (
+            <>
+              <circle cx="16" cy="14" r={isLotso ? '7' : '9.5'} fill={primary} stroke="#14171c" strokeWidth="2.5" />
+              <circle cx="48" cy="14" r={isLotso ? '7' : '9.5'} fill={primary} stroke="#14171c" strokeWidth="2.5" />
+            </>
+          )}
+          {hs === 'stitch_alien_ears' && (
+            <>
+              <ellipse cx="9" cy="24" rx="5.5" ry="13" transform="rotate(-38 9 24)" fill={skin} stroke="#14171c" strokeWidth="2.3" />
+              <ellipse cx="55" cy="24" rx="5.5" ry="13" transform="rotate(38 55 24)" fill={skin} stroke="#14171c" strokeWidth="2.3" />
+              <ellipse cx="9" cy="24" rx="3" ry="9" transform="rotate(-38 9 24)" fill={secondary} />
+              <ellipse cx="55" cy="24" rx="3" ry="9" transform="rotate(38 55 24)" fill={secondary} />
+            </>
+          )}
+          {hs === 'sulley_horns' && (
+            <>
+              <path d="M19 20 Q11 11 16 6" fill="none" stroke="#cbd5e1" strokeWidth="4.2" strokeLinecap="round" />
+              <path d="M45 20 Q53 11 48 6" fill="none" stroke="#cbd5e1" strokeWidth="4.2" strokeLinecap="round" />
+            </>
+          )}
+          {hs === 'maleficent_horns' && (
+            <>
+              <path d="M21 21 Q10 10 17 3 Q22 10 25 19" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M43 21 Q54 10 47 3 Q42 10 39 19" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+            </>
           )}
 
-          {/* Human or Elf Ears */}
-          {!isFullMask && (
-            hs === 'elf_circlet' ? (
-              <>
-                <polygon points="16,30 5,25 15,38" fill={skin} stroke="#14171c" strokeWidth="2.2" strokeLinejoin="round" />
-                <polygon points="48,30 59,25 49,38" fill={skin} stroke="#14171c" strokeWidth="2.2" strokeLinejoin="round" />
-              </>
-            ) : (
-              <>
-                <circle cx="15" cy="34" r="4.2" fill={skin} stroke="#14171c" strokeWidth="2.2" />
-                <circle cx="49" cy="34" r="4.2" fill={skin} stroke="#14171c" strokeWidth="2.2" />
-              </>
-            )
+          {/* Human Ears (when applicable) */}
+          {!['mickey_ears', 'minnie_bow_ears', 'stitch_alien_ears', 'baymax_eyes', 'mike_cyclops', 'three_eye_alien', 'donald_sailor_beak', 'olaf_snowman', 'buzz_space_dome'].includes(hs) && (
+            <>
+              <circle cx="15" cy="34" r="4" fill={skin} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="49" cy="34" r="4" fill={skin} stroke="#14171c" strokeWidth="2.2" />
+            </>
           )}
 
-          {/* Chibi Human Head Base */}
-          <circle
-            cx="32"
-            cy="33"
-            r="16"
-            fill={isFullMask ? primary : skin}
-            stroke="#14171c"
-            strokeWidth="2.8"
-          />
+          {/* Head Circle */}
+          <circle cx="32" cy="33" r="16" fill={skin} stroke="#14171c" strokeWidth="2.8" />
 
-          {/* Eyes / Visors / Masks */}
-          {hs === 'mecha_visor' ? (
+          {/* Special Faces: Baymax / Mike / Three-Eye Alien / Donald / Olaf / Stitch */}
+          {hs === 'baymax_eyes' ? (
             <>
-              <path d="M20 22 L44 22 L42 44 Q32 49 22 44 Z" fill={secondary} stroke="#14171c" strokeWidth="2" />
-              <rect x="22" y="30" width="7" height="3.6" rx="1.5" fill="#38bdf8" />
-              <rect x="35" y="30" width="7" height="3.6" rx="1.5" fill="#38bdf8" />
+              <line x1="24" y1="33" x2="40" y2="33" stroke="#18181b" strokeWidth="2.4" />
+              <circle cx="24" cy="33" r="3" fill="#18181b" />
+              <circle cx="40" cy="33" r="3" fill="#18181b" />
             </>
-          ) : hs === 'spider_mask' ? (
+          ) : hs === 'mike_cyclops' ? (
             <>
-              <ellipse cx="25" cy="32" rx="5.2" ry="6.2" transform="rotate(-14 25 32)" fill="#ffffff" stroke="#111827" strokeWidth="2.4" />
-              <ellipse cx="39" cy="32" rx="5.2" ry="6.2" transform="rotate(14 39 32)" fill="#ffffff" stroke="#111827" strokeWidth="2.4" />
+              <circle cx="32" cy="31" r="9.5" fill="#ffffff" stroke="#14171c" strokeWidth="2" />
+              <circle cx="32" cy="31" r="5.5" fill="#10b981" />
+              <circle cx="32" cy="31" r="2.8" fill="#18181b" />
+              <circle cx="30.5" cy="29.5" r="1.2" fill="#ffffff" />
+              <path d="M26 43 Q32 46 38 43" fill="none" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
             </>
-          ) : hs === 'sentai_helmet' ? (
+          ) : hs === 'three_eye_alien' ? (
             <>
-              <path d="M17 29 Q32 25 47 29 L45 36 Q32 39 19 36 Z" fill="#09090b" stroke="#fde047" strokeWidth="1.6" />
-              <polygon points="32,27 23,19 27,27" fill={secondary} />
-              <polygon points="32,27 41,19 37,27" fill={secondary} />
-              <rect x="27" y="40" width="10" height="4.5" rx="2" fill="#e2e8f0" stroke="#14171c" strokeWidth="1.4" />
-            </>
-          ) : hs === 'bat_cowl' ? (
-            <>
-              <path d="M16 35 C16 17, 48 17, 48 35 L40 36 L32 33 L24 36 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <polygon points="18,22 20,7 26,19" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <polygon points="46,22 44,7 38,19" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <polygon points="22,31 28,32 23,34" fill="#ffffff" />
-              <polygon points="42,31 36,32 41,34" fill="#ffffff" />
-              <path d="M28 41 Q32 43 36 41" fill="none" stroke="#18181b" strokeWidth="1.8" strokeLinecap="round" />
-            </>
-          ) : hs === 'blindfold_white' ? (
-            <>
-              <polygon points="16,24 20,7 27,18 32,5 37,18 44,7 48,24" fill={primary} stroke="#14171c" strokeWidth="2.2" strokeLinejoin="round" />
-              <rect x="16" y="27" width="32" height="8" rx="3" fill={secondary} stroke="#14171c" strokeWidth="2" />
-              <path d="M28 41 Q32 44 36 41" fill="none" stroke="#18181b" strokeWidth="1.8" strokeLinecap="round" />
+              <line x1="32" y1="17" x2="32" y2="8" stroke={skin} strokeWidth="2.8" />
+              <circle cx="32" cy="7" r="3.2" fill={skin} stroke="#14171c" strokeWidth="1.8" />
+              {[23, 32, 41].map((ex) => (
+                <g key={ex}>
+                  <circle cx={ex} cy="31" r="4" fill="#ffffff" stroke="#14171c" strokeWidth="1.6" />
+                  <circle cx={ex} cy="31" r="1.8" fill="#18181b" />
+                </g>
+              ))}
+              <path d="M24 40 Q32 44 40 40" fill="none" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
             </>
           ) : (
             <>
-              {/* Expressive Human Chibi Eyes & Brows */}
+              {/* Standard Chibi Disney Eyes */}
+              {hs === 'incredible_mask' && species.id === 'disney_mr_incredible' && (
+                <rect x="19" y="29" width="26" height="7.5" rx="3.5" fill="#111827" />
+              )}
               <circle cx="25.5" cy="33" r="2.7" fill="#18181b" />
               <circle cx="38.5" cy="33" r="2.7" fill="#18181b" />
               <circle cx="24.7" cy="32" r="1" fill="#ffffff" />
               <circle cx="37.7" cy="32" r="1" fill="#ffffff" />
-              <path d="M22.5 28.2 L28 28.8" stroke="#18181b" strokeWidth="1.8" strokeLinecap="round" />
-              <path d="M41.5 28.2 L36 28.8" stroke="#18181b" strokeWidth="1.8" strokeLinecap="round" />
               <ellipse cx="20.5" cy="37" rx="3" ry="1.8" fill="#fb7185" opacity="0.65" />
               <ellipse cx="43.5" cy="37" rx="3" ry="1.8" fill="#fb7185" opacity="0.65" />
 
-              {hs === 'ninja_mask' ? (
-                <path d="M17 36 Q32 34 47 36 C46 46, 18 46, 17 36 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              {hs === 'mirabel_glasses_curls' && (
+                <>
+                  <circle cx="25.5" cy="33" r="5.2" fill="none" stroke={secondary} strokeWidth="2" />
+                  <circle cx="38.5" cy="33" r="5.2" fill="none" stroke={secondary} strokeWidth="2" />
+                  <line x1="30.7" y1="33" x2="33.3" y2="33" stroke={secondary} strokeWidth="2" />
+                </>
+              )}
+
+              {hs === 'donald_sailor_beak' ? (
+                <ellipse cx="32" cy="39" rx="7.5" ry="3.8" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
+              ) : hs === 'olaf_snowman' ? (
+                <>
+                  <polygon points="31,34 43,36 31,38" fill={secondary} stroke="#14171c" strokeWidth="1.5" />
+                  <path d="M27 41 Q32 45 37 41" fill="none" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M32 17 L32 8 M32 14 L27 9 M32 14 L37 9" stroke={primary} strokeWidth="2.2" strokeLinecap="round" />
+                </>
+              ) : hs === 'pinocchio_hat_nose' ? (
+                <>
+                  <line x1="32" y1="35" x2="43" y2="35" stroke={skin} strokeWidth="3.8" strokeLinecap="round" />
+                  <path d="M28.5 40 Q32 43 35.5 40" fill="none" stroke="#18181b" strokeWidth="1.9" strokeLinecap="round" />
+                </>
+              ) : hs === 'stitch_alien_ears' ? (
+                <>
+                  <ellipse cx="32" cy="35.5" rx="4.2" ry="3.2" fill={primary} />
+                  <path d="M26 41 Q32 44 38 41" fill="none" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
+                </>
               ) : (
                 <path d="M28.5 40 Q32 43.2 35.5 40" fill="none" stroke="#18181b" strokeWidth="1.9" strokeLinecap="round" />
               )}
             </>
           )}
 
-          {/* Hair / Helmets / Hats on top of human head */}
-          {(hs === 'spiky_saiyan' || hs === 'spiky_headband' || hs === 'slayer_scar' || hs === 'demon_lord') && (
+          {/* Front Hair / Crowns / Hats */}
+          {hs === 'cruella_half_hair' && (
+            <>
+              <path d="M16 30 C16 14, 32 14, 32 25 L32 18 L16 30 Z" fill="#ffffff" stroke="#14171c" strokeWidth="2.2" />
+              <path d="M15 29 C15 14, 32 14, 32 26 Z" fill="#ffffff" stroke="#14171c" strokeWidth="2.2" />
+              <path d="M32 26 C32 14, 49 14, 49 29 Z" fill="#18181b" stroke="#14171c" strokeWidth="2.2" />
+            </>
+          )}
+          {hs === 'hades_flame_hair' && (
             <polygon
-              points="15,27 12,15 22,19 25,6 32,16 39,6 42,19 52,15 49,27"
+              points="18,24 16,12 24,17 28,5 33,15 39,4 43,17 49,11 46,24"
               fill={primary}
-              stroke="#14171c"
-              strokeWidth="2.3"
+              stroke={secondary}
+              strokeWidth="2"
               strokeLinejoin="round"
             />
           )}
-          {hs === 'demon_lord' && (
+          {(hs === 'cowboy_hat' || hs === 'villain_tophat_plume' || hs === 'pirate_dreads_tricorne') && (
             <>
-              <polygon points="21,19 15,6 26,16" fill={secondary} stroke="#14171c" strokeWidth="2" />
-              <polygon points="43,19 49,6 38,16" fill={secondary} stroke="#14171c" strokeWidth="2" />
+              <ellipse cx="32" cy="21" rx="22" ry="4.8" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M21 21 L23 10 L41 10 L43 21 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <rect x="22" y="17" width="20" height="3.2" fill={secondary} />
             </>
           )}
-          {(hs === 'wizard_hat') && (
+          {(hs === 'peter_robin_cap' || hs === 'pinocchio_hat_nose') && (
             <>
-              <ellipse cx="32" cy="20" rx="22" ry="5" fill={primary} stroke="#14171c" strokeWidth="2.3" />
-              <polygon points="20,20 35,3 44,20" fill={primary} stroke="#14171c" strokeWidth="2.3" strokeLinejoin="round" />
+              <polygon points="16,24 34,8 48,23" fill={primary} stroke="#14171c" strokeWidth="2.2" strokeLinejoin="round" />
+              <line x1="41" y1="16" x2="49" y2="7" stroke={secondary} strokeWidth="3.5" strokeLinecap="round" />
             </>
           )}
-          {(hs === 'straw_hat') && (
+          {hs === 'donald_sailor_beak' && (
+            <ellipse cx="34" cy="16" rx="14" ry="5.5" transform="rotate(-10 34 16)" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+          )}
+          {hs === 'buzz_space_dome' && (
             <>
-              <ellipse cx="32" cy="21" rx="23" ry="5" fill={primary} stroke="#14171c" strokeWidth="2.3" />
-              <path d="M20 21 C20 9, 44 9, 44 21 Z" fill={primary} stroke="#14171c" strokeWidth="2.3" />
+              <path d="M16 30 C16 14, 48 14, 48 30 Q32 22 16 30 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="32" cy="32" r="20" fill="#bae6fd" fillOpacity="0.28" stroke={secondary} strokeWidth="2.2" />
+            </>
+          )}
+          {(hs === 'cinderella_updo' || hs === 'tinker_pom_bun' || hs === 'mulan_jade_bun') && (
+            <>
+              <circle cx="32" cy="11" r="7" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+            </>
+          )}
+          {hs === 'genie_topknot_beard' && (
+            <path d="M32 17 Q34 5 42 8" fill="none" stroke={primary} strokeWidth="4.5" strokeLinecap="round" />
+          )}
+          {hs === 'aladdin_fez' && (
+            <>
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <polygon points="28,16 29,8 36,8 37,16" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
+            </>
+          )}
+          {(hs === 'snow_bob_bow' || hs === 'minnie_bow_ears') && (
+            <>
+              {hs === 'snow_bob_bow' && (
+                <path d="M15 31 C15 14, 49 14, 49 31 Q32 21 15 31 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              )}
+              <path
+                d="M22 15 Q27 7 32 15 Q37 7 42 15 Q37 22 32 16 Q27 22 22 15 Z"
+                fill={secondary}
+                stroke="#14171c"
+                strokeWidth="2"
+              />
+            </>
+          )}
+          {(hs === 'royal_tiara_curls' || hs === 'queen_crown_veil' || hs === 'elsa_side_braid') && (
+            <>
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <polygon
+                points="23,18 26,9 32,14 38,9 41,18"
+                fill={hs === 'elsa_side_braid' ? secondary : '#facc15'}
+                stroke="#14171c"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+            </>
+          )}
+          {['anna_twin_braids', 'ariel_wave_flower', 'rapunzel_floral_long', 'jasmine_ponytail_gem', 'mirabel_glasses_curls', 'boo_twintails', 'incredible_mask', 'maleficent_horns'].includes(hs) && (
+            <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+          )}
+
+          {/* 🎌 Anime Specific SVG Head & Face Overlays */}
+          {(hs === 'anime_spiky_shonen' || hs === 'anime_headband_spiky' || hs === 'anime_slayer_earrings' || hs === 'anime_blindfold_spiky') && (
+            <>
+              <polygon
+                points="15,27 11,14 21,19 25,5 32,16 39,5 43,19 53,14 49,27"
+                fill={primary}
+                stroke="#14171c"
+                strokeWidth="2.2"
+                strokeLinejoin="round"
+              />
+              {hs === 'anime_headband_spiky' && (
+                <rect x="16" y="21" width="32" height="5" rx="2" fill={secondary} stroke="#14171c" strokeWidth="1.6" />
+              )}
+              {hs === 'anime_blindfold_spiky' && (
+                <rect x="16" y="28" width="32" height="8" rx="3" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
+              )}
+            </>
+          )}
+          {hs === 'anime_straw_hat' && (
+            <>
+              <ellipse cx="32" cy="21" rx="23" ry="5" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M20 21 C20 9, 44 9, 44 21 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
               <rect x="21" y="17" width="22" height="3.5" fill={secondary} />
             </>
           )}
-          {(hs === 'knight_crest' || hs === 'spartan_plume' || hs === 'samurai_kabuto' || hs === 'viking_horns' || hs === 'thor_helm') && (
+          {hs === 'anime_boar_mask' && (
             <>
-              <path d="M16 27 C16 12, 48 12, 48 27 Z" fill={hs === 'spartan_plume' ? secondary : primary} stroke="#14171c" strokeWidth="2.4" />
-              {hs === 'samurai_kabuto' && (
-                <path d="M22 19 Q32 9 42 19" fill="none" stroke={secondary} strokeWidth="3.2" strokeLinecap="round" />
+              <circle cx="32" cy="33" r="16.5" fill={primary} stroke="#14171c" strokeWidth="2.6" />
+              <polygon points="18,21 13,8 26,17" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <polygon points="46,21 51,8 38,17" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <ellipse cx="32" cy="37" rx="6" ry="4.2" fill="#f9a8d4" stroke="#14171c" strokeWidth="1.8" />
+              <circle cx="24" cy="31" r="3" fill={secondary} />
+              <circle cx="40" cy="31" r="3" fill={secondary} />
+            </>
+          )}
+          {hs === 'anime_sailor_odango' && (
+            <>
+              <circle cx="17" cy="14" r="5.5" fill={primary} stroke="#14171c" strokeWidth="2" />
+              <circle cx="47" cy="14" r="5.5" fill={primary} stroke="#14171c" strokeWidth="2" />
+              <circle cx="17" cy="14" r="2.2" fill={secondary} />
+              <circle cx="47" cy="14" r="2.2" fill={secondary} />
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+            </>
+          )}
+          {hs === 'anime_bamboo_muzzle' && (
+            <>
+              <path d="M15 30 C16 14, 48 14, 49 30 Q32 21 15 30 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <rect x="23" y="38" width="18" height="5.5" rx="2.5" fill="#22c55e" stroke="#14171c" strokeWidth="1.8" />
+            </>
+          )}
+          {hs === 'anime_anya_cones' && (
+            <>
+              <path d="M15 30 C16 15, 48 15, 49 30 Q32 21 15 30 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <polygon points="18,21 21,9 26,20" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
+              <polygon points="46,21 43,9 38,20" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
+            </>
+          )}
+          {hs === 'anime_elf_twintails' && (
+            <>
+              <ellipse cx="11" cy="36" rx="4.8" ry="13" transform="rotate(14 11 36)" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <ellipse cx="53" cy="36" rx="4.8" ry="13" transform="rotate(-14 53 36)" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+            </>
+          )}
+          {hs === 'anime_maid_bob' && (
+            <path d="M15 30 C16 14, 48 14, 49 30 Q32 21 15 30 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+          )}
+          {hs === 'anime_doraemon_bell' && (
+            <>
+              <path d="M16 34 C16 14, 48 14, 48 34 C46 23, 18 23, 16 34 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="32" cy="35" r="3.4" fill="#ef4444" stroke="#14171c" strokeWidth="1.5" />
+              <rect x="20" y="46" width="24" height="4" rx="2" fill={secondary} stroke="#14171c" strokeWidth="1.5" />
+              <circle cx="32" cy="49" r="3.2" fill="#facc15" stroke="#14171c" strokeWidth="1.5" />
+            </>
+          )}
+          {hs === 'anime_shinchan_brows' && (
+            <>
+              <path d="M17 25 C19 15, 45 15, 47 25 Z" fill={primary} stroke="#14171c" strokeWidth="2" />
+              <path d="M21 27 Q25 23 29 27" fill="none" stroke="#18181b" strokeWidth="4.2" strokeLinecap="round" />
+              <path d="M35 27 Q39 23 43 27" fill="none" stroke="#18181b" strokeWidth="4.2" strokeLinecap="round" />
+            </>
+          )}
+          {hs === 'anime_glasses_detective' && (
+            <>
+              <path d="M16 27 C17 15, 47 15, 48 27 Q32 21 16 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="25.5" cy="33" r="5.4" fill="none" stroke="#18181b" strokeWidth="2.2" />
+              <circle cx="38.5" cy="33" r="5.4" fill="none" stroke="#18181b" strokeWidth="2.2" />
+              <line x1="30.9" y1="33" x2="33.1" y2="33" stroke="#18181b" strokeWidth="2.2" />
+            </>
+          )}
+          {hs === 'anime_pikachu_ears' && (
+            <>
+              <polygon points="18,22 11,4 25,17" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <polygon points="46,22 53,4 39,17" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <circle cx="20" cy="38" r="3.8" fill={secondary} />
+              <circle cx="44" cy="38" r="3.8" fill={secondary} />
+            </>
+          )}
+          {hs === 'anime_chopper_hat' && (
+            <>
+              <ellipse cx="32" cy="22" rx="22" ry="4.5" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <rect x="21" y="7" width="22" height="15" rx="3" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M29 11 L35 17 M35 11 L29 17" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" />
+              <circle cx="32" cy="36" r="2.8" fill={secondary} />
+            </>
+          )}
+          {hs === 'anime_ninja_mask_silver' && (
+            <>
+              <polygon points="16,26 20,8 30,17 37,5 48,25" fill={primary} stroke="#14171c" strokeWidth="2.2" strokeLinejoin="round" />
+              {species.id === 'anime_kakashi' && (
+                <path d="M17 35 Q32 33 47 35 C46 46, 18 46, 17 35 Z" fill={secondary} stroke="#14171c" strokeWidth="2" />
               )}
-              {(hs === 'viking_horns' || hs === 'thor_helm') && (
-                <>
-                  <polygon points="16,22 7,10 19,17" fill="#fef3c7" stroke="#14171c" strokeWidth="2" />
-                  <polygon points="48,22 57,10 45,17" fill="#fef3c7" stroke="#14171c" strokeWidth="2" />
-                </>
-              )}
             </>
           )}
-          {hs === 'chef_toque' && (
-            <path d="M21 23 L20 11 Q26 5 32 9 Q38 5 44 11 L43 23 Z" fill={primary} stroke="#14171c" strokeWidth="2.3" />
-          )}
-          {hs === 'astro_helmet' && (
-            <circle cx="32" cy="32" r="20" fill="#bae6fd" fillOpacity="0.32" stroke={secondary} strokeWidth="2.4" />
-          )}
-          {(hs === 'muaythai_mongkhon' || hs === 'sport_headband' || hs === 'spiky_headband' || hs === 'ninja_mask' || hs === 'monkey_king_band' || hs === 'wonder_tiara') && (
-            <rect x="16" y="21" width="32" height="5" rx="2.5" fill={secondary} stroke="#14171c" strokeWidth="1.8" />
-          )}
-          {hs === 'super_curl' && (
+          {hs === 'anime_chainsaw_head' && (
             <>
-              <path d="M16 27 C16 14, 48 14, 48 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.3" />
-              <path d="M32 22 Q29 27 34 29" fill="none" stroke={primary} strokeWidth="2.8" strokeLinecap="round" />
+              <circle cx="32" cy="33" r="16" fill={primary} stroke="#14171c" strokeWidth="2.6" />
+              <rect x="29" y="3" width="6" height="24" rx="2" fill="#cbd5e1" stroke="#14171c" strokeWidth="2" />
+              <circle cx="25" cy="32" r="3" fill={secondary} />
+              <circle cx="39" cy="32" r="3" fill={secondary} />
             </>
           )}
-          {(hs === 'top_bun' || hs === 'sumo_topknot') && (
+          {hs === 'anime_korosensei_smile' && (
             <>
-              <path d="M16 27 C16 15, 48 15, 48 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <circle cx="32" cy="11" r="6.5" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M18 21 C20 11, 44 11, 46 21 Z" fill={primary} stroke="#14171c" strokeWidth="2" />
             </>
           )}
-          {hs === 'double_buns' && (
+          {hs === 'anime_jotaro_cap' && (
             <>
-              <path d="M16 27 C16 15, 48 15, 48 27 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <circle cx="19" cy="15" r="6" fill={secondary} stroke="#14171c" strokeWidth="2.2" />
-              <circle cx="45" cy="15" r="6" fill={secondary} stroke="#14171c" strokeWidth="2.2" />
+              <path d="M16 25 L18 13 L46 13 L48 25 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
+              <rect x="16" y="22" width="34" height="4" rx="1.5" fill={primary} stroke="#14171c" strokeWidth="1.8" />
             </>
-          )}
-          {hs === 'jiangshi_talisman' && (
-            <>
-              <path d="M17 24 L20 13 L44 13 L47 24 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
-              <rect x="28" y="21" width="8" height="15" rx="1" fill={secondary} stroke="#14171c" strokeWidth="1.5" />
-            </>
-          )}
-          {!['spiky_saiyan', 'spiky_headband', 'slayer_scar', 'demon_lord', 'wizard_hat', 'straw_hat', 'knight_crest', 'spartan_plume', 'samurai_kabuto', 'viking_horns', 'thor_helm', 'chef_toque', 'super_curl', 'top_bun', 'sumo_topknot', 'double_buns', 'jiangshi_talisman', 'bald_hero', 'shaolin_monk', 'mecha_visor', 'spider_mask', 'sentai_helmet', 'bat_cowl', 'blindfold_white'].includes(hs) && (
-            <path d="M16 26 C17 14, 47 14, 48 26 Q32 21 16 26 Z" fill={primary} stroke="#14171c" strokeWidth="2.2" />
           )}
         </svg>
         {propEmoji && (
@@ -842,12 +1025,20 @@ export function WardrobeShopModal({
   setJoinEquipPetGear,
   joinEquipMount = 'mount_none',
   setJoinEquipMount = () => {},
+  joinPropColors = {},
+  setJoinPropColors = () => {},
   joinGoalType,
   setJoinGoalType,
   joinStart,
   setJoinStart,
   joinGoal,
   setJoinGoal,
+  joinBodyWeight = '',
+  setJoinBodyWeight = () => {},
+  joinHeightCm = '',
+  setJoinHeightCm = () => {},
+  joinGender = 'female',
+  setJoinGender = () => {},
   joinWorkout,
   setJoinWorkout,
   joinStatus,
@@ -862,18 +1053,23 @@ export function WardrobeShopModal({
   const rotYRef = useRef<number>(INITIAL_FACING_YAW);
   const autoSpinRef = useRef<boolean>(true);
   const [autoSpinUi, setAutoSpinUi] = useState<boolean>(true);
-  const [leftTab, setLeftTab] = useState<'species' | 'hero'>(() =>
-    isHeroSpecies(joinSpecies) ? 'hero' : 'species'
+  const [leftTab, setLeftTab] = useState<'species' | 'hero' | 'anime'>(() =>
+    isAnimeSpecies(joinSpecies) ? 'anime' : isHeroSpecies(joinSpecies) ? 'hero' : 'species'
   );
   const [selectedCategory, setSelectedCategory] = useState<SpeciesCategoryId>(
     () => resolveBreedOption(joinSpecies).category
   );
   const [selectedHeroCat, setSelectedHeroCat] = useState<HeroCategoryId>(
-    () => resolveBreedOption(joinSpecies).heroCategory || 'rpg'
+    () => resolveBreedOption(joinSpecies).heroCategory || 'princess'
+  );
+  const [selectedAnimeCat, setSelectedAnimeCat] = useState<AnimeCategoryId>(
+    () => resolveBreedOption(joinSpecies).animeCategory || 'shonen'
   );
   const [leftSearch, setLeftSearch] = useState<string>('');
   const [colorEditTarget, setColorEditTarget] = useState<'body' | 'band'>('body');
   const [showFineSliders, setShowFineSliders] = useState<boolean>(true);
+  const [armorColorPart, setArmorColorPart] = useState<'shirt' | 'pants'>('shirt');
+  const [showPropFineSliders, setShowPropFineSliders] = useState<boolean>(false);
   const [rightCategory, setRightCategory] = useState<ShopCategory | 'gacha'>(initialRightTab || 'armor');
   const [previewBelly, setPreviewBelly] = useState<number>(1.0);
   const [shopBusyId, setShopBusyId] = useState<string | null>(null);
@@ -913,10 +1109,18 @@ export function WardrobeShopModal({
   const effectiveAura = previewOverrides.aura ?? joinEquipAura;
   const effectivePet = previewOverrides.pet ?? joinEquipPetGear;
   const effectiveMount = previewOverrides.mount ?? joinEquipMount;
+  const propColorsJson = JSON.stringify(joinPropColors || {});
 
   const ownedSet = new Set([...Array.from(FREE_DEFAULT_ITEMS), ...unlockedItems]);
   const gachaOwnedCount = GACHA_EXCLUSIVE_ITEMS.filter((it) => ownedSet.has(it.id)).length;
   const goalMeta = getGoalTypeMeta(joinGoalType);
+  const effectiveWeightInput = joinBodyWeight || (!goalMeta.isCumulative ? joinStart : '');
+  const parsedBodyWeight = parseFloat(effectiveWeightInput || '0');
+  const parsedHeightCm = parseFloat(joinHeightCm || '0');
+  const bmiMeta = computeBmiMeta(parsedBodyWeight, parsedHeightCm, joinGender);
+  const effectiveBellyScale = bmiMeta.isValid ? bmiMeta.bellyScale : previewBelly;
+  const liveBellyRef = useRef<number>(effectiveBellyScale);
+  liveBellyRef.current = effectiveBellyScale;
 
   useEffect(() => {
     if (isOpen) {
@@ -927,7 +1131,10 @@ export function WardrobeShopModal({
       setLastWonGachaItem(null);
       clearAllPreviewOverrides();
       const curBreed = resolveBreedOption(joinSpecies);
-      if (curBreed.isHero) {
+      if (isAnimeSpecies(joinSpecies) || curBreed.animeCategory) {
+        setLeftTab('anime');
+        if (curBreed.animeCategory) setSelectedAnimeCat(curBreed.animeCategory);
+      } else if (curBreed.isHero) {
         setLeftTab('hero');
         if (curBreed.heroCategory) setSelectedHeroCat(curBreed.heroCategory);
       } else {
@@ -1113,12 +1320,13 @@ export function WardrobeShopModal({
 
     // 5. Build Character 3D Mesh facing angled ~30 deg toward camera
     const isMuscle = joinGoalType === 'muscle_gain';
+    const initBelly = liveBellyRef.current;
     const charParts = buildCharacterMesh({
       colorHex: joinColor,
       accessory: 'none',
       bandColor: joinBandColor,
-      bellyScale: isMuscle ? 1.05 : previewBelly,
-      muscleScale: isMuscle ? Math.max(1.1, previewBelly) : 1.0,
+      bellyScale: isMuscle ? Math.max(0.95, initBelly * 0.92) : initBelly,
+      muscleScale: isMuscle ? Math.max(1.1, initBelly) : 1.0,
       showDumbbells: isMuscle,
       species: joinSpecies,
       equipHat: effectiveHat,
@@ -1128,12 +1336,13 @@ export function WardrobeShopModal({
       equipWings: effectiveWings,
       equipAura: effectiveAura,
       equipMount: effectiveMount,
+      propColors: joinPropColors,
       animMode: 'idle',
     });
     charParts.rootGroup.rotation.y = rotYRef.current;
     scene.add(charParts.rootGroup);
 
-    const petParts = buildPetMesh(effectivePet);
+    const petParts = buildPetMesh(effectivePet, joinPropColors?.pet);
     if (petParts) {
       charParts.rootGroup.add(petParts.petGroup);
     }
@@ -1204,8 +1413,9 @@ export function WardrobeShopModal({
         isl.position.y += Math.sin(t * 0.8 + idx * 1.8) * 0.004;
       });
 
-      const scaleTarget = isMuscle ? 1.05 : previewBelly;
-      const muscleTarget = isMuscle ? Math.max(1.1, previewBelly) : 1.0;
+      const bVal = liveBellyRef.current;
+      const scaleTarget = isMuscle ? Math.max(0.95, bVal * 0.92) : bVal;
+      const muscleTarget = isMuscle ? Math.max(1.1, bVal) : 1.0;
       applyCharacterBellyScale(charParts, scaleTarget, muscleTarget);
       syncCharacterMountPose(charParts, t, 0, true, false);
       if (charParts.auraSpinGroup) {
@@ -1242,18 +1452,27 @@ export function WardrobeShopModal({
     effectiveAura,
     effectivePet,
     effectiveMount,
+    propColorsJson,
     joinGoalType,
-    previewBelly,
   ]);
 
   if (!isOpen) return null;
 
   const handleSelectSpecies = (sp: SpeciesOption) => {
+    const wasHero = isHeroSpecies(joinSpecies);
     setJoinSpecies(sp.id);
     setJoinEmoji(sp.emoji);
     setJoinColor(sp.colorHex);
     setJoinBandColor(sp.bandColor);
     setJoinThemeId('none');
+    if (wasHero) {
+      setJoinPropColors((prev) => {
+        const next = { ...prev };
+        delete next.shirt;
+        delete next.pants;
+        return next;
+      });
+    }
   };
 
   const handleSelectHero = (hero: SpeciesOption) => {
@@ -1263,18 +1482,17 @@ export function WardrobeShopModal({
     setJoinBandColor(hero.bandColor);
     setJoinThemeId('none');
     setJoinEquipHat('none');
-    if (
-      mode === 'create' ||
-      joinEquipArmor === 'armor_chibi_animal' ||
-      joinEquipArmor === 'armor_bare'
-    ) {
-      const targetArmor = hero.defaultArmor || 'armor_none';
-      if (ownedSet.has(targetArmor)) {
-        setJoinEquipArmor(targetArmor);
-      } else {
-        setJoinEquipArmor('armor_none');
-      }
+    const targetArmor = hero.defaultArmor || 'armor_none';
+    if (ownedSet.has(targetArmor)) {
+      setJoinEquipArmor(targetArmor);
+    } else {
+      setJoinEquipArmor('armor_none');
     }
+    setJoinPropColors((prev) => ({
+      ...prev,
+      shirt: hero.defaultShirtHex || undefined,
+      pants: hero.defaultPantsHex || undefined,
+    }));
   };
 
   const handleResetToDefault = () => {
@@ -1290,9 +1508,10 @@ export function WardrobeShopModal({
     setJoinEquipAura('aura_none');
     setJoinEquipPetGear('pet_none');
     setJoinEquipMount('mount_none');
+    setJoinPropColors({});
     setPreviewBelly(1.0);
     clearAllPreviewOverrides();
-    setShopMsg('✨ รีเซ็ตชุด พรอพ และสัตว์ขี่เป็นค่าเริ่มต้นแล้ว! เลือกแต่งใหม่ได้เลย');
+    setShopMsg('✨ รีเซ็ตชุด พรอพ สีพรอพ และสัตว์ขี่เป็นค่าเริ่มต้นแล้ว! เลือกแต่งใหม่ได้เลย');
   };
 
   const handleTogglePreview = (item: ShopItem) => {
@@ -1427,7 +1646,12 @@ export function WardrobeShopModal({
       <div className="relative z-10 h-dvh max-w-[1440px] mx-auto px-3 sm:px-6 py-3 flex flex-col justify-between pointer-events-none">
         {/* TOP HUD BAR */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 pointer-events-auto">
-          <div className="rpg-stone-frame rounded-2xl px-3 py-2 flex items-center gap-2.5 min-w-[210px]">
+          <button
+            type="button"
+            onClick={() => setShowConfirmModal(true)}
+            title="คลิกเพื่อเปลี่ยนชื่อตัวละคร / ตั้งค่าสายภารกิจ"
+            className="rpg-stone-frame rounded-2xl px-3 py-2 flex items-center gap-2.5 min-w-[210px] text-left cursor-pointer hover:brightness-110 transition group"
+          >
             <div className="w-11 h-11 rounded-xl border-2 border-amber-300 bg-slate-900/90 flex items-center justify-center overflow-hidden shrink-0 shadow">
               <ChibiHeroBustSvg
                 species={{ ...activeBreedMeta, colorHex: joinColor }}
@@ -1436,8 +1660,11 @@ export function WardrobeShopModal({
               />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-extrabold text-amber-200 truncate">
-                {joinName || 'ผู้กล้าคนใหม่'}
+              <div className="text-xs font-extrabold text-amber-200 truncate flex items-center gap-1">
+                <span className="truncate">{joinName || 'ผู้กล้าคนใหม่'}</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-400/20 border border-amber-400/60 text-amber-300 shrink-0 group-hover:bg-amber-400 group-hover:text-black transition">
+                  ✏️ แก้ชื่อ
+                </span>
               </div>
               <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-amber-500/70 mt-1">
                 <div className="h-full bg-gradient-to-r from-lime-400 to-emerald-400 w-3/4" />
@@ -1448,7 +1675,7 @@ export function WardrobeShopModal({
                   : '👀 กองเชียร์เดินเล่น'}
               </div>
             </div>
-          </div>
+          </button>
 
           <div className="text-center mx-auto">
             <h2 className="font-[family-name:var(--font-kanit)] text-2xl sm:text-4xl font-extrabold tracking-wide rpg-gold-title">
@@ -1479,33 +1706,41 @@ export function WardrobeShopModal({
 
         {/* MIDDLE ROW: LEFT STONE PANEL + OPEN SKY CENTER STAGE + RIGHT STONE PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end lg:items-center flex-1 my-2 min-h-0">
-          {/* LEFT PANEL: Carved Stone & Gold Selector (🐾 120 Animals vs 🦸 60 Chibi Human Heroes) */}
+          {/* LEFT PANEL: Carved Stone & Gold Selector (🐾 120 Animals vs 🏰 56 Disney vs 🎌 56 Anime) */}
           <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] flex flex-col relative">
             <StoneFrameCorners />
             <RpgWingedHeaderPlaque
-              title={leftTab === 'species' ? 'เลือกสายพันธุ์สัตว์' : 'เลือกคลาสฮีโร่มนุษย์จิบิ'}
+              title={
+                leftTab === 'species'
+                  ? 'เลือกสายพันธุ์สัตว์'
+                  : leftTab === 'anime'
+                  ? 'เลือกตัวละครอนิเมะดัง'
+                  : 'เลือกตัวละครดิสนีย์ & พิกซาร์'
+              }
               subtitle={
                 leftTab === 'species'
                   ? '(เลี้ยง • ป่า • สูญพันธุ์ • เทพนิยาย 🐉)'
-                  : '(ผู้กล้า • ซูเปอร์ฮีโร่ • ตำนาน • สายฟิต 🦸)'
+                  : leftTab === 'anime'
+                  ? '(โชเน็น • นางเอก • วัยเด็ก • ตัวตึง 🎌)'
+                  : '(เจ้าหญิง • คลาสสิก • พิกซาร์ • วายร้าย 🏰)'
               }
             />
 
-            {/* Side Tabs on desktop (protruding right edge of stone frame), compact row on mobile */}
-            <div className="grid grid-cols-2 gap-1.5 lg:absolute lg:left-full lg:top-14 lg:flex lg:flex-col lg:gap-1.5 lg:ml-[5px] z-10">
+            {/* 3 Side Tabs on desktop (protruding right edge of stone frame), compact 3-col row on mobile */}
+            <div className="grid grid-cols-3 gap-1 lg:absolute lg:left-full lg:top-12 lg:flex lg:flex-col lg:gap-1.5 lg:ml-[5px] z-10">
               <button
                 type="button"
                 onClick={() => {
                   setLeftTab('species');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-2 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
                   leftTab === 'species'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
                 }`}
               >
-                🐾 สายสัตว์ ({SPECIES_LIST.length})
+                🐾 สัตว์ ({SPECIES_LIST.length})
               </button>
               <button
                 type="button"
@@ -1513,17 +1748,31 @@ export function WardrobeShopModal({
                   setLeftTab('hero');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-2 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
                   leftTab === 'hero'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
                 }`}
               >
-                🦸 สายฮีโร่ ({HERO_LIST.length})
+                🏰 ดิสนีย์ ({HERO_LIST.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeftTab('anime');
+                  setLeftSearch('');
+                }}
+                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                  leftTab === 'anime'
+                    ? 'rpg-btn-gold'
+                    : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
+                }`}
+              >
+                🎌 อนิเมะ ({ANIME_LIST.length})
               </button>
             </div>
 
-            {/* Quick Search across 120 Animals or 60 Heroes */}
+            {/* Quick Search across 120 Animals, 56 Disney/Pixar, or 56 Anime Characters */}
             <div className="relative">
               <input
                 type="text"
@@ -1532,7 +1781,9 @@ export function WardrobeShopModal({
                 placeholder={
                   leftTab === 'species'
                     ? '🔍 ค้นหาใน 120 สายพันธุ์ (เช่น มังกร, หมูเด้ง, ทีเร็กซ์)...'
-                    : '🔍 ค้นหาใน 60 ฮีโร่ (เช่น ไซย่า, มวยไทย, พาลาดิน, ไอรอน)...'
+                    : leftTab === 'anime'
+                    ? '🔍 ค้นหาอนิเมะ (เช่น โงกุน, ลูฟี่, โกโจ, อาเนีย, โดราเอมอน, ชินจัง)...'
+                    : '🔍 ค้นหาดิสนีย์ (เช่น เอลซ่า, สโนว์ไวท์, สติทช์, เบย์แมกซ์, วู้ดดี้)...'
                 }
                 className="w-full bg-slate-950/90 text-amber-100 placeholder:text-slate-400 border border-slate-600 focus:border-amber-400 outline-none rounded-xl px-3 py-1.5 text-xs font-semibold pr-7"
               />
@@ -1547,7 +1798,77 @@ export function WardrobeShopModal({
               )}
             </div>
 
-            {leftTab === 'hero' ? (
+            {leftTab === 'anime' ? (
+              <div className="flex flex-col gap-2 flex-1 min-h-0">
+                <div className="grid grid-cols-4 gap-1 bg-black/35 p-1 rounded-xl border border-slate-700/80">
+                  {ANIME_CATEGORIES.map((aCat) => {
+                    const isAActive = selectedAnimeCat === aCat.id && !leftSearch.trim();
+                    return (
+                      <button
+                        key={aCat.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAnimeCat(aCat.id);
+                          setLeftSearch('');
+                        }}
+                        title={aCat.desc}
+                        className={`py-1 px-1 rounded-lg border text-[10px] font-extrabold cursor-pointer transition text-center truncate ${
+                          isAActive
+                            ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950 shadow'
+                            : 'bg-slate-900/85 border-slate-700 text-slate-300 hover:border-amber-400'
+                        }`}
+                      >
+                        {aCat.emoji} {aCat.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="space-y-2 overflow-y-auto pr-1 flex-1 py-0.5">
+                  {ANIME_LIST.filter((ani) => {
+                    const q = leftSearch.trim().toLowerCase();
+                    if (q) {
+                      return (
+                        ani.name.toLowerCase().includes(q) ||
+                        ani.nickname.toLowerCase().includes(q) ||
+                        ani.desc.toLowerCase().includes(q)
+                      );
+                    }
+                    return ani.animeCategory === selectedAnimeCat;
+                  }).map((ani) => {
+                    const active = joinSpecies === ani.id;
+                    return (
+                      <button
+                        key={ani.id}
+                        type="button"
+                        onClick={() => handleSelectHero(ani)}
+                        title={ani.desc}
+                        className={`w-full px-3 py-2 rounded-xl text-left transition cursor-pointer flex items-center gap-3 ${
+                          active ? 'rpg-hero-row-active' : 'rpg-hero-row'
+                        }`}
+                      >
+                        <ChibiHeroBustSvg
+                          species={ani}
+                          outfitHex={ani.bandColor}
+                          accentHex="#fde047"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="font-[family-name:var(--font-kanit)] text-sm sm:text-[15px] font-extrabold text-white truncate flex items-center gap-1.5"
+                            style={{ textShadow: '0 2px 3px rgba(0,0,0,0.9)' }}
+                          >
+                            <span className="truncate">{ani.name}</span>
+                            <span className="shrink-0">{ani.emoji}</span>
+                          </div>
+                          <div className="text-[10px] font-bold text-amber-200/90 truncate">
+                            {ani.nickname} • {ani.desc}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : leftTab === 'hero' ? (
               <div className="flex flex-col gap-2 flex-1 min-h-0">
                 <div className="grid grid-cols-4 gap-1 bg-black/35 p-1 rounded-xl border border-slate-700/80">
                   {HERO_CATEGORIES.map((hCat) => {
@@ -1874,24 +2195,117 @@ export function WardrobeShopModal({
               </span>
             </button>
 
-            <div className="w-full max-w-[380px] flex flex-col items-center gap-2 pointer-events-auto">
-              {/* Compact Belly / Muscle 3D Slider Bar */}
-              <div className="w-full rpg-stone-frame rounded-2xl px-4 py-2.5 space-y-1">
-                <div className="flex items-center justify-between text-xs font-extrabold text-amber-200">
-                  <span>
-                    {joinGoalType === 'muscle_gain' ? '💪 ขนาดกล้ามเนื้อ 3D' : '🎈 ความอ้วนของพุง 3D'}
+            <div className="w-full max-w-[400px] flex flex-col items-center gap-2 pointer-events-auto">
+              {/* BMI-Driven 3D Body Sculptor Card */}
+              <div className="w-full rpg-stone-frame rounded-2xl px-3.5 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-amber-200">
+                    ⚖️ รูปร่างผู้กล้าตามค่า BMI
                   </span>
-                  <span className="text-sky-300">{Math.round(previewBelly * 100)}%</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                  >
+                    {bmiMeta.isValid ? `BMI ${bmiMeta.bmi} • ${bmiMeta.label}` : bmiMeta.label}
+                  </span>
                 </div>
-                <input
-                  type="range"
-                  min={0.75}
-                  max={1.55}
-                  step={0.05}
-                  value={previewBelly}
-                  onChange={(e) => setPreviewBelly(Number(e.target.value))}
-                  className="w-full accent-amber-400 cursor-pointer"
-                />
+
+                {/* Gender + Weight + Height Row */}
+                <div className="grid grid-cols-12 gap-1.5 items-end">
+                  <div className="col-span-4">
+                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                      เพศ
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setJoinGender('female')}
+                        className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                          joinGender === 'female'
+                            ? 'bg-pink-500 text-white border-amber-200 shadow'
+                            : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        👩 หญิง
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setJoinGender('male')}
+                        className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                          joinGender === 'male'
+                            ? 'bg-sky-500 text-white border-amber-200 shadow'
+                            : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        👨 ชาย
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="col-span-4">
+                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                      น้ำหนัก (กก.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="20"
+                      max="250"
+                      value={effectiveWeightInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setJoinBodyWeight(val);
+                        if (!goalMeta.isCumulative && mode === 'create') {
+                          setJoinStart(val);
+                        }
+                      }}
+                      placeholder="65.0"
+                      className="w-full bg-slate-950 text-amber-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
+                    />
+                  </div>
+
+                  <div className="col-span-4">
+                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                      ส่วนสูง (ซม.)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="80"
+                      max="250"
+                      value={joinHeightCm}
+                      onChange={(e) => setJoinHeightCm(e.target.value)}
+                      placeholder="165"
+                      className="w-full bg-slate-950 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
+                    />
+                  </div>
+                </div>
+
+                {/* 5-Segment Asian BMI Gauge Bar */}
+                <div className="space-y-1 pt-0.5">
+                  <div className="relative w-full h-3 rounded-full overflow-visible border border-black/80 flex shadow-inner">
+                    <div className="w-1/5 h-full bg-sky-400 rounded-l-full" title="ผอม (<18.5)" />
+                    <div className="w-1/5 h-full bg-emerald-400" title="สมส่วน (18.5–22.9)" />
+                    <div className="w-1/5 h-full bg-amber-300" title="เริ่มท้วม (23–24.9)" />
+                    <div className="w-1/5 h-full bg-orange-500" title="อ้วนระดับ 1 (25–29.9)" />
+                    <div className="w-1/5 h-full bg-rose-500 rounded-r-full" title="อ้วนระดับ 2 (30+)" />
+                    {bmiMeta.isValid && (
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-2 border-stone-950 shadow-[0_0_8px_rgba(255,255,255,0.9)] transition-all duration-300"
+                        style={{ left: `${bmiMeta.gaugePct}%` }}
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-[9px] font-bold text-amber-100/75">
+                    <span className="text-sky-300">ผอม</span>
+                    <span className="text-emerald-300">สมส่วน</span>
+                    <span className="text-amber-300">ท้วม</span>
+                    <span className="text-orange-300">อ้วน 1</span>
+                    <span className="text-rose-300">อ้วน 2</span>
+                  </div>
+                  <div className="text-[9.5px] font-semibold text-amber-200/70 text-center">
+                    🔒 ปั้นขนาดพุงตาม BMI จริง • ซ่อนตัวเลขน้ำหนัก/ส่วนสูง/BMI จากสาธารณะทั้งหมด
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1923,15 +2337,26 @@ export function WardrobeShopModal({
                   slot.cat === 'wings' ||
                   slot.cat === 'aura' ||
                   slot.cat === 'mount';
+                const slotDyeHex =
+                  slot.cat === 'armor'
+                    ? joinPropColors.shirt || joinPropColors.pants
+                    : joinPropColors[slot.cat as PropColorKey];
                 return (
                   <button
                     key={slot.cat}
                     type="button"
                     onClick={() => setRightCategory(slot.cat)}
-                    className={`p-1 rounded-xl flex flex-col items-center justify-center cursor-pointer transition ${
+                    className={`relative p-1 rounded-xl flex flex-col items-center justify-center cursor-pointer transition ${
                       isSelected ? 'rpg-slot-active scale-105' : 'rpg-slot hover:border-amber-300'
                     }`}
                   >
+                    {slotDyeHex && (
+                      <span
+                        title={`ย้อมสี ${slotDyeHex}`}
+                        style={{ backgroundColor: slotDyeHex }}
+                        className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full border border-white shadow"
+                      />
+                    )}
                     {isEmojiSlot ? (
                       <span className="w-8 h-8 rounded-lg flex items-center justify-center text-xl bg-slate-900/70">
                         {slot.obj?.icon || '➖'}
@@ -1976,6 +2401,216 @@ export function WardrobeShopModal({
                 <span>ค่าเริ่มต้น (ถอดหมด)</span>
               </button>
             </div>
+
+            {/* 🎨 สตูดิโอย้อมสีพรอพ & เสื้อกางเกง (Prop & Outfit Dye Bar) */}
+            {rightCategory !== 'gacha' && (() => {
+              const activePropKey: PropColorKey =
+                rightCategory === 'armor' ? armorColorPart : (rightCategory as PropColorKey);
+              const activeSlotObj =
+                rightCategory === 'hat'
+                  ? hatObj
+                  : rightCategory === 'face'
+                  ? faceObj
+                  : rightCategory === 'armor'
+                  ? armorObj
+                  : rightCategory === 'weapon'
+                  ? weaponObj
+                  : rightCategory === 'wings'
+                  ? wingsObj
+                  : rightCategory === 'aura'
+                  ? auraObj
+                  : rightCategory === 'pet'
+                  ? petObj
+                  : mountObj;
+              const fallbackItemHex =
+                activeSlotObj && activeSlotObj.colorHex > 0
+                  ? `#${(rightCategory === 'armor' && armorColorPart === 'pants'
+                      ? activeSlotObj.accentHex || activeSlotObj.colorHex
+                      : activeSlotObj.colorHex
+                    )
+                      .toString(16)
+                      .padStart(6, '0')
+                      .toUpperCase()}`
+                  : '#38BDF8';
+              const currentCustomHex = joinPropColors[activePropKey];
+              const displayHex = currentCustomHex || fallbackItemHex;
+              const propHsl = hexToHsl(displayHex);
+
+              const slotDyeLabelMap: Record<ShopCategory, string> = {
+                hat: 'หมวก/เครื่องหัว',
+                face: 'แว่น/หน้ากาก',
+                armor: 'เสื้อ & กางเกง',
+                weapon: 'ของถือเล่น',
+                wings: 'กระเป๋า/ปีกหลัง',
+                aura: 'ออร่า',
+                pet: 'สัตว์เลี้ยง',
+                mount: 'สัตว์ขี่',
+              };
+
+              const applyPropColor = (hex: string) => {
+                const cleanHex = hex.toUpperCase();
+                if (rightCategory === 'armor' && effectiveArmor === 'armor_bare') {
+                  setJoinEquipArmor('armor_none');
+                }
+                setJoinPropColors((prev) => ({
+                  ...prev,
+                  [activePropKey]: cleanHex,
+                }));
+              };
+
+              const resetSinglePropColor = () => {
+                setJoinPropColors((prev) => {
+                  const next = { ...prev };
+                  delete next[activePropKey];
+                  return next;
+                });
+              };
+
+              return (
+                <div className="bg-black/35 border border-amber-500/40 rounded-xl p-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    {rightCategory === 'armor' ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setArmorColorPart('shirt')}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                            armorColorPart === 'shirt'
+                              ? 'bg-amber-400 text-black border-amber-100'
+                              : 'bg-slate-900 text-amber-200 border-slate-700'
+                          }`}
+                        >
+                          👕 สีเสื้อ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setArmorColorPart('pants')}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                            armorColorPart === 'pants'
+                              ? 'bg-amber-400 text-black border-amber-100'
+                              : 'bg-slate-900 text-amber-200 border-slate-700'
+                          }`}
+                        >
+                          👖 สีกางเกง/กระโปรง
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[10.5px] font-extrabold text-amber-200 truncate">
+                        🎨 ย้อมสี{slotDyeLabelMap[rightCategory]}
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      {currentCustomHex && (
+                        <button
+                          type="button"
+                          onClick={resetSinglePropColor}
+                          title="คืนค่าสีดั้งเดิมของพรอพชิ้นนี้"
+                          className="px-1.5 py-0.5 rounded bg-rose-950/90 hover:bg-rose-700 text-rose-200 border border-rose-400/60 text-[9.5px] font-extrabold cursor-pointer transition"
+                        >
+                          ↺ สีเดิม
+                        </button>
+                      )}
+                      <label
+                        title="คลิกเลือกสีพรอพได้ทุกเฉด (RGB / Eyedropper)"
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-slate-900 border border-amber-400/80 cursor-pointer hover:brightness-110"
+                      >
+                        <input
+                          type="color"
+                          value={/^#[0-9A-Fa-f]{6}$/.test(displayHex) ? displayHex : '#38BDF8'}
+                          onChange={(e) => applyPropColor(e.target.value)}
+                          className="w-3.5 h-3.5 rounded border-0 p-0 bg-transparent cursor-pointer"
+                        />
+                        <span className="text-[9.5px] font-mono font-extrabold text-amber-200">
+                          {currentCustomHex || 'ต้นฉบับ'}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPropFineSliders((v) => !v)}
+                        className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-600 cursor-pointer"
+                        title="พับ/กางแถบไล่โทนสีพรอพละเอียด"
+                      >
+                        {showPropFineSliders ? '▾' : '▸'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showPropFineSliders && (
+                    <div className="space-y-1 pt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-bold text-slate-300 w-9 shrink-0">โทนสี</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={360}
+                          value={propHsl.h}
+                          onChange={(e) =>
+                            applyPropColor(
+                              hslToHex(
+                                Number(e.target.value),
+                                Math.max(45, propHsl.s),
+                                Math.min(86, Math.max(22, propHsl.l))
+                              )
+                            )
+                          }
+                          className="w-full h-2 rounded-full appearance-none cursor-pointer border border-black/60"
+                          style={{
+                            background:
+                              'linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-bold text-slate-300 w-9 shrink-0">อ่อน-เข้ม</span>
+                        <input
+                          type="range"
+                          min={14}
+                          max={95}
+                          value={propHsl.l}
+                          onChange={(e) =>
+                            applyPropColor(hslToHex(propHsl.h, Math.max(20, propHsl.s), Number(e.target.value)))
+                          }
+                          className="w-full h-2 rounded-full appearance-none cursor-pointer border border-black/60"
+                          style={{
+                            background: `linear-gradient(90deg, #111827 0%, hsl(${propHsl.h}, ${Math.max(55, propHsl.s)}%, 50%) 50%, #ffffff 100%)`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ปุ่มกดย้อมสีด่วน 10 เฉดยอดฮิต */}
+                  <div className="flex items-center justify-between pt-0.5">
+                    {[
+                      '#F8FAFC',
+                      '#FACC15',
+                      '#FB923C',
+                      '#EF4444',
+                      '#F472B6',
+                      '#C084FC',
+                      '#38BDF8',
+                      '#34D399',
+                      '#92400E',
+                      '#18181B',
+                    ].map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        onClick={() => applyPropColor(hex)}
+                        style={{ backgroundColor: hex }}
+                        title={`ย้อมสี ${hex}`}
+                        className={`w-4 h-4 rounded-full border cursor-pointer transition ${
+                          currentCustomHex === hex
+                            ? 'border-amber-300 scale-125 ring-1 ring-amber-300'
+                            : 'border-black/80 hover:scale-110'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {activePreviewItems.length > 0 && (
               <div className="bg-sky-500/20 border border-sky-300 text-sky-100 rounded-xl px-2.5 py-1.5 text-[10.5px] font-extrabold flex items-center justify-between gap-2">
@@ -2283,7 +2918,7 @@ export function WardrobeShopModal({
                     ตั้งชื่อ &amp; สายภารกิจลงสนาม
                   </h3>
                   <p className="text-[11px] text-amber-100/80">
-                    ทุก +1% ของเป้าหมาย รับ +25 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
+                    ทุก +1% ของเป้าหมาย รับ +15 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
                   </p>
                 </div>
               </div>
@@ -2355,7 +2990,90 @@ export function WardrobeShopModal({
               </div>
 
               {joinRole === 'competitor' ? (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
+                  {/* Synced Personal BMI Section (Required for Competitors, Hidden Publicly) */}
+                  <div className="rounded-xl bg-slate-950/80 border border-amber-500/50 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold text-amber-200">
+                        ⚖️ ข้อมูลส่วนตัวคำนวณหุ่น BMI (ซ่อนสาธารณะ 🔒)
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                      >
+                        {bmiMeta.isValid ? `BMI ${bmiMeta.bmi} • ${bmiMeta.label}` : 'กรอกให้ครบ'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-12 gap-1.5">
+                      <div className="col-span-4">
+                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                          เพศ
+                        </label>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setJoinGender('female')}
+                            className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
+                              joinGender === 'female'
+                                ? 'bg-pink-500 text-white border-amber-200'
+                                : 'bg-slate-900 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            👩 หญิง
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setJoinGender('male')}
+                            className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
+                              joinGender === 'male'
+                                ? 'bg-sky-500 text-white border-amber-200'
+                                : 'bg-slate-900 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            👨 ชาย
+                          </button>
+                        </div>
+                      </div>
+                      <div className="col-span-4">
+                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                          น้ำหนักจริง (กก.)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="20"
+                          max="250"
+                          required
+                          value={effectiveWeightInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setJoinBodyWeight(val);
+                            if (!goalMeta.isCumulative && mode === 'create') {
+                              setJoinStart(val);
+                            }
+                          }}
+                          placeholder="65.0"
+                          className="w-full bg-slate-900 text-white placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
+                        />
+                      </div>
+                      <div className="col-span-4">
+                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                          ส่วนสูง (ซม.)
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="80"
+                          max="250"
+                          required
+                          value={joinHeightCm}
+                          onChange={(e) => setJoinHeightCm(e.target.value)}
+                          placeholder="165"
+                          className="w-full bg-slate-900 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-[11px] font-bold text-amber-200 mb-1">
                       🎯 เลือกสายภารกิจ (5 สาย)
@@ -2378,14 +3096,20 @@ export function WardrobeShopModal({
                     {!goalMeta.isCumulative && (
                       <div>
                         <label className="block text-[10px] font-bold text-amber-200 mb-0.5">
-                          ค่าเริ่มต้น ({goalMeta.unit})
+                          ค่าเริ่มต้นภารกิจ ({goalMeta.unit})
                         </label>
                         <input
                           type="number"
                           step="0.1"
                           required
-                          value={joinStart}
-                          onChange={(e) => setJoinStart(e.target.value)}
+                          value={joinStart || effectiveWeightInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setJoinStart(val);
+                            if (mode === 'create') {
+                              setJoinBodyWeight(val);
+                            }
+                          }}
                           placeholder="65.0"
                           className="w-full bg-slate-950 text-white placeholder:text-slate-400 border-2 border-amber-500/70 rounded-xl px-2.5 py-1.5 text-xs font-bold"
                         />
@@ -2406,33 +3130,23 @@ export function WardrobeShopModal({
                       />
                     </div>
                   </div>
+
+                  {bmiMeta.isValid && (joinGoalType === 'weight_loss' || joinGoalType === 'weight_gain') && (
+                    <div className="flex items-center justify-between gap-2 bg-emerald-950/60 border border-emerald-500/40 rounded-xl px-2.5 py-1.5 text-[10px] text-emerald-200">
+                      <span>
+                        💡 เกณฑ์สมส่วนตามส่วนสูง: {bmiMeta.healthyMinKg}–{bmiMeta.healthyMaxKg} กก.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setJoinGoal(String(bmiMeta.recommendedTargetKg))}
+                        className="px-2 py-0.5 rounded-lg bg-emerald-400 text-black font-extrabold cursor-pointer hover:brightness-110 shrink-0"
+                      >
+                        ใช้เป้าแนะนำ {bmiMeta.recommendedTargetKg} กก.
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setJoinWorkout('fit')}
-                    className={`py-2 rounded-xl text-xs font-bold border cursor-pointer ${
-                      joinWorkout === 'fit'
-                        ? 'bg-emerald-500 text-black border-white'
-                        : 'bg-slate-900 text-slate-300 border-slate-600'
-                    }`}
-                  >
-                    💪 สายฟิต ({FIT_ACTIVITIES.length} ท่า)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJoinWorkout('eat')}
-                    className={`py-2 rounded-xl text-xs font-bold border cursor-pointer ${
-                      joinWorkout === 'eat'
-                        ? 'bg-amber-400 text-black border-white'
-                        : 'bg-slate-900 text-slate-300 border-slate-600'
-                    }`}
-                  >
-                    🍕 สายกิน ({EAT_ACTIVITIES.length} ท่า)
-                  </button>
-                </div>
-              )}
+              ) : null}
 
               {mode === 'edit' && editingPlayerId !== currentUserId && (
                 <div>
@@ -2492,6 +3206,8 @@ export interface LoginGatePlayerSummary {
   equipAura?: string;
   progressPct?: number;
   diffLabel?: string;
+  bellyScale?: number;
+  bmiBellyScale?: number;
 }
 
 interface LoginGateModalProps {
@@ -2582,6 +3298,7 @@ export function LoginGateModal({
       colorHex: champion?.colorHex || '#F8FAFC',
       accessory: 'headband',
       bandColor: champion?.bandColor || '#FACC15',
+      bellyScale: champion?.bellyScale ?? champion?.bmiBellyScale ?? 1,
       species: champion?.breed || champion?.species || 'bunny',
       equipHat: champion?.equipHat && champion.equipHat !== 'none' ? champion.equipHat : 'hat_tiara',
       equipFace: champion?.equipFace || 'face_none',

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
-import { GOAL_TYPES } from '@/lib/rpg_catalog';
+import { GOAL_TYPES, parsePropColors } from '@/lib/rpg_catalog';
 
 const VALID_GOAL_TYPES = new Set<string>(GOAL_TYPES.map((g) => g.id));
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9A-Fa-f]{6}$/.test(v);
@@ -20,6 +20,9 @@ export async function POST(req: Request) {
       pinCode,
       startWeight,
       goalWeight,
+      bodyWeight,
+      heightCm,
+      gender,
       startVal,
       targetVal,
       goalType,
@@ -42,6 +45,7 @@ export async function POST(req: Request) {
       equipAura,
       equipPetGear,
       equipMount,
+      propColors,
     } = body;
 
     const finalRole = role === 'spectator' ? 'spectator' : 'competitor';
@@ -49,11 +53,27 @@ export async function POST(req: Request) {
       typeof goalType === 'string' && VALID_GOAL_TYPES.has(goalType) ? goalType : 'weight_loss';
     const isCumulative = finalGoalType === 'reps_accumulate' || finalGoalType === 'distance_accumulate';
 
-    const rawStart = startVal !== undefined ? Number(startVal) : Number(startWeight || 0);
+    const rawBodyWeight =
+      bodyWeight !== undefined && Number(bodyWeight) > 0 ? Number(bodyWeight) : 0;
+    const rawHeightCm = heightCm !== undefined && Number(heightCm) > 0 ? Number(heightCm) : 0;
+    const finalGender = gender === 'male' ? 'male' : 'female';
+
+    const rawStartInput = startVal !== undefined ? Number(startVal) : Number(startWeight || 0);
+    const rawStart = !isCumulative && !rawStartInput && rawBodyWeight > 0 ? rawBodyWeight : rawStartInput;
     const rawTarget = targetVal !== undefined ? Number(targetVal) : Number(goalWeight || 0);
+    const effectiveBodyWeight = rawBodyWeight > 0 ? rawBodyWeight : !isCumulative ? rawStart : 0;
 
     if (!name || (finalRole === 'competitor' && (!rawTarget || (!isCumulative && !rawStart)))) {
       return NextResponse.json({ error: 'กรุณากรอกชื่อและเป้าหมายให้ครบถ้วน' }, { status: 400 });
+    }
+    if (
+      finalRole === 'competitor' &&
+      (effectiveBodyWeight <= 15 || rawHeightCm < 80 || rawHeightCm > 250)
+    ) {
+      return NextResponse.json(
+        { error: 'กรุณากรอกน้ำหนัก (กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
+        { status: 400 }
+      );
     }
 
     const existing = await turso.execute({
@@ -84,16 +104,19 @@ export async function POST(req: Request) {
     const finalAura = typeof equipAura === 'string' && equipAura ? equipAura : 'aura_none';
     const finalPetGear = typeof equipPetGear === 'string' && equipPetGear ? equipPetGear : 'pet_none';
     const finalMount = typeof equipMount === 'string' && equipMount ? equipMount : 'mount_none';
+    const finalPropColors = JSON.stringify(parsePropColors(propColors));
 
     const safeStart = finalRole === 'competitor' ? (isCumulative ? 0 : rawStart) : 0;
     const safeGoal = finalRole === 'competitor' ? rawTarget : 0;
+    const safeBodyWeight = effectiveBodyWeight > 0 ? effectiveBodyWeight : 0;
+    const safeHeightCm = rawHeightCm > 0 ? rawHeightCm : 0;
 
     const result = await turso.execute({
       sql: `INSERT INTO users (
         name, avatar_emoji, color_hex, accessory, band_color, role, workout_type, pet_type,
-        pin_code, start_weight, goal_weight, points, species, breed, theme_id,
-        equip_hat, equip_face, equip_armor, equip_weapon, equip_wings, equip_aura, equip_pet_gear, equip_mount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pin_code, start_weight, goal_weight, body_weight, height_cm, gender, points, species, breed, theme_id,
+        equip_hat, equip_face, equip_armor, equip_weapon, equip_wings, equip_aura, equip_pet_gear, equip_mount, prop_colors
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 60, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         name.trim(),
         avatarEmoji || '🐰',
@@ -106,6 +129,9 @@ export async function POST(req: Request) {
         finalPin,
         safeStart,
         safeGoal,
+        safeBodyWeight,
+        safeHeightCm,
+        finalGender,
         finalSpecies,
         finalBreed,
         finalTheme,
@@ -117,6 +143,7 @@ export async function POST(req: Request) {
         finalAura,
         finalPetGear,
         finalMount,
+        finalPropColors,
       ],
     });
 
@@ -166,6 +193,9 @@ export async function PATCH(req: Request) {
       role,
       startWeight,
       goalWeight,
+      bodyWeight,
+      heightCm,
+      gender,
       startVal,
       targetVal,
       goalType,
@@ -182,6 +212,7 @@ export async function PATCH(req: Request) {
       equipAura,
       equipPetGear,
       equipMount,
+      propColors,
     } = body;
 
     if (!userId || (!isSelf && !pinCode)) {
@@ -209,8 +240,45 @@ export async function PATCH(req: Request) {
 
     const nextStart = rawStart !== undefined && rawStart >= 0 ? rawStart : Number(user.start_weight || 0);
     const nextGoal = rawTarget !== undefined && rawTarget > 0 ? rawTarget : Number(user.goal_weight || 0);
+    const nextBodyWeight =
+      bodyWeight !== undefined && Number(bodyWeight) > 0
+        ? Number(bodyWeight)
+        : Number(user.body_weight || nextStart || 0);
+    const nextHeightCm =
+      heightCm !== undefined && Number(heightCm) > 0
+        ? Number(heightCm)
+        : Number(user.height_cm || 0);
+    const nextGender =
+      gender === 'male' || gender === 'female'
+        ? gender
+        : String(user.gender || 'female') === 'male'
+        ? 'male'
+        : 'female';
+
+    if (
+      nextRole === 'competitor' &&
+      goalType !== undefined &&
+      (nextBodyWeight <= 15 || nextHeightCm < 80 || nextHeightCm > 250)
+    ) {
+      return NextResponse.json(
+        { error: 'กรุณากรอกน้ำหนัก (กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
+        { status: 400 }
+      );
+    }
 
     const nextName = typeof name === 'string' && name.trim() ? name.trim() : String(user.name);
+    if (nextName.toLowerCase() !== String(user.name).trim().toLowerCase()) {
+      const dupCheck = await turso.execute({
+        sql: 'SELECT id FROM users WHERE LOWER(name) = LOWER(?) AND id != ? LIMIT 1',
+        args: [nextName, userId],
+      });
+      if (dupCheck.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'ชื่อตัวละครนี้มีคนใช้แล้ว กรุณาตั้งชื่ออื่นนะ!' },
+          { status: 409 }
+        );
+      }
+    }
     const nextEmoji = typeof avatarEmoji === 'string' && avatarEmoji ? avatarEmoji : String(user.avatar_emoji);
     const nextColor = isHex(colorHex) ? colorHex : String(user.color_hex);
     const nextAccessory = typeof accessory === 'string' ? accessory : String(user.accessory || 'headband');
@@ -232,14 +300,16 @@ export async function PATCH(req: Request) {
       typeof equipPetGear === 'string' && equipPetGear ? equipPetGear : String(user.equip_pet_gear || 'pet_none');
     const nextMount =
       typeof equipMount === 'string' && equipMount ? equipMount : String(user.equip_mount || 'mount_none');
+    const nextPropColors =
+      propColors !== undefined ? JSON.stringify(parsePropColors(propColors)) : String(user.prop_colors || '{}');
 
     await turso.execute({
       sql: `UPDATE users SET
         name = ?, avatar_emoji = ?, color_hex = ?, accessory = ?, band_color = ?,
         role = ?, workout_type = ?, pet_type = ?, status_text = ?,
-        start_weight = ?, goal_weight = ?,
+        start_weight = ?, goal_weight = ?, body_weight = ?, height_cm = ?, gender = ?,
         species = ?, breed = ?, theme_id = ?,
-        equip_hat = ?, equip_face = ?, equip_armor = ?, equip_weapon = ?, equip_wings = ?, equip_aura = ?, equip_pet_gear = ?, equip_mount = ?
+        equip_hat = ?, equip_face = ?, equip_armor = ?, equip_weapon = ?, equip_wings = ?, equip_aura = ?, equip_pet_gear = ?, equip_mount = ?, prop_colors = ?
       WHERE id = ?`,
       args: [
         nextName,
@@ -253,6 +323,9 @@ export async function PATCH(req: Request) {
         nextStatus,
         nextStart,
         nextGoal,
+        nextBodyWeight,
+        nextHeightCm,
+        nextGender,
         nextSpecies,
         nextBreed,
         nextTheme,
@@ -264,6 +337,7 @@ export async function PATCH(req: Request) {
         nextAura,
         nextPetGear,
         nextMount,
+        nextPropColors,
         userId,
       ],
     });

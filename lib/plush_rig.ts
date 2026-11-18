@@ -20,6 +20,8 @@ export interface BuildChubbyPlushRigOptions {
   furColor: string | number;
   animPatterns: RegExp[];
   animTimeOffset?: number;
+  customShirtHex?: string;
+  customPantsHex?: string;
 }
 
 interface OutfitPalette {
@@ -435,9 +437,17 @@ export function buildChubbyPlushOutfitRig({
   furColor,
   animPatterns,
   animTimeOffset = 0,
+  customShirtHex,
+  customPantsHex,
 }: BuildChubbyPlushRigOptions): ChubbyPlushRigResult {
   const isBareFur = equipArmor === 'armor_bare';
-  const palette = resolveOutfitPalette(equipArmor);
+  const palette = { ...resolveOutfitPalette(equipArmor) };
+  if (customShirtHex && /^#[0-9A-Fa-f]{6}$/.test(customShirtHex)) {
+    palette.shirtHex = new THREE.Color(customShirtHex).getHex();
+  }
+  if (customPantsHex && /^#[0-9A-Fa-f]{6}$/.test(customPantsHex)) {
+    palette.pantsHex = new THREE.Color(customPantsHex).getHex();
+  }
   const furMat = new THREE.MeshPhysicalMaterial({
     color: furColor,
     roughness: 0.56,

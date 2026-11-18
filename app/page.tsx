@@ -36,9 +36,11 @@ import {
   computeGoalProgress,
   getGoalTypeMeta,
   resolveBreedOption,
+  type GenderType,
   type GoalType,
   type ShopCategory,
   type ShopItem,
+  type PropColorMap,
 } from '@/lib/rpg_catalog';
 import {
   WardrobeShopModal,
@@ -59,6 +61,10 @@ interface Player {
   startWeight?: number;
   currentWeight?: number;
   goalWeight?: number;
+  bodyWeight?: number;
+  heightCm?: number;
+  gender?: GenderType;
+  bmiBellyScale?: number;
   goalType?: GoalType;
   startVal?: number;
   currentVal?: number;
@@ -67,6 +73,8 @@ interface Player {
   diffLabel?: string;
   isInFoodStall?: boolean;
   points?: number;
+  checkedInToday?: boolean;
+  beachCoinsToday?: number;
   species?: string;
   breed?: string;
   themeId?: string;
@@ -78,6 +86,7 @@ interface Player {
   equipAura?: string;
   equipPetGear?: string;
   equipMount?: string;
+  propColors?: PropColorMap;
   unlockedItems?: string[];
   taunt: string;
   cheerCount?: number;
@@ -222,12 +231,16 @@ export default function Arena3DPage() {
   const [joinEquipAura, setJoinEquipAura] = useState('aura_none');
   const [joinEquipPetGear, setJoinEquipPetGear] = useState('pet_none');
   const [joinEquipMount, setJoinEquipMount] = useState('mount_none');
+  const [joinPropColors, setJoinPropColors] = useState<PropColorMap>({});
   const [joinGoalType, setJoinGoalType] = useState<GoalType>('weight_loss');
   const [joinPin, setJoinPin] = useState('');
   const [joinStatus, setJoinStatus] = useState('');
   const [quickStatusInput, setQuickStatusInput] = useState('');
   const [joinStart, setJoinStart] = useState('');
   const [joinGoal, setJoinGoal] = useState('');
+  const [joinBodyWeight, setJoinBodyWeight] = useState('');
+  const [joinHeightCm, setJoinHeightCm] = useState('');
+  const [joinGender, setJoinGender] = useState<GenderType>('female');
   const [joinError, setJoinError] = useState('');
   const [joining, setJoining] = useState(false);
 
@@ -317,6 +330,43 @@ export default function Arena3DPage() {
   const lastMoveBroadcastAtRef = useRef<number>(0);
   const lastLocalEjectAtRef = useRef<number>(0);
   const wasWalkingRef = useRef<boolean>(false);
+  const currentUserIdRef = useRef<number | null>(null);
+  const claimingCoinRef = useRef<boolean>(false);
+  const claimBeachCoinRef = useRef<(slotId: number, spawnToken: string) => Promise<void>>(async () => {});
+  const lunchCoinsRef = useRef<Array<{ slotId: number; spawnToken: string; x: number; z: number }>>([]);
+  const claimedTokensRef = useRef<Set<string>>(new Set());
+  const [isLunchRush, setIsLunchRush] = useState<boolean>(false);
+  const [claimingCheckin, setClaimingCheckin] = useState<boolean>(false);
+
+  useEffect(() => {
+    const syncLunchCoins = async () => {
+      const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+      const day = bkk.getUTCDay();
+      const hour = bkk.getUTCHours();
+      const inWindow = day >= 1 && day <= 5 && hour === 12;
+      if (!inWindow) {
+        lunchCoinsRef.current = [];
+        setIsLunchRush(false);
+        return;
+      }
+      try {
+        const res = await fetch('/api/rewards', { cache: 'no-store' });
+        if (res.ok) {
+          const d = await res.json();
+          setIsLunchRush(Boolean(d.isLunchRush));
+          lunchCoinsRef.current = Array.isArray(d.coins) ? d.coins : [];
+        }
+      } catch {
+        // ignore transient poll error
+      }
+    };
+    const iv = setInterval(syncLunchCoins, 3800);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   useEffect(() => {
     playersRef.current = players;
@@ -344,6 +394,10 @@ export default function Arena3DPage() {
         }
 
         const nextParticipants: Player[] = Array.isArray(data.participants) ? data.participants : [];
+        if (data.lunchRush) {
+          setIsLunchRush(Boolean(data.lunchRush.isLunchRush));
+          lunchCoinsRef.current = Array.isArray(data.lunchRush.coins) ? data.lunchRush.coins : [];
+        }
 
         // ซิงก์ข้อความ Speech Bubble บนหัวแบบสดๆ ใน DOM ทันที แม้ยังไม่ต้องสร้างฉาก 3D ใหม่
         nextParticipants.forEach((p) => {
@@ -385,7 +439,12 @@ export default function Arena3DPage() {
             p.currentVal,
             p.targetVal,
             p.progressPct,
+            p.bmiBellyScale,
+            p.heightCm,
+            p.gender,
             p.points,
+            p.checkedInToday,
+            p.beachCoinsToday,
             p.species,
             p.breed,
             p.themeId,
@@ -397,6 +456,7 @@ export default function Arena3DPage() {
             p.equipAura,
             p.equipPetGear,
             p.equipMount,
+            JSON.stringify(p.propColors || {}),
             p.cheerCount,
             p.temptCount,
             p.taunt,
@@ -485,6 +545,7 @@ export default function Arena3DPage() {
         actorName?: string;
         actorEmoji?: string;
         detail?: string;
+        dividends?: any[];
       }
     ) => {
       broadcastRealtimeEvent('arena_sync', {
@@ -652,12 +713,48 @@ export default function Arena3DPage() {
               `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail}`
             );
           } else if (payload.reason === 'weight_logged') {
-            showToast(
-              '⚡',
-              'อัปเดตผลภารกิจสด!',
-              `${payload.actorEmoji || ''} ${payload.actorName} ส่งผลภารกิจใหม่ในสนามแล้ว!`
-            );
+            const divs = Array.isArray(payload.dividends) ? payload.dividends : [];
+            const myWin = divs.find((d: any) => Number(d.userId) === currentUserIdRef.current);
+            if (myWin) {
+              confetti({ particleCount: 95, spread: 80, origin: { y: 0.6 } });
+              if (myWin.kind === 'cheer') {
+                showToast(
+                  '💰',
+                  `ปันผลวงแชร์เข้ากระเป๋า! (+${myWin.payout} 🪙)`,
+                  `เพราะคุณส่งไฟเชียร์ให้ ${payload.actorEmoji || ''} ${payload.actorName} แล้วเพื่อนทำแต้มได้สำเร็จ!`
+                );
+              } else {
+                showToast(
+                  '😈',
+                  `${myWin.jackpot ? 'แจ็กพอตซุ้มอาหาร!!' : 'แผนขุนพุงสำเร็จ!!'} (+${myWin.payout} 🪙)`,
+                  `คุณส่งของกินแกล้ง ${payload.actorEmoji || ''} ${payload.actorName} จนพัฒนาการถอยหลัง รับทรัพย์เต็มๆ!`
+                );
+              }
+            } else {
+              showToast(
+                '⚡',
+                'อัปเดตผลภารกิจสด!',
+                `${payload.actorEmoji || ''} ${payload.actorName} ส่งผลภารกิจใหม่ในสนามแล้ว!${
+                  divs.length > 0 ? ` (แจกปันผล ${divs.length} คน!)` : ''
+                }`
+              );
+            }
           }
+        }
+      } else if (event === 'coin_claimed') {
+        if (payload.spawnToken) {
+          claimedTokensRef.current.add(String(payload.spawnToken));
+          lunchCoinsRef.current = lunchCoinsRef.current.filter(
+            (c) => c.spawnToken !== payload.spawnToken
+          );
+        }
+        if (payload.winnerName && Number(payload.winnerId) !== currentUserIdRef.current) {
+          showToast(
+            '🪙',
+            `${payload.winnerEmoji || '⚡'} ${payload.winnerName} ไวจัด!`,
+            'แย่งชิงเหรียญทองพักเที่ยงไปได้ +1 🪙! รออีก 15 วินาทีเหรียญลูกใหม่จะสุ่มโผล่นะ!'
+          );
+          fetchArenaDataRef.current({ force: true });
         }
       } else if (event === 'interaction') {
         // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
@@ -684,16 +781,20 @@ export default function Arena3DPage() {
             startTime: performance.now(),
           };
           const nextNet = typeof inter.netPower === 'number' ? inter.netPower : null;
+          const recvCoinTxt =
+            inter.targetUserId === currentUserIdRef.current && inter.receiverBonusEarned > 0
+              ? ` (คุณได้รับแต้มกำลังใจ +${inter.receiverBonusEarned} 🪙 ด้วย!)`
+              : '';
           if (inter.kind === 'cheer') {
             if (nextNet === 6) {
-              showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `${inter.senderName} เติมไฟทะลุขีดจำกัด (+6)!`);
+              showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `${inter.senderName} เติมไฟทะลุขีดจำกัด (+6)!${recvCoinTxt}`);
             } else if (nextNet === 3) {
-              showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `${inter.senderName} เติมเชื้อเพลิง ${inter.giftItem}!`);
+              showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `${inter.senderName} เติมเชื้อเพลิง ${inter.giftItem}!${recvCoinTxt}`);
             } else {
               showToast(
                 '🔥',
                 `เติมไฟให้ ${inter.targetName}! (+1)`,
-                `${inter.senderName} ส่ง ${inter.giftItem}`
+                `${inter.senderName} ส่ง ${inter.giftItem}${recvCoinTxt}`
               );
             }
           } else {
@@ -947,13 +1048,26 @@ export default function Arena3DPage() {
 
         let bellyScale = 1.0;
         let muscleScale = 1.0;
-        if (gType === 'weight_loss') {
+        const hasBmiScale = typeof p.bmiBellyScale === 'number';
+        if (gType === 'muscle_gain') {
+          bellyScale = hasBmiScale
+            ? Math.max(0.88, Math.min(1.45, p.bmiBellyScale! * 0.94 + (isInFoodStall ? 0.1 : 0)))
+            : isInFoodStall
+            ? 1.18
+            : 1.04;
+          muscleScale = Math.max(0.92, 1.05 + progressRatio * 0.65 - negRatio * 0.12);
+        } else if (hasBmiScale) {
+          bellyScale = Math.max(
+            0.75,
+            Math.min(1.55, p.bmiBellyScale! + (isInFoodStall ? 0.08 : 0))
+          );
+          if (gType === 'reps_accumulate' || gType === 'distance_accumulate') {
+            muscleScale = 1.1 + progressRatio * 0.25;
+          }
+        } else if (gType === 'weight_loss') {
           bellyScale = Math.max(0.78, Math.min(1.55, 1.25 - progressRatio * 0.42 + negRatio * 0.25));
         } else if (gType === 'weight_gain') {
           bellyScale = Math.max(0.76, Math.min(1.45, 0.86 + progressRatio * 0.45 - negRatio * 0.08));
-        } else if (gType === 'muscle_gain') {
-          bellyScale = isInFoodStall ? 1.18 : 1.04;
-          muscleScale = Math.max(0.92, 1.05 + progressRatio * 0.65 - negRatio * 0.12);
         } else {
           bellyScale = 0.94;
           muscleScale = 1.1 + progressRatio * 0.25;
@@ -993,6 +1107,7 @@ export default function Arena3DPage() {
         p.currentVal,
         p.targetVal,
         p.progressPct,
+        p.bmiBellyScale,
         p.isInFoodStall,
         p.species,
         p.breed,
@@ -1005,6 +1120,7 @@ export default function Arena3DPage() {
         p.equipAura,
         p.equipPetGear,
         p.equipMount,
+        JSON.stringify(p.propColors || {}),
         p.cheerCount,
         p.temptCount,
       ])
@@ -1085,11 +1201,15 @@ export default function Arena3DPage() {
     setJoinEquipAura('aura_none');
     setJoinEquipPetGear('pet_none');
     setJoinEquipMount('mount_none');
+    setJoinPropColors({});
     setJoinGoalType('weight_loss');
     setJoinPin('');
     setJoinStatus('');
     setJoinStart('');
     setJoinGoal('');
+    setJoinBodyWeight('');
+    setJoinHeightCm('');
+    setJoinGender('female');
     setJoinError('');
     setIsJoinOpen(true);
   }, []);
@@ -1105,8 +1225,13 @@ export default function Arena3DPage() {
       setJoinGoalType((p.goalType as GoalType) || 'weight_loss');
       const sVal = p.startVal ?? p.startWeight ?? 0;
       const tVal = p.targetVal ?? p.goalWeight ?? 0;
+      const bwVal = p.bodyWeight ?? p.currentVal ?? p.currentWeight ?? sVal;
+      const hVal = p.heightCm ?? 0;
       setJoinStart(p.id === currentUserId && sVal > 0 ? String(sVal) : '');
       setJoinGoal(p.id === currentUserId && tVal > 0 ? String(tVal) : '');
+      setJoinBodyWeight(p.id === currentUserId && bwVal > 0 ? String(bwVal) : '');
+      setJoinHeightCm(p.id === currentUserId && hVal > 0 ? String(hVal) : '');
+      setJoinGender(p.id === currentUserId && p.gender === 'male' ? 'male' : 'female');
       setJoinName(p.name);
       setJoinEmoji(p.emoji);
       setJoinColor(p.colorHex || '#F8FAFC');
@@ -1122,6 +1247,7 @@ export default function Arena3DPage() {
       setJoinEquipAura(p.equipAura || 'aura_none');
       setJoinEquipPetGear(p.equipPetGear || 'pet_none');
       setJoinEquipMount(p.equipMount || 'mount_none');
+      setJoinPropColors(p.propColors || {});
       setJoinPin('');
       setJoinStatus(p.statusText || '');
       setJoinError('');
@@ -1553,7 +1679,7 @@ export default function Arena3DPage() {
     });
     scene.add(crosswalkGroup);
 
-    // Track samples for spectator trespassing detection
+    // Track samples for spectator trespassing detection (เฉพาะช่วงลู่วิ่งระหว่างจุดเริ่มต้นถึงเส้นชัยเท่านั้น)
     const trackSamples = trackCurve.getSpacedPoints(80);
     const getNearestTrackInfo = (pos: THREE.Vector3) => {
       let minDist = Infinity;
@@ -1569,7 +1695,10 @@ export default function Arena3DPage() {
       }
       const dist = Math.sqrt(minDist);
       const t = nearestIdx / (trackSamples.length - 1);
-      const onTrack = dist < trackWidth / 2 - 0.15;
+      // ก่อนจุดสตาร์ท (ซุ้มอาหาร/หลังเส้นเริ่ม) และหลังเส้นชัย ให้เดินเล่นได้อิสระ พี่ยามไม่ไล่!
+      const afterStartLine = (pos.x - startPt.x) * startTan.x + (pos.z - startPt.z) * startTan.z > 0.2;
+      const beforeFinishLine = (pos.x - endPt.x) * endTan.x + (pos.z - endPt.z) * endTan.z < -0.6;
+      const onTrack = afterStartLine && beforeFinishLine && dist < trackWidth / 2 - 0.15;
       const dxC = pos.x - crosswalkPt.x;
       const dzC = pos.z - crosswalkPt.z;
       const alongCrosswalk = Math.abs(dxC * crosswalkTan.x + dzC * crosswalkTan.z);
@@ -1713,8 +1842,6 @@ export default function Arena3DPage() {
     }
 
     const meshes: any[] = [];
-    const fitSpectators = spectatorList.filter((pl) => !isEatPath(pl.workoutType));
-    const eatSpectators = spectatorList.filter((pl) => isEatPath(pl.workoutType));
     const foodStallCompetitorList = rankedPlayers.filter((r) => r.isInFoodStall);
     const activeTrackCompetitorCount = Math.max(0, competitors.length - foodStallCompetitorList.length);
     let compIdx = 0;
@@ -1728,12 +1855,11 @@ export default function Arena3DPage() {
       const isInFoodStall = Boolean(!isSpectator && rankedInfo?.isInFoodStall);
       const style = STYLES[idx % STYLES.length];
 
-      const isEat = isSpectator && isEatPath(p.workoutType);
-      const samePathList = isEat ? eatSpectators : fitSpectators;
-      const indexInPath = isSpectator ? samePathList.findIndex((pl) => pl.id === p.id) : 0;
+      const indexInSpectators = isSpectator ? spectatorList.findIndex((pl) => pl.id === p.id) : 0;
       const customPair = isSpectator ? pairedActivities[p.id] : undefined;
       const dailyAct = isSpectator
-        ? customPair || getDailySpectatorActivity(p.id, p.workoutType, samePathList.length, indexInPath)
+        ? customPair ||
+          getDailySpectatorActivity(p.id, p.workoutType, spectatorList.length, indexInSpectators)
         : null;
 
       let slackerAct: ReturnType<typeof getFoodStallSlackerActivity> | null = null;
@@ -1802,7 +1928,7 @@ export default function Arena3DPage() {
         : slackerAct
         ? slackerAct.animType
         : '';
-      const initialBellyScale = rankedInfo?.bellyScale ?? 1;
+      const initialBellyScale = rankedInfo?.bellyScale ?? p.bmiBellyScale ?? 1;
       const initialMuscleScale = rankedInfo?.muscleScale ?? 1;
       const powerMeta = !isSpectator
         ? resolvePowerBoostMeta(p.cheerCount ?? 0, p.temptCount ?? 0)
@@ -1823,6 +1949,7 @@ export default function Arena3DPage() {
         equipWings: p.equipWings || 'wings_none',
         equipAura: p.equipAura || 'aura_none',
         equipMount: p.equipMount || 'mount_none',
+        propColors: p.propColors,
         animMode: isSpectator || isInFoodStall ? 'spectator' : 'run',
         animSeed: idx,
         netPower: powerMeta ? powerMeta.netPower : 0,
@@ -1843,7 +1970,7 @@ export default function Arena3DPage() {
           : !isSpectator
           ? p.petType || 'none'
           : 'none';
-      const petParts = buildPetMesh(petType);
+      const petParts = buildPetMesh(petType, p.propColors?.pet);
       if (petParts) {
         rootGroup.add(petParts.petGroup);
         if (petParts.leashMesh) rootGroup.add(petParts.leashMesh);
@@ -2005,6 +2132,73 @@ export default function Arena3DPage() {
     deliveryRiderGroup.visible = false;
     scene.add(deliveryRiderGroup);
 
+    // =========================================================================
+    // 🪙 ศึกแย่งเหรียญทองพักเที่ยง 3D (โผล่เฉพาะ จันทร์–ศุกร์ 12:00–13:00 น. เหรียญละ +1 🪙 แย่งกันทั้งห้อง!)
+    // =========================================================================
+    const goldCoinMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.48,
+      metalness: 0.78,
+      roughness: 0.18,
+    });
+    const goldRimMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xfacc15,
+      emissiveIntensity: 0.35,
+      metalness: 0.85,
+      roughness: 0.15,
+    });
+    const coinGlowRingMat = new THREE.MeshBasicMaterial({
+      color: 0xfde047,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+    });
+
+    const beachCoins: Array<{
+      index: number;
+      group: THREE.Group;
+      spinner: THREE.Group;
+      activeToken: string;
+    }> = [];
+
+    for (let ci = 0; ci < 3; ci++) {
+      const cGroup = new THREE.Group();
+      cGroup.userData.beachCoinIndex = ci;
+      cGroup.visible = false;
+      const spinner = new THREE.Group();
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.12, 24), goldCoinMat);
+      disc.rotation.x = Math.PI / 2;
+      disc.castShadow = true;
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.055, 10, 24), goldRimMat);
+      const starFront = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), goldRimMat);
+      starFront.scale.set(1, 1, 0.45);
+      starFront.position.z = 0.06;
+      const starBack = starFront.clone();
+      starBack.position.z = -0.06;
+      spinner.add(disc, rim, starFront, starBack);
+
+      const groundGlow = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.68, 24), coinGlowRingMat);
+      groundGlow.rotation.x = -Math.PI / 2;
+      groundGlow.position.y = -0.56;
+
+      cGroup.add(spinner, groundGlow);
+      cGroup.traverse((ch) => {
+        ch.userData.beachCoinIndex = ci;
+      });
+      scene.add(cGroup);
+      beachCoins.push({ index: ci, group: cGroup, spinner, activeToken: '' });
+    }
+
+    const collectBeachCoinObj = (coinObj: (typeof beachCoins)[number]) => {
+      if (!coinObj.group.visible || !coinObj.activeToken) return;
+      const tok = coinObj.activeToken;
+      claimedTokensRef.current.add(tok);
+      coinObj.group.visible = false;
+      void claimBeachCoinRef.current(coinObj.index, tok);
+    };
+
     let frameId: number;
     let elapsed = 0;
     const clock = new THREE.Clock();
@@ -2013,6 +2207,33 @@ export default function Arena3DPage() {
       frameId = requestAnimationFrame(animate);
       const delta = Math.min(0.05, clock.getDelta());
       elapsed += delta;
+
+      const walkerMesh =
+        walkingSpectatorIdRef.current !== null
+          ? meshes.find((m) => m.id === walkingSpectatorIdRef.current)
+          : null;
+      beachCoins.forEach((bc, bci) => {
+        const serverCoin = lunchCoinsRef.current.find(
+          (sc) => sc.slotId === bc.index && !claimedTokensRef.current.has(sc.spawnToken)
+        );
+        if (!serverCoin) {
+          bc.group.visible = false;
+          bc.activeToken = '';
+          return;
+        }
+        bc.activeToken = serverCoin.spawnToken;
+        bc.group.position.set(serverCoin.x, 0.78, serverCoin.z);
+        bc.group.visible = true;
+        bc.spinner.rotation.y = elapsed * 2.8 + bci * 1.8;
+        bc.spinner.position.y = Math.sin(elapsed * 3.4 + bci * 1.4) * 0.14;
+        if (walkerMesh) {
+          const dx = walkerMesh.rootGroup.position.x - bc.group.position.x;
+          const dz = walkerMesh.rootGroup.position.z - bc.group.position.z;
+          if (dx * dx + dz * dz < 3.2) {
+            collectBeachCoinObj(bc);
+          }
+        }
+      });
 
       clouds.forEach((c) => {
         c.position.x += 0.015;
@@ -2780,6 +3001,21 @@ export default function Arena3DPage() {
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
+
+      // คลิกเก็บเหรียญทองนำโชค 3D บนชายหาด! (+10 🪙)
+      const visibleCoins = beachCoins.filter((bc) => bc.group.visible).map((bc) => bc.group);
+      if (visibleCoins.length > 0) {
+        const coinHits = raycaster.intersectObjects(visibleCoins, true);
+        if (coinHits.length > 0) {
+          const cIdx = coinHits[0].object.userData.beachCoinIndex;
+          const targetCoin = beachCoins.find((bc) => bc.index === cIdx);
+          if (targetCoin) {
+            collectBeachCoinObj(targetCoin);
+            return;
+          }
+        }
+      }
+
       const hits = raycaster.intersectObjects(meshes.map((m) => m.rootGroup), true);
       if (hits.length > 0) {
         let obj: THREE.Object3D | null = hits[0].object;
@@ -2802,10 +3038,13 @@ export default function Arena3DPage() {
         const groundHits = raycaster.intersectObject(island, false);
         if (groundHits.length > 0) {
           const pHit = groundHits[0].point;
+          const minBeachX = islandCenterX - islandW / 2 + 1.8;
+          const maxBeachX = islandCenterX + islandW / 2 - 1.8;
+          const maxBeachZ = islandD / 2 - 1.8;
           walkTargetRef.current = new THREE.Vector3(
-            Math.max(-29, Math.min(29, pHit.x)),
+            Math.max(minBeachX, Math.min(maxBeachX, pHit.x)),
             0.2,
-            Math.max(-26, Math.min(26, pHit.z))
+            Math.max(-maxBeachZ, Math.min(maxBeachZ, pHit.z))
           );
         }
       }
@@ -2859,6 +3098,76 @@ export default function Arena3DPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneSignature, pairedActivities, currentUserId]);
 
+  const handleDailyCheckin = async () => {
+    if (!currentUserId || currentUserId <= 0 || claimingCheckin) return;
+    setClaimingCheckin(true);
+    try {
+      const res = await fetch('/api/rewards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUserId, type: 'daily_checkin' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast('🌅', 'เช็คอินวันนี้แล้ว', data.error || 'พรุ่งนี้มารับใหม่นะ');
+      } else {
+        confetti({ particleCount: 75, spread: 70, origin: { y: 0.28 } });
+        showToast(
+          '🎁',
+          `รับโบนัสเช็คอินรายวัน +${data.earned} 🪙!`,
+          `สะสมเป็น ${data.points} 🪙 แล้ว! (อย่าลืมมาแย่งเหรียญพักเที่ยง จ.-ศ. 12:00-13:00 น. นะ!)`
+        );
+        await fetchArenaData({ force: true });
+      }
+    } catch {
+      showToast('❌', 'เช็คอินไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setClaimingCheckin(false);
+    }
+  };
+
+  claimBeachCoinRef.current = async (slotId: number, spawnToken: string) => {
+    const uid = currentUserIdRef.current;
+    if (!uid || uid <= 0) {
+      claimedTokensRef.current.delete(spawnToken);
+      showToast('🪙', 'เข้าสู่ระบบเพื่อแย่งเหรียญ!', 'ล็อกอินหรือสร้างตัวละครก่อน แล้วมาร่วมศึกชิงเหรียญพักเที่ยงได้เลย!');
+      return;
+    }
+    if (claimingCoinRef.current) return;
+    claimingCoinRef.current = true;
+    try {
+      const res = await fetch('/api/rewards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, type: 'beach_coin', slotId, spawnToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast('⚡', 'ช้าไปเสี้ยววินาที!!', data.error || 'เพื่อนแย่งเก็บเหรียญนี้ตัดหน้าไปแล้ว!');
+      } else {
+        lunchCoinsRef.current = lunchCoinsRef.current.filter((c) => c.spawnToken !== spawnToken);
+        confetti({ particleCount: 35, spread: 50, origin: { y: 0.6 } });
+        showToast(
+          '🪙',
+          `ชิงเหรียญพักเที่ยงสำเร็จ! (+${data.earned} 🪙)`,
+          `มือไวสุดในสนาม! สะสมรวมเป็น ${data.points} 🪙 แล้ว!`
+        );
+        broadcastRealtimeEvent('coin_claimed', {
+          slotId,
+          spawnToken,
+          winnerId: uid,
+          winnerName: data.winnerName || '',
+          winnerEmoji: data.winnerEmoji || '⚡',
+        });
+        await fetchArenaDataRef.current({ force: true });
+      }
+    } catch {
+      claimedTokensRef.current.delete(spawnToken);
+    } finally {
+      claimingCoinRef.current = false;
+    }
+  };
+
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
@@ -2881,9 +3190,47 @@ export default function Arena3DPage() {
       if (!res.ok) {
         setModalError(data.error || 'เกิดข้อผิดพลาด');
       } else {
+        const divs: Array<{
+          userId: number;
+          name: string;
+          emoji: string;
+          kind: 'cheer' | 'tempt';
+          payout: number;
+          jackpot?: boolean;
+        }> = Array.isArray(data.dividends) ? data.dividends : [];
+
         if (data.earnedPoints > 0 || data.diff < 0) {
-          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+          confetti({ particleCount: 85, spread: 72, origin: { y: 0.6 } });
         }
+
+        const cheerWinners = divs.filter((d) => d.kind === 'cheer');
+        const temptWinners = divs.filter((d) => d.kind === 'tempt');
+        if (cheerWinners.length > 0) {
+          const names = cheerWinners.map((w) => `${w.emoji}${w.name} (+${w.payout}🪙)`).join(', ');
+          showToast(
+            '🤝',
+            `คุณรับ +${data.earnedPoints} 🪙 & แจกปันผลวงแชร์!`,
+            `กองเชียร์รับปันผลไปด้วย: ${names}`
+          );
+        } else if (temptWinners.length > 0) {
+          const names = temptWinners.map((w) => `${w.emoji}${w.name} (+${w.payout}🪙)`).join(', ');
+          showToast(
+            '😈',
+            'พลาดท่าให้สายมารขุนพุง!!',
+            `แก๊งแกล้งเพื่อนรับทรัพย์ไปเต็มๆ: ${names}`
+          );
+        } else if (data.earnedPoints > 0) {
+          showToast(
+            '🪙',
+            `อัปเดตภารกิจสำเร็จ! รับ +${data.earnedPoints} 🪙`,
+            data.dailyLogBonus > 0
+              ? `รวมโบนัสส่งผลรายวัน +${data.dailyLogBonus} 🪙 แล้ว! (มีทั้งหมด ${data.points} 🪙)`
+              : data.roast || 'พุ่งเข้าใกล้เส้นชัยไปอีกขั้น!'
+          );
+        } else {
+          showToast('⚖️', 'อัปเดตภารกิจแล้ว!', data.roast || 'บันทึกค่าล่าสุดเรียบร้อย!');
+        }
+
         setIsLogOpen(false);
         setPinInput('');
         await fetchArenaData({ force: true });
@@ -2892,6 +3239,7 @@ export default function Arena3DPage() {
           actorId: activeUserId,
           actorName: actor?.name || '',
           actorEmoji: actor?.emoji || '⚡',
+          dividends: divs,
         });
         setTimeout(() => focusOnCharacter(activeUserId), 300);
       }
@@ -2995,6 +3343,9 @@ export default function Arena3DPage() {
         startWeight: undefined,
         currentWeight: undefined,
         goalWeight: undefined,
+        bodyWeight: undefined,
+        heightCm: undefined,
+        gender: undefined,
         startVal: undefined,
         currentVal: undefined,
         targetVal: undefined,
@@ -3012,6 +3363,10 @@ export default function Arena3DPage() {
     try {
       const isEdit = joinMode === 'edit' && editingPlayerId !== null;
       const isSelf = isEdit && editingPlayerId === currentUserId;
+      const isCumulativeGoal =
+        joinGoalType === 'reps_accumulate' || joinGoalType === 'distance_accumulate';
+      const effectiveStartStr = joinStart || (!isCumulativeGoal ? joinBodyWeight : '');
+      const effectiveBodyWeightStr = joinBodyWeight || (!isCumulativeGoal ? joinStart : '');
       const payloadCommon = {
         name: joinName,
         avatarEmoji: joinEmoji,
@@ -3033,10 +3388,14 @@ export default function Arena3DPage() {
         equipAura: joinEquipAura,
         equipPetGear: joinEquipPetGear,
         equipMount: joinEquipMount,
+        propColors: joinPropColors,
         goalType: joinGoalType,
-        startVal: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : 0,
+        bodyWeight: effectiveBodyWeightStr ? parseFloat(effectiveBodyWeightStr) : 0,
+        heightCm: joinHeightCm ? parseFloat(joinHeightCm) : 0,
+        gender: joinGender,
+        startVal: joinRole === 'competitor' && effectiveStartStr ? parseFloat(effectiveStartStr) : 0,
         targetVal: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : 0,
-        startWeight: joinRole === 'competitor' && joinStart ? parseFloat(joinStart) : 0,
+        startWeight: joinRole === 'competitor' && effectiveStartStr ? parseFloat(effectiveStartStr) : 0,
         goalWeight: joinRole === 'competitor' && joinGoal ? parseFloat(joinGoal) : 0,
       };
       const res = await fetch('/api/users', {
@@ -3093,6 +3452,8 @@ export default function Arena3DPage() {
         setJoinPin('');
         setJoinStart('');
         setJoinGoal('');
+        setJoinBodyWeight('');
+        setJoinHeightCm('');
         await fetchArenaData({ force: true });
 
         broadcastArenaSync(isEdit ? 'user_updated' : 'user_created', {
@@ -3122,11 +3483,17 @@ export default function Arena3DPage() {
     if (!boardTargetId) return;
     setSendingBoard(true);
     try {
+      const effectiveSenderId =
+        currentUserId && currentUserId > 0
+          ? currentUserId
+          : boardSenderId
+          ? Number(boardSenderId)
+          : null;
       const res = await fetch('/api/interactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          senderId: boardSenderId ? Number(boardSenderId) : null,
+          senderId: effectiveSenderId,
           targetUserId: boardTargetId,
           kind: boardKind,
           message: boardMessage,
@@ -3135,6 +3502,8 @@ export default function Arena3DPage() {
       const data = await res.json();
       if (res.ok && data.interaction) {
         const inter = data.interaction;
+        const bonusTxt =
+          inter.senderBonusEarned > 0 ? ` (รับโบนัส +${inter.senderBonusEarned} 🪙!)` : '';
         setBoardMessage('');
         setRoastFeed((prev) => [
           {
@@ -3165,19 +3534,27 @@ export default function Arena3DPage() {
             origin: { y: 0.65 },
           });
           if (nextNet === 6) {
-            showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `พลังไฟทะลุ +6 ผมทองออร่าสายฟ้ามาเต็ม!`);
+            showToast('⚡', `${inter.targetName} แปลงร่าง SUPER SAIYAN!!`, `พลังไฟทะลุ +6!${bonusTxt}`);
           } else if (nextNet === 3) {
-            showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `เติมไฟครบ +3 ไฟลุกท่วมตัวพุ่งฉิว!`);
+            showToast('🔥', `${inter.targetName} ติดโหมดไฟบูสต์!!`, `เติมไฟครบ +3!${bonusTxt}`);
           } else {
-            showToast('🔥', `เติมไฟให้ ${inter.targetName}! (+1)`, `${inter.senderName} ส่ง ${inter.giftItem}`);
+            showToast(
+              '🔥',
+              `เติมไฟลงขันแชร์ให้ ${inter.targetName}! (+1)`,
+              `ส่ง ${inter.giftItem}${bonusTxt} • ถ้าเพื่อนทำแต้มได้ รับปันผลอีก!`
+            );
           }
         } else {
           if (nextNet === -6) {
-            showToast('🩷', `${inter.targetName} กลายร่างเป็นจอมมารบู!!`, `โดนขุนของกินครบ -6 ตัวเบิ้มพ่นไอน้ำฟู่ๆ!`);
+            showToast('🩷', `${inter.targetName} กลายร่างเป็นจอมมารบู!!`, `โดนขุนของกินครบ -6!${bonusTxt}`);
           } else if (nextNet === -3) {
-            showToast('💤', `${inter.targetName} ขยายร่างเป็นคาบิก้อน!!`, `โดนส่ง ${inter.giftItem} จนตัวบึ้มพุงป่อง (-3)!`);
+            showToast('💤', `${inter.targetName} ขยายร่างเป็นคาบิก้อน!!`, `โดนส่ง ${inter.giftItem} จนพุงป่อง (-3)!${bonusTxt}`);
           } else {
-            showToast('😈', `มารผจญขุนพุง ${inter.targetName}! (-1)`, `${inter.senderName} เอา ${inter.giftItem} ไปล่อถึงที่!`);
+            showToast(
+              '😈',
+              `ส่งของกินดักทาง ${inter.targetName}! (-1)`,
+              `ล่อด้วย ${inter.giftItem}${bonusTxt} • ถ้าเพื่อนถอยหลัง รับทรัพย์ทันที!`
+            );
           }
         }
         // ซิงก์สถานะร่างแปลง 3D ทันทีเมื่อลูกไฟ/ไรเดอร์พุ่งถึงตัวละคร
@@ -3263,12 +3640,22 @@ export default function Arena3DPage() {
               </span>
             </div>
             <p className="text-[11px] font-semibold text-amber-100/80 mt-0.5">
-              รวมทุกสายในสนามเดียวด้วย Progress % • ทุก +1% รับ +25 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
+              รวมทุกสายในสนามเดียวด้วย Progress % • ทุก +1% รับ +15 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
+          {isLunchRush && (
+            <div
+              className="bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 text-stone-950 border-2 border-white rounded-xl px-2.5 py-1.5 text-xs font-extrabold flex items-center gap-1.5 shadow-[0_2px_0_#000] animate-pulse"
+              title="เปิดเฉพาะวันจันทร์–ศุกร์ เวลา 12:00–13:00 น. คลิกหรือเดินชนเหรียญทองบนหาดทราย แย่งกันรับเหรียญละ +1 🪙!"
+            >
+              <span>🪙</span>
+              <span>แย่งเหรียญเที่ยง LIVE! (+1🪙)</span>
+            </div>
+          )}
+
           {bkkWeather && (
             <div
               className="rpg-panel rounded-xl px-2.5 py-1.5 text-amber-200 text-xs font-extrabold flex items-center gap-1.5"
@@ -3334,6 +3721,17 @@ export default function Arena3DPage() {
             }
             return (
               <div className="flex items-center gap-1.5">
+                {!currentUser.checkedInToday && (
+                  <button
+                    onClick={handleDailyCheckin}
+                    disabled={claimingCheckin}
+                    className="neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-xs px-3 py-2 rounded-xl flex items-center gap-1 cursor-pointer animate-bounce"
+                    title="รับโบนัสเช็คอินรายวันฟรี +10 🪙!"
+                  >
+                    <span>🎁</span>
+                    <span>เช็คอิน +10🪙</span>
+                  </button>
+                )}
                 <button
                   onClick={() => openWardrobeModal(currentUser, 'gacha')}
                   className="neo-btn bg-gradient-to-r from-fuchsia-600 via-amber-400 to-cyan-400 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-[0_3px_0_#000]"
@@ -3544,7 +3942,7 @@ export default function Arena3DPage() {
                         บันทึกผลภารกิจผู้กล้า 3D
                       </h3>
                       <p className="text-xs text-amber-100/80 font-medium">
-                        ทุกๆ +1% ความคืบหน้าที่เพิ่มขึ้น รับทันที +25 🪙 แต้มสะสม!
+                        ทุกๆ +1% ความคืบหน้าที่เพิ่มขึ้น รับทันที +15 🪙 (+10 🪙 โบนัสส่งผลรายวัน)!
                       </p>
                     </div>
                   </div>
@@ -3675,12 +4073,20 @@ export default function Arena3DPage() {
         setJoinEquipPetGear={setJoinEquipPetGear}
         joinEquipMount={joinEquipMount}
         setJoinEquipMount={setJoinEquipMount}
+        joinPropColors={joinPropColors}
+        setJoinPropColors={setJoinPropColors}
         joinGoalType={joinGoalType}
         setJoinGoalType={setJoinGoalType}
         joinStart={joinStart}
         setJoinStart={setJoinStart}
         joinGoal={joinGoal}
         setJoinGoal={setJoinGoal}
+        joinBodyWeight={joinBodyWeight}
+        setJoinBodyWeight={setJoinBodyWeight}
+        joinHeightCm={joinHeightCm}
+        setJoinHeightCm={setJoinHeightCm}
+        joinGender={joinGender}
+        setJoinGender={setJoinGender}
         joinWorkout={joinWorkout}
         setJoinWorkout={setJoinWorkout}
         joinStatus={joinStatus}
@@ -3849,6 +4255,31 @@ export default function Arena3DPage() {
                 >
                   😈 มารผจญ/ขุนพุง (-1)
                 </button>
+              </div>
+
+              {/* กติกาวงแชร์ปันผลสายเชียร์ & สายมารแทงสวนรับทรัพย์ */}
+              <div
+                className={`rounded-xl border-2 border-black px-3 py-2 text-[11px] font-bold leading-snug ${
+                  boardKind === 'cheer'
+                    ? 'bg-amber-100 text-stone-900'
+                    : 'bg-rose-100 text-rose-950'
+                }`}
+              >
+                {boardKind === 'cheer' ? (
+                  <>
+                    <div>🤝 <strong>วงแชร์สายส่งไฟ:</strong> คนส่งได้ <strong>+2 🪙</strong> &amp; <strong>คนได้รับไฟก็ได้ +2 🪙</strong> ทันที! (สูงสุด 5 ครั้ง/วัน)</div>
+                    <div className="text-[10.5px] text-amber-900 mt-0.5">
+                      💰 ถ้าเพื่อนอัปเดตผลรอบถัดไปแล้ว<strong>พัฒนาขึ้น/ได้แต้ม</strong> คนส่งไฟรับปันผลอีก <strong>+8 🪙/ดวง (สูงสุด 3 ดวง) + โบนัส 25% ของแต้มเพื่อน!</strong>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>😈 <strong>สายมารแทงสวนขุนพุง:</strong> คนส่งแกล้งเพื่อนรับทันที <strong>+2 🪙</strong> (สูงสุด 5 ครั้ง/วัน)</div>
+                    <div className="text-[10.5px] text-rose-900 mt-0.5">
+                      🍔 ถ้าเพื่อนตบะแตกอัปเดตผล<strong>ถอยหลัง</strong> รับรางวัลนำจับ <strong>+12 🪙/ชิ้น</strong> (และถ้าร่วงเข้าซุ้มอาหารริมหาด รับแจ็กพอต <strong>+20 🪙/ชิ้น!</strong>)
+                    </div>
+                  </>
+                )}
               </div>
 
               <input

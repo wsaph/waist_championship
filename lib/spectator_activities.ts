@@ -107,33 +107,36 @@ function hashString(str: string): number {
   return h >>> 0;
 }
 
+export const ALL_SPECTATOR_ACTIVITIES: SpectatorActivity[] = [
+  ...FIT_ACTIVITIES,
+  ...EAT_ACTIVITIES,
+];
+
 export function getDailySpectatorActivity(
   userId: number,
-  workoutType: string | undefined,
-  samePathCount: number,
-  indexInPath: number
+  _workoutType?: string,
+  totalSpectators = 1,
+  spectatorIndex = 0
 ): SpectatorActivity {
-  const eat = isEatPath(workoutType);
   const dayKey = getBangkok7AmDayKey();
-  const list = eat ? EAT_ACTIVITIES : FIT_ACTIVITIES;
 
-  // Group activity surprise when there are >= 2 spectators on the same path
-  if (samePathCount >= 2) {
-    const groupSeed = hashString(`${dayKey}-${eat ? 'eat' : 'fit'}-group`);
-    if (groupSeed % 3 === 0) {
-      if (!eat && indexInPath < 2) {
+  // Group activity surprise when there are >= 2 spectators
+  if (totalSpectators >= 2) {
+    const groupSeed = hashString(`${dayKey}-all-spectators-group`);
+    if (groupSeed % 4 === 0 && spectatorIndex < 3) {
+      const groupPick = groupSeed % 3;
+      if (groupPick === 0 && spectatorIndex < 2) {
         return { label: '🏸 ตีแบดคู่ข้างสนาม!', animType: 'badminton' };
       }
-      if (eat && indexInPath < 4) {
-        return groupSeed % 2 === 0
-          ? { label: '🍲 ตั้งวงชาบูหลายคน!', animType: 'picnic_shabu' }
-          : { label: '🃏 ตั้งวงเล่นไพ่ข้างสนาม!', animType: 'play_cards' };
+      if (groupPick === 1) {
+        return { label: '🍲 ตั้งวงชาบูหลายคน!', animType: 'picnic_shabu' };
       }
+      return { label: '🃏 ตั้งวงเล่นไพ่ข้างสนาม!', animType: 'play_cards' };
     }
   }
 
-  const idx = hashString(`${dayKey}-user-${userId}`) % list.length;
-  return list[idx];
+  const idx = hashString(`${dayKey}-user-${userId}`) % ALL_SPECTATOR_ACTIVITIES.length;
+  return ALL_SPECTATOR_ACTIVITIES[idx];
 }
 
 export interface FoodStallSlackerActivity {

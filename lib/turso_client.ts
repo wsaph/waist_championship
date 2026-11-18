@@ -36,6 +36,9 @@ async function ensureSchema() {
           pin_code TEXT NOT NULL DEFAULT '1234',
           start_weight REAL NOT NULL DEFAULT 0,
           goal_weight REAL NOT NULL DEFAULT 0,
+          body_weight REAL NOT NULL DEFAULT 0,
+          height_cm REAL NOT NULL DEFAULT 0,
+          gender TEXT DEFAULT 'female',
           points INTEGER NOT NULL DEFAULT 100,
           species TEXT DEFAULT 'bunny',
           breed TEXT DEFAULT '',
@@ -48,6 +51,10 @@ async function ensureSchema() {
           equip_aura TEXT DEFAULT 'aura_none',
           equip_pet_gear TEXT DEFAULT 'pet_none',
           equip_mount TEXT DEFAULT 'mount_none',
+          prop_colors TEXT DEFAULT '{}',
+          last_checkin_date TEXT DEFAULT '',
+          coin_pickups_date TEXT DEFAULT '',
+          coin_pickups_count INTEGER NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -65,6 +72,13 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_aura TEXT DEFAULT 'aura_none'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_pet_gear TEXT DEFAULT 'pet_none'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_mount TEXT DEFAULT 'mount_none'`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN prop_colors TEXT DEFAULT '{}'`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN body_weight REAL NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN height_cm REAL NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN gender TEXT DEFAULT 'female'`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN last_checkin_date TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_date TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_count INTEGER NOT NULL DEFAULT 0`);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS seasons (
@@ -119,14 +133,29 @@ async function ensureSchema() {
       await client.execute(`
         CREATE TABLE IF NOT EXISTS interactions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sender_id INTEGER DEFAULT NULL,
           sender_name TEXT NOT NULL DEFAULT 'ผู้หวังดี',
           sender_emoji TEXT NOT NULL DEFAULT '📣',
           target_user_id INTEGER NOT NULL,
           kind TEXT NOT NULL DEFAULT 'cheer',
           gift_item TEXT NOT NULL,
           message TEXT DEFAULT '',
+          dividend_claimed INTEGER NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      await safeAlter(`ALTER TABLE interactions ADD COLUMN sender_id INTEGER DEFAULT NULL`);
+      await safeAlter(`ALTER TABLE interactions ADD COLUMN dividend_claimed INTEGER NOT NULL DEFAULT 0`);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS arena_coins (
+          slot_id INTEGER PRIMARY KEY,
+          spawn_token TEXT NOT NULL,
+          pos_x REAL NOT NULL,
+          pos_z REAL NOT NULL,
+          spawn_at INTEGER NOT NULL DEFAULT 0,
+          claimed_by INTEGER DEFAULT NULL
         )
       `);
 

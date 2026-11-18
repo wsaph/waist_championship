@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS users (
   pin_code TEXT NOT NULL DEFAULT '1234',
   start_weight REAL NOT NULL DEFAULT 0,
   goal_weight REAL NOT NULL DEFAULT 0,
+  body_weight REAL NOT NULL DEFAULT 0,
+  height_cm REAL NOT NULL DEFAULT 0,
+  gender TEXT DEFAULT 'female',
   points INTEGER NOT NULL DEFAULT 100,
   species TEXT DEFAULT 'bunny',
   theme_id TEXT DEFAULT 'none',
@@ -19,6 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
   equip_armor TEXT DEFAULT 'armor_none',
   equip_wings TEXT DEFAULT 'wings_none',
   equip_pet_gear TEXT DEFAULT 'pet_none',
+  last_checkin_date TEXT DEFAULT '',
+  coin_pickups_date TEXT DEFAULT '',
+  coin_pickups_count INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -66,12 +72,23 @@ CREATE TABLE IF NOT EXISTS weight_logs (
 
 CREATE TABLE IF NOT EXISTS interactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender_id INTEGER DEFAULT NULL,
   sender_name TEXT NOT NULL DEFAULT 'ผู้หวังดี',
   sender_emoji TEXT NOT NULL DEFAULT '📣',
   target_user_id INTEGER NOT NULL,
   kind TEXT NOT NULL DEFAULT 'cheer',
   gift_item TEXT NOT NULL,
   message TEXT DEFAULT '',
+  dividend_claimed INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS arena_coins (
+  slot_id INTEGER PRIMARY KEY,
+  spawn_token TEXT NOT NULL,
+  pos_x REAL NOT NULL,
+  pos_z REAL NOT NULL,
+  spawn_at INTEGER NOT NULL DEFAULT 0,
+  claimed_by INTEGER DEFAULT NULL
 );

@@ -1,3 +1,12 @@
+import {
+  ANIME_CATEGORIES,
+  ANIME_LIST,
+  type AnimeCategoryId,
+  type AnimeCategoryMeta,
+} from '@/lib/anime_catalog';
+
+export { ANIME_CATEGORIES, ANIME_LIST, type AnimeCategoryId, type AnimeCategoryMeta };
+
 export type GoalType =
   | 'weight_loss'
   | 'weight_gain'
@@ -115,6 +124,112 @@ export function computeGoalProgress(
   return { pct: clamped, diffLabel, isInFoodStall };
 }
 
+export type GenderType = 'female' | 'male';
+
+export interface BmiMeta {
+  isValid: boolean;
+  bmi: number;
+  tier: 'underweight' | 'normal' | 'overweight' | 'obese1' | 'obese2';
+  label: string;
+  badgeClass: string;
+  bellyScale: number;
+  gaugePct: number;
+  healthyMinKg: number;
+  healthyMaxKg: number;
+  recommendedTargetKg: number;
+}
+
+export function computeBmiMeta(
+  weightKg: number,
+  heightCm: number,
+  gender: GenderType = 'female'
+): BmiMeta {
+  const valid = Number.isFinite(weightKg) && Number.isFinite(heightCm) && weightKg > 15 && heightCm >= 80 && heightCm <= 250;
+  if (!valid) {
+    return {
+      isValid: false,
+      bmi: 0,
+      tier: 'normal',
+      label: 'กรอกน้ำหนัก & ส่วนสูง',
+      badgeClass: 'bg-slate-800 text-slate-300 border-slate-500',
+      bellyScale: 1.0,
+      gaugePct: 32,
+      healthyMinKg: 0,
+      healthyMaxKg: 0,
+      recommendedTargetKg: 0,
+    };
+  }
+
+  const hM = heightCm / 100;
+  const h2 = hM * hM;
+  const rawBmi = weightKg / h2;
+  const bmi = Number(rawBmi.toFixed(1));
+
+  let tier: BmiMeta['tier'] = 'normal';
+  let label = 'สมส่วนสุขภาพดี';
+  let badgeClass = 'bg-emerald-500/25 text-emerald-300 border-emerald-400';
+  let gaugePct = 32;
+  let baseScale = 1.0;
+
+  // Piecewise mapping across 5 Asian BMI visual segments (20% each = 0..20..40..60..80..100%)
+  if (rawBmi < 18.5) {
+    tier = 'underweight';
+    label = 'ผอมเพรียว';
+    badgeClass = 'bg-sky-500/25 text-sky-300 border-sky-400';
+    const t = Math.max(0, Math.min(1, (rawBmi - 14.5) / (18.5 - 14.5)));
+    gaugePct = t * 20;
+    baseScale = 0.75 + t * (0.88 - 0.75);
+  } else if (rawBmi < 23.0) {
+    tier = 'normal';
+    label = 'สมส่วนสุขภาพดี';
+    badgeClass = 'bg-emerald-500/25 text-emerald-300 border-emerald-400';
+    const t = (rawBmi - 18.5) / (23.0 - 18.5);
+    gaugePct = 20 + t * 20;
+    baseScale = 0.88 + t * (1.05 - 0.88);
+  } else if (rawBmi < 25.0) {
+    tier = 'overweight';
+    label = 'เริ่มท้วม';
+    badgeClass = 'bg-amber-500/25 text-amber-300 border-amber-400';
+    const t = (rawBmi - 23.0) / (25.0 - 23.0);
+    gaugePct = 40 + t * 20;
+    baseScale = 1.05 + t * (1.18 - 1.05);
+  } else if (rawBmi < 30.0) {
+    tier = 'obese1';
+    label = 'อ้วนระดับ 1';
+    badgeClass = 'bg-orange-500/25 text-orange-300 border-orange-400';
+    const t = (rawBmi - 25.0) / (30.0 - 25.0);
+    gaugePct = 60 + t * 20;
+    baseScale = 1.18 + t * (1.38 - 1.18);
+  } else {
+    tier = 'obese2';
+    label = 'อ้วนระดับ 2';
+    badgeClass = 'bg-rose-500/25 text-rose-300 border-rose-400';
+    const t = Math.max(0, Math.min(1, (rawBmi - 30.0) / (36.0 - 30.0)));
+    gaugePct = 80 + t * 20;
+    baseScale = 1.38 + t * (1.55 - 1.38);
+  }
+
+  const genderOffset = gender === 'male' ? 0.02 : -0.02;
+  const bellyScale = Number(Math.max(0.75, Math.min(1.55, baseScale + genderOffset)).toFixed(2));
+  const healthyMinKg = Number((18.5 * h2).toFixed(1));
+  const healthyMaxKg = Number((22.9 * h2).toFixed(1));
+  const idealBmi = gender === 'male' ? 22.0 : 20.5;
+  const recommendedTargetKg = Math.round(idealBmi * h2 * 2) / 2;
+
+  return {
+    isValid: true,
+    bmi,
+    tier,
+    label,
+    badgeClass,
+    bellyScale,
+    gaugePct: Number(Math.max(2, Math.min(98, gaugePct)).toFixed(1)),
+    healthyMinKg,
+    healthyMaxKg,
+    recommendedTargetKg,
+  };
+}
+
 export type SpeciesCategoryId = 'pet' | 'wild' | 'extinct' | 'mythical';
 
 export interface SpeciesCategoryMeta {
@@ -131,7 +246,7 @@ export const SPECIES_CATEGORIES: SpeciesCategoryMeta[] = [
   { id: 'mythical', name: 'เทพนิยาย', emoji: '🐉', desc: 'สัตว์วิเศษในตำนานพลังเวทล้นพุง' },
 ];
 
-export type HeroCategoryId = 'rpg' | 'super' | 'legend' | 'fitness';
+export type HeroCategoryId = 'princess' | 'classic' | 'pixar' | 'villain';
 
 export interface HeroCategoryMeta {
   id: HeroCategoryId;
@@ -141,65 +256,70 @@ export interface HeroCategoryMeta {
 }
 
 export const HERO_CATEGORIES: HeroCategoryMeta[] = [
-  { id: 'rpg', name: 'ผู้กล้า RPG', emoji: '⚔️', desc: 'อัศวิน จอมเวท นินจา ซามูไร แฟนตาซี' },
-  { id: 'super', name: 'ซูเปอร์ฮีโร่', emoji: '🦸', desc: 'ฮีโร่หน้ากาก เกราะไซไฟ & นักบินอวกาศ' },
-  { id: 'legend', name: 'ตำนาน/อนิเมะ', emoji: '🏮', desc: 'ไซย่า หมวกฟาง เทพปกรณัม & จอมยุทธ์' },
-  { id: 'fitness', name: 'สายฟิต/อาชีพ', emoji: '🥊', desc: 'มวยไทย เทรนเนอร์ เชฟ ไรเดอร์ & ขาแดนซ์' },
+  { id: 'princess', name: 'เจ้าหญิง', emoji: '👑', desc: 'สโนว์ไวท์ เอลซ่า ซินเดอเรลล่า แอเรียล ราพันเซล' },
+  { id: 'classic', name: 'คลาสสิก', emoji: '🏰', desc: 'มิกกี้ มินนี่ สติทช์ อะลาดิน จินนี่ ปีเตอร์แพน' },
+  { id: 'pixar', name: 'พิกซาร์/ฮิต', emoji: '🚀', desc: 'วู้ดดี้ บัซ เบย์แมกซ์ ซัลลี่ ไมค์ โอลาฟ Inside Out' },
+  { id: 'villain', name: 'วายร้าย', emoji: '😈', desc: 'มาเลฟิเซนต์ เออร์ซูล่า ครูเอลล่า ฮาเดส ล็อตโซ่' },
 ];
 
 export type HeroHeadStyle =
-  | 'knight_crest'
-  | 'wizard_hat'
-  | 'viking_horns'
-  | 'ninja_mask'
-  | 'kunoichi_ponytail'
-  | 'samurai_kabuto'
-  | 'elf_circlet'
-  | 'valkyrie_wings'
-  | 'demon_lord'
-  | 'pirate_captain'
-  | 'twintail_princess'
-  | 'shaolin_monk'
-  | 'bard_feather'
-  | 'super_curl'
-  | 'wonder_tiara'
-  | 'mecha_visor'
-  | 'bat_cowl'
-  | 'spider_mask'
-  | 'flash_wings'
-  | 'thor_helm'
-  | 'captain_cowl'
-  | 'sentai_helmet'
-  | 'cyber_mohawk'
-  | 'astro_helmet'
-  | 'esper_clips'
-  | 'jedi_hood'
-  | 'secret_agent'
-  | 'spiky_saiyan'
-  | 'straw_hat'
-  | 'slayer_scar'
-  | 'blindfold_white'
-  | 'spiky_headband'
   | 'bald_hero'
-  | 'monkey_king_band'
-  | 'pharaoh_nemes'
-  | 'spartan_plume'
-  | 'laurel_god'
-  | 'vampire_slick'
-  | 'jiangshi_talisman'
-  | 'double_buns'
-  | 'muaythai_mongkhon'
-  | 'sport_headband'
-  | 'top_bun'
-  | 'runner_visor'
-  | 'sumo_topknot'
-  | 'lifeguard_cap'
-  | 'chef_toque'
-  | 'rider_helmet'
-  | 'office_glasses'
-  | 'doctor_mirror'
-  | 'disco_afro'
-  | 'gamer_headset';
+  | 'snow_bob_bow'
+  | 'elsa_side_braid'
+  | 'anna_twin_braids'
+  | 'cinderella_updo'
+  | 'ariel_wave_flower'
+  | 'rapunzel_floral_long'
+  | 'jasmine_ponytail_gem'
+  | 'mulan_jade_bun'
+  | 'royal_tiara_curls'
+  | 'merida_wild_curls'
+  | 'tinker_pom_bun'
+  | 'aladdin_fez'
+  | 'genie_topknot_beard'
+  | 'peter_robin_cap'
+  | 'pinocchio_hat_nose'
+  | 'mickey_ears'
+  | 'minnie_bow_ears'
+  | 'donald_sailor_beak'
+  | 'stitch_alien_ears'
+  | 'cowboy_hat'
+  | 'buzz_space_dome'
+  | 'three_eye_alien'
+  | 'baymax_eyes'
+  | 'mike_cyclops'
+  | 'sulley_horns'
+  | 'olaf_snowman'
+  | 'maleficent_horns'
+  | 'cruella_half_hair'
+  | 'hades_flame_hair'
+  | 'queen_crown_veil'
+  | 'villain_tophat_plume'
+  | 'mirabel_glasses_curls'
+  | 'boo_twintails'
+  | 'incredible_mask'
+  | 'pirate_dreads_tricorne'
+  | 'anime_spiky_shonen'
+  | 'anime_straw_hat'
+  | 'anime_headband_spiky'
+  | 'anime_slayer_earrings'
+  | 'anime_boar_mask'
+  | 'anime_blindfold_spiky'
+  | 'anime_bald_shine'
+  | 'anime_sailor_odango'
+  | 'anime_bamboo_muzzle'
+  | 'anime_anya_cones'
+  | 'anime_elf_twintails'
+  | 'anime_maid_bob'
+  | 'anime_doraemon_bell'
+  | 'anime_shinchan_brows'
+  | 'anime_glasses_detective'
+  | 'anime_pikachu_ears'
+  | 'anime_chopper_hat'
+  | 'anime_ninja_mask_silver'
+  | 'anime_chainsaw_head'
+  | 'anime_korosensei_smile'
+  | 'anime_jotaro_cap';
 
 export interface SpeciesOption {
   id: string;
@@ -250,9 +370,12 @@ export interface SpeciesOption {
     | 'jackalope';
   isHero?: boolean;
   heroCategory?: HeroCategoryId;
+  animeCategory?: AnimeCategoryId;
   heroStyle?: HeroHeadStyle;
   skinHex?: string;
   defaultArmor?: string;
+  defaultShirtHex?: string;
+  defaultPantsHex?: string;
   whiskers?: boolean;
   facePattern?: 'none' | 'mask_white' | 'husky_mask' | 'pug_wrinkle' | 'siamese_points' | 'calico' | 'raccoon_mask' | 'cow_spots' | 'red_panda';
   headTopper?: 'none' | 'alpaca_fluff' | 'capybara_orange';
@@ -410,99 +533,140 @@ const LEGACY_SPECIES_FALLBACK: Record<string, string> = {
 
 export const HERO_LIST: SpeciesOption[] = [
   // ============================================================================
-  // ⚔️ 1. คลาสผู้กล้า RPG (RPG Heroes - 15 ตัวละครมนุษย์จิบิ)
+  // 👑 1. เจ้าหญิงดิสนีย์ & นางฟ้า (Disney Princesses & Queens - 14 ตัวละคร)
   // ============================================================================
-  { id: 'hero_paladin', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'knight_crest', skinHex: '#FAD6B8', colorHex: '#CBD5E1', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'พาลาดินแสงศักดิ์สิทธิ์', nickname: 'อัศวินเกราะพู่ทอง', emoji: '🛡️', desc: 'สวมหมวกเหล็กอัศวินเปิดหน้าติดพู่ขนม้าทอง สาบานจะปกป้องซิกแพค' },
-  { id: 'hero_dark_knight', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'knight_crest', skinHex: '#F3CBB0', colorHex: '#1E293B', bandColor: '#EF4444', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'อัศวินทมิฬผ่าแคลอรี่', nickname: 'ขุนศึกพู่เพลิงแดง', emoji: '⚔️', desc: 'หมวกเกราะเหล็กกล้าสีนิลพู่แดงฉาน ฟันไขมันขาดสะบั้นทุกก้าววิ่ง' },
-  { id: 'hero_archmage', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'wizard_hat', skinHex: '#FFE0C8', colorHex: '#2563EB', bandColor: '#FACC15', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'จอมเวทดาราพุงยุบ', nickname: 'พ่อมดหมวกดาวทอง', emoji: '🧙‍♂️', desc: 'หมวกพ่อมดปลายงอติดดาวเวทมนตร์ ร่ายคาถาเผาผลาญคูณสอง' },
-  { id: 'hero_witch', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'wizard_hat', skinHex: '#FFE4D6', colorHex: '#7C3AED', bandColor: '#F472B6', defaultArmor: 'armor_princess', earStyle: 'human', name: 'แม่มดน้อยปรุงยาคลีน', nickname: 'แม่มดหมวกม่วงสายหวาน', emoji: '🧙‍♀️', desc: 'ต้มสมุนไพรดีท็อกซ์หม้อใหญ่ บินฉิวเข้าเส้นชัยแบบน้ำตาลศูนย์เปอร์เซ็นต์' },
-  { id: 'hero_viking', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'viking_horns', skinHex: '#F5C6A5', colorHex: '#64748B', bandColor: '#D97706', defaultArmor: 'armor_vest', earStyle: 'human', name: 'นักรบไวกิ้งจอมพลัง', nickname: 'ไวกิ้งเขาคู่เคราเปีย', emoji: '🪓', desc: 'หมวกเหล็กเขาโค้งคู่พร้อมเคราเปียสุดดุดัน พายเรือข้ามทะเลมาเบิร์น' },
-  { id: 'hero_ninja', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'ninja_mask', skinHex: '#F5CBA7', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'นินจาเงาวาร์ปหนีตาชั่ง', nickname: 'ชิโนบิผ้าปิดหน้า', emoji: '🥷', desc: 'คลุมหน้ากากนินจามิดชิด คาดแผ่นเหล็กหน้าผาก วิ่งเงียบไวปานสายลม' },
-  { id: 'hero_kunoichi', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'kunoichi_ponytail', skinHex: '#FFE2CE', colorHex: '#312E81', bandColor: '#EC4899', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'คุโนะอิจิสาวหางม้า', nickname: 'นินจาสาวปิ่นซากุระ', emoji: '🌸', desc: 'มัดผมหางม้าสูงปักปิ่นพิฆาต กระโดดตีลังกาหลบชานมไข่มุกพริ้วไหว' },
-  { id: 'hero_samurai', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'samurai_kabuto', skinHex: '#F5CBA7', colorHex: '#991B1B', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ซามูไรคาบูโตะจันทร์เสี้ยว', nickname: 'ยอดขุนพลอาทิตย์อุทัย', emoji: '⛩️', desc: 'หมวกเกราะซามูไรติดเขาพระจันทร์เสี้ยวทองคำ วิถีแห่งวินัยเหล็ก' },
-  { id: 'hero_elf', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'elf_circlet', skinHex: '#FFE7D6', colorHex: '#FDE047', bandColor: '#10B981', defaultArmor: 'armor_vest', earStyle: 'human', name: 'เอลฟ์นักธนูพงไพร', nickname: 'หูยาวรัดเกล้ามรกต', emoji: '🧝', desc: 'เอลฟ์หนุ่มสาวหูแหลมสง่างาม ผมทองสลวยสวมรัดเกล้ามรกต กินแต่สลัดผักสด' },
-  { id: 'hero_valkyrie', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'valkyrie_wings', skinHex: '#FFE4D4', colorHex: '#FEF08A', bandColor: '#F8FAFC', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'วาลคีรีนางฟ้าศึกสวรรค์', nickname: 'รัดเกล้าปีกขนนกขาว', emoji: '🪽', desc: 'สวมรัดเกล้าติดปีกนางฟ้าคู่ข้างขมับ นำทัพผู้กล้าบินทะยานสู่เส้นชัย' },
-  { id: 'hero_demon_lord', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'demon_lord', skinHex: '#E2E8F0', colorHex: '#18181B', bandColor: '#DC2626', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'จอมมารเขาคู่อสูรฟิตเนส', nickname: 'ราชาปีศาจสายเบิร์น', emoji: '😈', desc: 'ผมตั้งยุ่งเท่พร้อมเขาจอมมารโค้งสีเลือดหมู ยึดครองบัลลังก์เอวเอส' },
-  { id: 'hero_pirate', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'pirate_captain', skinHex: '#E5B28A', colorHex: '#292524', bandColor: '#EF4444', defaultArmor: 'armor_vest', earStyle: 'human', name: 'กัปตันโจรสลัดเจ็ดคาบสมุทร', nickname: 'หมวกสามมุมตาเดียว', emoji: '🏴‍☠️', desc: 'สวมหมวกกัปตันโพกผ้าแดง คาดผ้าปิดตาเท่ๆ ออกปล้นเวย์โปรตีนกลางทะเล' },
-  { id: 'hero_princess', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'twintail_princess', skinHex: '#FFE6DA', colorHex: '#F472B6', bandColor: '#FACC15', defaultArmor: 'armor_princess', earStyle: 'human', name: 'เจ้าหญิงทวินเทลสายหวาน', nickname: 'แกละคู่มงกุฎเพชร', emoji: '👑', desc: 'มัดผมแกละทวินเทลฟูฟ่องสองข้าง สวมมงกุฎทอง วิ่งสวยไม่หวั่นแดด' },
-  { id: 'hero_monk', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'shaolin_monk', skinHex: '#F1C29B', colorHex: '#F97316', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'หลวงจีนเส้าหลินหมัดอรหันต์', nickname: 'ศีรษะแต้มหกจุดทอง', emoji: '📿', desc: 'ฝึกวิชาตัวเบาและคาร์ดิโอขั้นสุดยอด ตบะแข็งแกร่งไม่หวั่นซุ้มหมูกรอบ' },
-  { id: 'hero_bard', category: 'mythical', isHero: true, heroCategory: 'rpg', heroStyle: 'bard_feather', skinHex: '#FAD6B8', colorHex: '#059669', bandColor: '#FDE047', defaultArmor: 'armor_vest', earStyle: 'human', name: 'กวีพเนจรหมวกขนนก', nickname: 'นักดนตรีบัฟความเร็ว', emoji: '🪶', desc: 'หมวกเบเร่ต์ปักขนนกยาวพริ้ว ร้องเพลงปลุกใจให้ทุกคนวิ่งเร็วขึ้น' },
+  { id: 'disney_snow_white', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'snow_bob_bow', skinHex: '#FFE9DE', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#2563EB', defaultPantsHex: '#FACC15', earStyle: 'human', name: 'สโนว์ไวท์', nickname: 'เจ้าหญิงหิมะสายแอปเปิลคลีน', emoji: '🍎', desc: 'ผมบ๊อบดำขลับคาดโบว์แดง เสื้อน้ำเงินกระโปรงเหลืองสดใสในตำนาน' },
+  { id: 'disney_elsa', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'elsa_side_braid', skinHex: '#FFF0EA', colorHex: '#F8FAFC', bandColor: '#38BDF8', defaultArmor: 'armor_princess', defaultShirtHex: '#38BDF8', defaultPantsHex: '#BAE6FD', earStyle: 'human', name: 'ราชินีเอลซ่า (Frozen)', nickname: 'Let It Go สลัดไขมันเยือกแข็ง', emoji: '❄️', desc: 'ผมบลอนด์เงินถักเปียปัดข้าง สวมรัดเกล้าคริสตัลน้ำแข็งและชุดฟ้าพาสเทล' },
+  { id: 'disney_anna', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'anna_twin_braids', skinHex: '#FFE4D4', colorHex: '#9A3412', bandColor: '#DB2777', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#1E293B', defaultPantsHex: '#1D4ED8', earStyle: 'human', name: 'เจ้าหญิงอันนา (Frozen)', nickname: 'เปียคู่สายลุยหิมะไม่กลัวหนาว', emoji: '🌷', desc: 'ผมสีน้ำตาลแดงถักเปียคู่ผูกริบบิ้นบานเย็น พลังบวกวิ่งสู้ไม่ถอย' },
+  { id: 'disney_cinderella', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'cinderella_updo', skinHex: '#FFE6D8', colorHex: '#FDE047', bandColor: '#38BDF8', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#60A5FA', defaultPantsHex: '#BAE6FD', earStyle: 'human', name: 'ซินเดอเรลล่า', nickname: 'วิ่งกลับก่อนเที่ยงคืนรองเท้าแก้วไม่หลุด', emoji: '👠', desc: 'ผมบลอนด์เกล้ามวยสูงคาดที่คาดผมสีฟ้า ชุดราตรีสีฟ้าพาสเทลแสนสง่า' },
+  { id: 'disney_ariel', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'ariel_wave_flower', skinHex: '#FFE4D6', colorHex: '#DC2626', bandColor: '#A855F7', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#A855F7', defaultPantsHex: '#10B981', earStyle: 'human', name: 'แอเรียล เงือกน้อย', nickname: 'มีขาสองข้างไว้สปรินต์เข้าเส้นชัย!', emoji: '🐚', desc: 'ผมแดงสดแสกปัดลอนใหญ่ทัดปลาดาว เสื้อม่วงคู่กระโปรงสีเขียวน้ำทะเล' },
+  { id: 'disney_belle', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'cinderella_updo', skinHex: '#FFE4D4', colorHex: '#78350F', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#FACC15', defaultPantsHex: '#FDE047', earStyle: 'human', name: 'เบลล์ โฉมงาม', nickname: 'หนอนหนังสือสายเต้นรำเบิร์นแคล', emoji: '🌹', desc: 'ผมสีน้ำตาลเกล้ามวยผูกโบว์ทอง สวมชุดราตรีสีเหลืองทองอร่าม' },
+  { id: 'disney_rapunzel', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'rapunzel_floral_long', skinHex: '#FFE6D6', colorHex: '#FACC15', bandColor: '#EC4899', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#A855F7', defaultPantsHex: '#F472B6', earStyle: 'human', name: 'ราพันเซล', nickname: 'ผมยาวเจ็ดสิบฟุตประดับดอกไม้', emoji: '🌸', desc: 'ผมทองเปียยาวสลวยประดับดอกไม้หลากสี กระโดดลงจากหอคอยมาวิ่งแข่ง!' },
+  { id: 'disney_jasmine', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'jasmine_ponytail_gem', skinHex: '#D99B6C', colorHex: '#18181B', bandColor: '#22D3EE', defaultArmor: 'armor_princess', defaultShirtHex: '#06B6D4', defaultPantsHex: '#67E8F9', earStyle: 'human', name: 'เจ้าหญิงจัสมิน', nickname: 'โฉมงามแห่งอักราบาห์เอวเอสตัวแม่', emoji: '🪔', desc: 'ผมดำยาวมัดพองคาดรัดเกล้าพลอยสีฟ้าเทอร์ควอยซ์พร้อมต่างหูทอง' },
+  { id: 'disney_mulan', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'mulan_jade_bun', skinHex: '#F7D2B4', colorHex: '#18181B', bandColor: '#34D399', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#F472B6', defaultPantsHex: '#1D4ED8', earStyle: 'human', name: 'มู่หลาน', nickname: 'ยอดวีรสตรีฝึกหนักฟิตทะลุกองทัพ', emoji: '🗡️', desc: 'ผมดำเกล้ามวยปักปิ่นหยกและดอกเหมย แข็งแกร่งคล่องแคล่วไม่แพ้ใคร' },
+  { id: 'disney_moana', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'ariel_wave_flower', skinHex: '#C6865A', colorHex: '#1C1917', bandColor: '#F43F5E', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#EA580C', defaultPantsHex: '#FEF3C7', earStyle: 'human', name: 'โมอาน่า เจ้าหญิงนักเดินเรือ', nickname: 'เสียงเพรียกจากท้องทะเลชายหาด', emoji: '🌊', desc: 'ผิวสีแทนแดดทะเล ผมดำหยักศกทัดดอกชบาชมพู วิ่งสู้คลื่นลมริมหาด!' },
+  { id: 'disney_aurora', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'royal_tiara_curls', skinHex: '#FFE8DC', colorHex: '#FDE047', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#EC4899', defaultPantsHex: '#F472B6', earStyle: 'human', name: 'ออโรร่า เจ้าหญิงนิทรา', nickname: 'นอนครบแปดชั่วโมงระบบเผาผลาญดีเลิศ', emoji: '👑', desc: 'ผมทองดัดลอนสลวยสวมมงกุฎทองทรงสูง ชุดเดรสสีชมพูกุหลาบ' },
+  { id: 'disney_tiana', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'cinderella_updo', skinHex: '#8D5524', colorHex: '#18181B', bandColor: '#4ADE80', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#4ADE80', defaultPantsHex: '#BBF7D0', earStyle: 'human', name: 'เทียน่า เจ้าหญิงเชฟมือทอง', nickname: 'เชฟสาวสู้ชีวิตคำนวณโภชนาการเป๊ะ', emoji: '🐸', desc: 'ผมดำเกล้ามวยสูงสวมมงกุฎดอกบัวเขียวมิ้นท์ ชุดราตรีใบบัวสุดหรู' },
+  { id: 'disney_merida', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'merida_wild_curls', skinHex: '#FFE8DC', colorHex: '#EA580C', bandColor: '#0F766E', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#0F766E', defaultPantsHex: '#115E59', earStyle: 'human', name: 'เมอริด้า นักธนูสาวหัวส้มฟู', nickname: 'ยิงธนูเข้าเป้าเผาแคลอรี่ทะลุพิกัด', emoji: '🏹', desc: 'ผมสีส้มแดงหยิกฟูฟ่องเต็มศีรษะ สวมชุดเขียวมรกตแห่งแดนสกอตแลนด์' },
+  { id: 'disney_tinkerbell', category: 'mythical', isHero: true, heroCategory: 'princess', heroStyle: 'tinker_pom_bun', skinHex: '#FFE6D6', colorHex: '#FDE047', bandColor: '#38BDF8', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#84CC16', defaultPantsHex: '#A3E635', earStyle: 'human', name: 'ทิงเกอร์เบลล์ นางฟ้าตัวจิ๋ว', nickname: 'โปรยผงพิกซี่ดัสต์ตัวเบาหวิวเข้าเส้นชัย', emoji: '✨', desc: 'ผมบลอนด์มัดจุกกลมสูงผูกโบว์ฟ้า ชุดใบไม้สีเขียวสดใสตัวปลิว' },
 
   // ============================================================================
-  // 🦸 2. ซูเปอร์ฮีโร่ & ไซไฟ (Superheroes & Sci-Fi - 15 ตัวละครมนุษย์จิบิ)
+  // 🏰 2. ดิสนีย์คลาสสิกขวัญใจมหาชน (Classic Disney Icons - 14 ตัวละคร)
   // ============================================================================
-  { id: 'hero_superman', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'super_curl', skinHex: '#FAD4B4', colorHex: '#0F172A', bandColor: '#EF4444', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'ยอดมนุษย์ปอยผมตัวเอส', nickname: 'บุรุษเหล็กคาร์ดิโอ', emoji: '🦸‍♂️', desc: 'ผมดำปาดเรียบพร้อมปอยม้วนตัว S กลางหน้าผาก แข็งแกร่งดั่งเหล็กกล้า' },
-  { id: 'hero_wonder', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'wonder_tiara', skinHex: '#F3C6A2', colorHex: '#1E1B4B', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'เจ้าหญิงนักรบอะเมซอน', nickname: 'รัดเกล้าดาวทองจอมพลัง', emoji: '🌟', desc: 'ผมดำสลวยสวมรัดเกล้าทองติดดาวแดง สะบัดบ่วงบาศก์มัดใจกรรมการ' },
-  { id: 'hero_mecha', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'mecha_visor', skinHex: '#F5CBA7', colorHex: '#DC2626', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ไอรอนไซบอร์กเกราะนาโน', nickname: 'เกราะแดงทองตานีออน', emoji: '🤖', desc: 'สวมหมวกเกราะไฮเทคสองสี ตาเรืองแสงอาร์ครีแอคเตอร์ คำนวณแคลแม่นเป๊ะ' },
-  { id: 'hero_bat_vigilante', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'bat_cowl', skinHex: '#F5CBA7', colorHex: '#18181B', bandColor: '#FACC15', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'อัศวินหน้ากากค้างคาว', nickname: 'ฮีโร่รัตติกาลหูแหลม', emoji: '🦇', desc: 'สวมหน้ากากคลุมครึ่งหน้าหูค้างคาวตาขาวคมกริบ ออกวิ่งซ้อมทุกเที่ยงคืน' },
-  { id: 'hero_spider', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'spider_mask', skinHex: '#FAD6B8', colorHex: '#EF4444', bandColor: '#2563EB', defaultArmor: 'armor_none', earStyle: 'human', name: 'ฮีโร่หน้ากากแมงมุม', nickname: 'ไอ้แมงมุมเลนส์ตาโต', emoji: '🕸️', desc: 'หน้ากากคลุมเต็มหัวตาขาวขอบดำสุดเท่ โหนใยตีลังกากระโดดข้ามความอ้วน' },
-  { id: 'hero_speedster', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'flash_wings', skinHex: '#FAD6B8', colorHex: '#DC2626', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'จ้าวความเร็วสายฟ้าแลบ', nickname: 'หน้ากากสายฟ้าข้างหู', emoji: '⚡', desc: 'วิ่งเร็วทะลุมิติจนไขมันตามไม่ทัน ติดปีกสายฟ้าสีทองคู่ข้างขมับ' },
-  { id: 'hero_thunder_god', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'thor_helm', skinHex: '#FAD6B8', colorHex: '#FACC15', bandColor: '#E2E8F0', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'เทพสายฟ้าหมวกปีกเงิน', nickname: 'บุตรแห่งแอสการ์ดกล้ามโต', emoji: '🔨', desc: 'ผมทองประบ่าสวมหมวกเหล็กติดปีกเงินคู่ เรียกสายฟ้าฟาดเบิร์นแคลอรี่' },
-  { id: 'hero_captain_shield', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'captain_cowl', skinHex: '#FAD8BC', colorHex: '#2563EB', bandColor: '#F8FAFC', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'กัปตันผู้พิทักษ์ติดดาว', nickname: 'ซุปเปอร์โซลเยอร์วิ่งทั้งวัน', emoji: '🛡️', desc: 'สวมหมวกยุทธวิธีติดปีกจิ๋วข้างขมับ วิ่งได้ทั้งวันไม่มีคำว่าหอบ!' },
-  { id: 'hero_sentai_red', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'sentai_helmet', skinHex: '#F5CBA7', colorHex: '#EF4444', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'เรนเจอร์เซนไตขบวนการสู้พุง', nickname: 'หมวกชิลด์ดำเขาทอง V-Fin', emoji: '💥', desc: 'แปลงร่างขบวนการห้าสี! เปลี่ยนสีหมวกเรนเจอร์ได้ทุกเฉดตามใจชอบ!' },
-  { id: 'hero_cyborg_punk', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'cyber_mohawk', skinHex: '#E5B896', colorHex: '#06B6D4', bandColor: '#EC4899', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'ไซบอร์กพังก์นีออน 2099', nickname: 'โมฮอว์กไฟสแกนเนอร์', emoji: '🦾', desc: 'ทรงผมโมฮอว์กนีออนสุดซ่า พร้อมแว่นสแกนเนอร์วัดระดับไขมันแบบเรียลไทม์' },
-  { id: 'hero_astronaut', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'astro_helmet', skinHex: '#FAD6B8', colorHex: '#F8FAFC', bandColor: '#38BDF8', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'นักบินอวกาศไร้แรงโน้มถ่วง', nickname: 'หมวกโดมแก้วอวกาศ', emoji: '👨‍🚀', desc: 'ครอบหมวกโดมกระจกอวกาศใสปิ๊ง เพราะอยู่บนดวงจันทร์น้ำหนักเบาลง 6 เท่า!' },
-  { id: 'hero_magical_girl', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'twintail_princess', skinHex: '#FFE6DA', colorHex: '#FDE047', bandColor: '#EC4899', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'สาวน้อยเวทมนตร์จันทรา', nickname: 'ทวินเทลทองตัวแทนดวงจันทร์', emoji: '🌙', desc: 'ตัวแทนแห่งดวงจันทร์จะลงทัณฑ์ไขมันแกเอง! ผมแกละทองคู่มงกุฎชมพู' },
-  { id: 'hero_esper', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'esper_clips', skinHex: '#FFE2CE', colorHex: '#F472B6', bandColor: '#A3E635', defaultArmor: 'armor_princess', earStyle: 'human', name: 'ผู้มีพลังจิตเสาอากาศคู่', nickname: 'หัวชมพูกิ๊บจำกัดพลัง', emoji: '🔮', desc: 'ใช้พลังจิตยกดัมเบลลอยฟ้า! ผมสีชมพูติดกิ๊บเสาอากาศคู่สุดกวน' },
-  { id: 'hero_galactic_knight', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'jedi_hood', skinHex: '#F5CBA7', colorHex: '#92400E', bandColor: '#38BDF8', defaultArmor: 'armor_vest', earStyle: 'human', name: 'อัศวินเจไดผู้พิทักษ์จักรวาล', nickname: 'ฮู้ดนักรบแห่งดวงดาว', emoji: '🌌', desc: 'คลุมฮู้ดผ้าคลุมนักรบอวกาศ ขอพลังแห่งการเผาผลาญจงสถิตอยู่กับท่าน' },
-  { id: 'hero_agent_spy', category: 'mythical', isHero: true, heroCategory: 'super', heroStyle: 'secret_agent', skinHex: '#F3C8A6', colorHex: '#18181B', bandColor: '#38BDF8', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'สายลับพยัคฆ์แว่นทมิฬ', nickname: 'เอเจนต์หูฟังภารกิจลับ', emoji: '🕶️', desc: 'ผมปาดเรียบเนี้ยบ สวมแว่นดำและหูฟังสายลับ ปฏิบัติการจารกรรมความผอม' },
+  { id: 'disney_mickey_cos', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'mickey_ears', skinHex: '#FFE4D0', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_none', defaultShirtHex: '#18181B', defaultPantsHex: '#EF4444', earStyle: 'human', name: 'มิกกี้ ซุปตาร์หูกลม', nickname: 'มาสคอตเบอร์หนึ่งกางเกงแดงในตำนาน', emoji: '🐭', desc: 'หูกลมสีดำคู่เอกลักษณ์ระดับโลก เสื้อดำกางเกงแดงสดใสขวัญใจทุกวัย!' },
+  { id: 'disney_minnie_cos', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'minnie_bow_ears', skinHex: '#FFE4D0', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#EF4444', defaultPantsHex: '#EF4444', earStyle: 'human', name: 'มินนี่ โบว์แดงลายจุด', nickname: 'หวานใจหูกลมกระโปรงแดงจุดขาว', emoji: '🎀', desc: 'หูกลมสีดำประดับโบว์แดงลายจุดขาวใหญ่กลางหัว น่ารักสดใสสุดๆ' },
+  { id: 'disney_donald_cos', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'donald_sailor_beak', skinHex: '#FFFFFF', colorHex: '#2563EB', bandColor: '#F97316', defaultArmor: 'armor_ms_sailor_uniform', defaultShirtHex: '#2563EB', defaultPantsHex: '#FFFFFF', earStyle: 'human', name: 'โดนัลด์ กะลาสีจอมโวยวาย', nickname: 'ก๊าบๆ หัวร้อนวิ่งแซงทุกคน!', emoji: '⚓', desc: 'ตัวขาวปากเป็ดสีส้ม สวมหมวกและเสื้อกะลาสีเรือสีน้ำเงินสุดคลาสสิก' },
+  { id: 'disney_stitch_cos', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'stitch_alien_ears', skinHex: '#3B82F6', colorHex: '#1D4ED8', bandColor: '#F472B6', defaultArmor: 'armor_none', defaultShirtHex: '#2563EB', defaultPantsHex: '#1E40AF', earStyle: 'human', name: 'สติทช์ จอมป่วนต่างดาว (626)', nickname: 'โอฮาน่าแปลว่าวิ่งลดพุงด้วยกัน!', emoji: '🛸', desc: 'ตัวสีฟ้าน้ำเงิน หูยาวใหญ่กางสองข้างด้านในสีชมพู จมูกกลมโตสุดแสบซน' },
+  { id: 'disney_lilo', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'ariel_wave_flower', skinHex: '#D99B6C', colorHex: '#18181B', bandColor: '#FFFFFF', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#EF4444', defaultPantsHex: '#DC2626', earStyle: 'human', name: 'ลีโล่ สาวน้อยฮาวาย', nickname: 'เต้นฮูล่าริมหาดเบิร์นไขมันกระจาย', emoji: '🌺', desc: 'สาวน้อยชาวเกาะผมดำทัดดอกไม้ขาว สวมชุดเดรสสีแดงสดใสคู่หูสติทช์' },
+  { id: 'disney_aladdin', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'aladdin_fez', skinHex: '#D99B6C', colorHex: '#18181B', bandColor: '#DC2626', defaultArmor: 'armor_vest', defaultShirtHex: '#7C3AED', defaultPantsHex: '#F8FAFC', earStyle: 'human', name: 'อะลาดิน จอมโจรพรมวิเศษ', nickname: 'วิ่งไวหลบทหารวังทั้งอักราบาห์', emoji: '🧞‍♂️', desc: 'ผมดำยุ่งเท่สวมหมวกเฟซสีแดงจิ๋ว เสื้อกั๊กม่วงกางเกงขาวพองคล่องตัว' },
+  { id: 'disney_genie', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'genie_topknot_beard', skinHex: '#38BDF8', colorHex: '#18181B', bandColor: '#FACC15', defaultArmor: 'armor_none', defaultShirtHex: '#0284C7', defaultPantsHex: '#1D4ED8', earStyle: 'human', name: 'ยักษ์จินนี่ ตะเกียงวิเศษ', nickname: 'ขอพรสามข้อให้ผอมเพรียวเดี๋ยวนี้!', emoji: '💨', desc: 'ผิวกายสีฟ้าสดใส มัดจุกหางม้าบนหัวพร้อมเคราแพะจิ๋วและกำไลทอง' },
+  { id: 'disney_peter_pan', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'peter_robin_cap', skinHex: '#FAD6B8', colorHex: '#16A34A', bandColor: '#EF4444', defaultArmor: 'armor_vest', defaultShirtHex: '#16A34A', defaultPantsHex: '#15803D', earStyle: 'human', name: 'ปีเตอร์แพน เด็กชายบินได้', nickname: 'ไม่ยอมแก่และไม่ยอมอ้วนที่เนเวอร์แลนด์', emoji: '🪶', desc: 'สวมหมวกแหลมสีเขียวปักขนนกแดง ชุดสีเขียวใบไม้ตัวเบาบินฉิว' },
+  { id: 'disney_alice', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'snow_bob_bow', skinHex: '#FFE8DC', colorHex: '#FDE047', bandColor: '#18181B', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#38BDF8', defaultPantsHex: '#FFFFFF', earStyle: 'human', name: 'อลิซ ในแดนมหัศจรรย์', nickname: 'วิ่งไล่ตามกระต่ายขาวจนผอมเพรียว!', emoji: '🐇', desc: 'ผมทองคาดโบว์ดำ ชุดเดรสสีฟ้าสดใสคู่กระโปรงผ้ากันเปื้อนขาว' },
+  { id: 'disney_pinocchio', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'pinocchio_hat_nose', skinHex: '#F5CBA7', colorHex: '#FACC15', bandColor: '#EF4444', defaultArmor: 'armor_ms_denim_overall', defaultShirtHex: '#FDE047', defaultPantsHex: '#EF4444', earStyle: 'human', name: 'พินอคคิโอ หุ่นไม้จมูกยาว', nickname: 'ถ้าโกหกว่ากินคลีนจมูกจะยาวทันที!', emoji: '🤥', desc: 'หมวกเหลืองติดขนนกแดง จมูกไม้ยื่นยาวสุดฮา สวมเสื้อเหลืองเอี๊ยมแดง!' },
+  { id: 'disney_hercules', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'incredible_mask', skinHex: '#E5AE86', colorHex: '#EA580C', bandColor: '#38BDF8', defaultArmor: 'armor_gold_paladin', defaultShirtHex: '#D97706', defaultPantsHex: '#2563EB', earStyle: 'human', name: 'เฮอร์คิวลิส บุตรเทพจอมพลัง', nickname: 'จากศูนย์สู่ฮีโร่กล้ามทองแห่งโอลิมปัส', emoji: '⚡', desc: 'ผมส้มทองคาดผ้าคาดหัวสีฟ้า นักรบกรีกจอมพลังยกเวทหนักแค่ไหนก็ไหว' },
+  { id: 'disney_tarzan', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'merida_wild_curls', skinHex: '#C6865A', colorHex: '#78350F', bandColor: '#A16207', defaultArmor: 'armor_none', defaultShirtHex: '#C6865A', defaultPantsHex: '#92400E', earStyle: 'human', name: 'ทาร์ซาน เจ้าป่าโหนเถาวัลย์', nickname: 'ซิกแพคธรรมชาติคาร์ดิโอทั่วพงไพร', emoji: '🌿', desc: 'ผิวแทนเข้มผมน้ำตาลเดรดล็อกยาวโหนเถาวัลย์ไวปานพายุ' },
+  { id: 'disney_maui', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'merida_wild_curls', skinHex: '#B4764E', colorHex: '#18181B', bandColor: '#22C55E', defaultArmor: 'armor_vest', defaultShirtHex: '#B4764E', defaultPantsHex: '#16A34A', earStyle: 'human', name: 'มาวอิ ครึ่งเทพจอมพลัง (Moana)', nickname: 'ด้วยความยินดี! กล้ามแน่นลากเกาะทั้งใบ', emoji: '🪝', desc: 'ผมดำหยักศกฟูใหญ่เต็มหัว ผิวแทนเข้มร่างบึ้กสายพลังแห่งมหาสมุทร' },
+  { id: 'disney_jack_sparrow', category: 'mythical', isHero: true, heroCategory: 'classic', heroStyle: 'pirate_dreads_tricorne', skinHex: '#D99B6C', colorHex: '#292524', bandColor: '#DC2626', defaultArmor: 'armor_vest', defaultShirtHex: '#F8FAFC', defaultPantsHex: '#334155', earStyle: 'human', name: 'กัปตันแจ็ค สแปร์โรว์', nickname: 'ท่าวิ่งเซๆ แต่เข้าเส้นชัยเฉย!', emoji: '🏴‍☠️', desc: 'หมวกโจรสลัดสามมุมโพกผ้าแดงพร้อมผมเดรดล็อกร้อยลูกปัดสุดกวน' },
 
   // ============================================================================
-  // 🏮 3. ตำนาน & อนิเมะสายฮา (Legends & Anime - 15 ตัวละครมนุษย์จิบิ)
+  // 🚀 3. พิกซาร์ & แอนิเมชันยอดฮิต (Pixar & Modern Hits - 16 ตัวละคร)
   // ============================================================================
-  { id: 'hero_saiyan', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'spiky_saiyan', skinHex: '#F5C6A0', colorHex: '#18181B', bandColor: '#F97316', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'นักรบไซย่าผมตั้งทะลุฟ้า', nickname: 'ยอดนักสู้พลังคลื่นเต่า', emoji: '🔥', desc: 'ทรงผมตั้งแหลมชี้ฟ้าหลายแฉกระดับตำนาน ยิ่งเบิร์นพลังต่อสู้ยิ่งพุ่งทะลุหมื่น!' },
-  { id: 'hero_straw_pirate', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'straw_hat', skinHex: '#F5C8A4', colorHex: '#FACC15', bandColor: '#EF4444', defaultArmor: 'armor_none', earStyle: 'human', name: 'กัปตันหมวกฟางจอมลุย', nickname: 'ราชาโจรสลัดสายเนื้อย่าง', emoji: '👒', desc: 'สวมหมวกฟางคาดริบบิ้นแดง มีรอยแผลใต้ตา วิ่งยืดแขนคว้าเส้นชัย!' },
-  { id: 'hero_demon_slayer', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'slayer_scar', skinHex: '#FAD6B8', colorHex: '#7F1D1D', bandColor: '#EF4444', defaultArmor: 'armor_vest', earStyle: 'human', name: 'นักล่าอสูรปราณเผาผลาญ', nickname: 'ปานไฟต่างหูไพ่ตะวัน', emoji: '🎴', desc: 'เพ่งจิตปราณทั้งปวง! ผมปัดข้างสีแดงเข้มพร้อมปานไฟและต่างหูไพ่สุดเท่' },
-  { id: 'hero_sorcerer', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'blindfold_white', skinHex: '#FFE4D4', colorHex: '#F8FAFC', bandColor: '#18181B', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'ผู้ใช้คุณไสยผ้าปิดตาดำ', nickname: 'จอมเวทผมขาวไร้ขีดจำกัด', emoji: '🤞', desc: 'ผมขาวชี้ฟูตั้งขึ้นพร้อมผ้าปิดตาสีดำสุดคูล กางอาณาเขตไร้ไขมัน!' },
-  { id: 'hero_leaf_shinobi', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'spiky_headband', skinHex: '#F7CCA8', colorHex: '#FACC15', bandColor: '#2563EB', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'นินจาหัวเหลืองจอมคาถา', nickname: 'คาถาแยกเงาวิ่งพันรอบ', emoji: '🍥', desc: 'ผมทองตั้งแหลมคาดผ้าหน้าผากเหล็ก วิ่งท่าแขนลู่ลมไปข้างหน้าไวสุดใจ' },
-  { id: 'hero_one_punch', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'bald_hero', skinHex: '#FAD6B8', colorHex: '#FACC15', bandColor: '#EF4444', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ฮีโร่หมัดเดียวหัวใสปิ๊ง', nickname: 'วิดพื้นร้อยครั้งวิ่งสิบโล', emoji: '👊', desc: 'ฝึกหนักจนผมร่วงหมดหัว เงาวับสะท้อนแดด แข็งแกร่งระดับต่อยแคลอรี่กระจุย!' },
-  { id: 'hero_monkey_king', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'monkey_king_band', skinHex: '#F3C59E', colorHex: '#B45309', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ซุนหงอคงรัดเกล้าทอง', nickname: 'ฉีเทียนต้าเซิ่งขนไก่ฟ้า', emoji: '👑', desc: 'สวมรัดเกล้าทองประดับขนไก่ฟ้าคู่ยาว ตีลังกาเมฆสีทองพุ่งเข้าเส้นชัย' },
-  { id: 'hero_pharaoh', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'pharaoh_nemes', skinHex: '#D99B6C', colorHex: '#FACC15', bandColor: '#1D4ED8', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ฟาโรห์อียิปต์บัลลังก์ทราย', nickname: 'ผ้าคลุมเนเมสทองคำ', emoji: '🏺', desc: 'สวมเครื่องหัวฟาโรห์ลายทองสลับน้ำเงินติดงูเห่าศักดิ์สิทธิ์ สง่างามเหนือกาลเวลา' },
-  { id: 'hero_spartan', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'spartan_plume', skinHex: '#DF9F70', colorHex: '#DC2626', bandColor: '#D97706', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ขุนศึกสปาร์ตันซิกแพคเหล็ก', nickname: 'หมวกทองสัมฤทธิ์พู่แดง', emoji: '🛡️', desc: 'นี่คือสปาร์ตา!! สวมหมวกเกราะกรีกโบราณพู่แผงขนม้าสีแดงโค้งอลังการ' },
-  { id: 'hero_zeus', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'laurel_god', skinHex: '#FAD6B8', colorHex: '#F8FAFC', bandColor: '#FACC15', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'มหาเทพโอลิมปัสช่อมะกอกทอง', nickname: 'เทพเจ้าหนวดเมฆา', emoji: '🏛️', desc: 'ผมและหนวดเคราขาวฟูดั่งก้อนเมฆ สวมมงกุฎช่อมะกอกทองคำแห่งผู้ชนะ' },
-  { id: 'hero_vampire', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'vampire_slick', skinHex: '#E2E8F0', colorHex: '#0F172A', bandColor: '#DC2626', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'เคานต์แวมไพร์ขุนนางรัตติกาล', nickname: 'ผิวขาวซีดเขี้ยวน้อย', emoji: '🧛', desc: 'ผมดำปาดเรียบหน้าผากแหลม มีเขี้ยวน้อยน่ารัก ดื่มแต่น้ำมะเขือเทศสกัดเย็น' },
-  { id: 'hero_jiangshi', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'jiangshi_talisman', skinHex: '#DBEAFE', colorHex: '#1E293B', bandColor: '#FACC15', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'ผีดิบจียงซือกระโดดลดพุง', nickname: 'หมวกขุนนางแปะยันต์เหลือง', emoji: '🧧', desc: 'แปะยันต์เหลืองสะกดความหิวไว้กลางหน้าผาก กระโดดก้าวขาคู่เบิร์นไม่หยุด!' },
-  { id: 'hero_chinese_buns', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'double_buns', skinHex: '#FFE4D4', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'จอมยุทธ์หมวยซาลาเปาคู่', nickname: 'อาหมวยกังฟูเตะสายฟ้า', emoji: '🥟', desc: 'มวยผมซาลาเปาคู่หุ้มผ้าไหมผูกริบบิ้น รัวลูกเตะกังฟูสลายแคลอรี่ร้อยท่า' },
-  { id: 'hero_oni_samurai', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'demon_lord', skinHex: '#F87171', colorHex: '#F8FAFC', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ยักษ์โอนิเขาทองจอมพลัง', nickname: 'อสูรแดงผมขาวสายลุย', emoji: '👹', desc: 'ผิวกายสีแดงเพลิงตัดกับผมขาวฟูและเขาทองคู่ ยกกระบองเหล็กแทนดัมเบล!' },
-  { id: 'hero_thai_warrior', category: 'mythical', isHero: true, heroCategory: 'legend', heroStyle: 'muaythai_mongkhon', skinHex: '#C6865A', colorHex: '#18181B', bandColor: '#DC2626', defaultArmor: 'armor_vest', earStyle: 'human', name: 'ขุนศึกบางระจันผ้าประเจียดแดง', nickname: 'นักรบไทยใจเกินร้อย', emoji: '🔥', desc: 'ผิวแทนเข้มโพกผ้าประเจียดสีแดงสด ฮึดสู้วิ่งถวายชีวิตไม่ยอมถอยเข้าซุ้มอาหาร' },
+  { id: 'disney_woody', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'cowboy_hat', skinHex: '#FAD6B8', colorHex: '#92400E', bandColor: '#EF4444', defaultArmor: 'armor_vest', defaultShirtHex: '#FACC15', defaultPantsHex: '#1D4ED8', earStyle: 'human', name: 'นายอำเภอวู้ดดี้ (Toy Story)', nickname: 'มีงูอยู่ในรองเท้าวิ่งของฉัน!', emoji: '🤠', desc: 'สวมหมวกคาวบอยสีน้ำตาลปีกกว้าง เสื้อเชิ้ตเหลืองกางเกงยีนส์น้ำเงินสุดเท่' },
+  { id: 'disney_buzz', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'buzz_space_dome', skinHex: '#FAD6B8', colorHex: '#7C3AED', bandColor: '#84CC16', defaultArmor: 'armor_gold_paladin', defaultShirtHex: '#84CC16', defaultPantsHex: '#F8FAFC', earStyle: 'human', name: 'บัซ ไลท์เยียร์ (Toy Story)', nickname: 'สู่ความเวิ้งว้างอันไกลโพ้นนน!', emoji: '👨‍🚀', desc: 'สวมฮู้ดม่วงครอบโดมแก้วอวกาศใส ชุดสเปซเรนเจอร์สีเขียวมะนาว-ขาวสุดล้ำ' },
+  { id: 'disney_jessie', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'cowboy_hat', skinHex: '#FFE4D4', colorHex: '#DC2626', bandColor: '#FFFFFF', defaultArmor: 'armor_vest', defaultShirtHex: '#FFFFFF', defaultPantsHex: '#2563EB', earStyle: 'human', name: 'เจสซี่ คาวเกิร์ลสาวซ่า', nickname: 'ยู้ฮูว์! ควบม้าเข้าเส้นชัยสุดพลัง', emoji: '🐴', desc: 'สวมหมวกคาวบอยสีแดงขอบขาว เสื้อขาวเหลืองคู่กางเกงยีนส์ขาลุย' },
+  { id: 'disney_alien_lgm', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'three_eye_alien', skinHex: '#84CC16', colorHex: '#84CC16', bandColor: '#7C3AED', defaultArmor: 'armor_none', defaultShirtHex: '#2563EB', defaultPantsHex: '#1D4ED8', earStyle: 'human', name: 'เอเลี่ยนสามตา (อู๋ววว~)', nickname: 'กงเล็บเลือกให้เราผอมแล้ว~ อู๋ววว!', emoji: '👽', desc: 'ตัวเขียวสามตาเรียงกันพร้อมเสาอากาศบนหัว สวมชุดอวกาศสีน้ำเงินสุดคิวท์!' },
+  { id: 'disney_baymax', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'baymax_eyes', skinHex: '#FFFFFF', colorHex: '#FFFFFF', bandColor: '#EF4444', defaultArmor: 'armor_none', defaultShirtHex: '#FFFFFF', defaultPantsHex: '#F8FAFC', earStyle: 'human', name: 'เบย์แมกซ์ หุ่นพยาบาลพุงนุ่ม', nickname: 'สวัสดี ฉันคือเบย์แมกซ์ ผู้ดูแลน้ำหนักของคุณ', emoji: '🤍', desc: 'ตัวกลมสีขาวมาร์ชเมลโลว์ ตาจุดดำคู่ขีดเชื่อมกัน พอง-ยุบพุงได้เหมือนในหนังเป๊ะ!' },
+  { id: 'disney_sulley', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'sulley_horns', skinHex: '#38BDF8', colorHex: '#06B6D4', bandColor: '#A855F7', defaultArmor: 'armor_none', defaultShirtHex: '#38BDF8', defaultPantsHex: '#A855F7', earStyle: 'human', name: 'ซัลลี่ มอนสเตอร์ขนฟูฟ้าม่วง', nickname: 'พี่ยักษ์ใจดีตัวฟ้าลายจุดม่วง', emoji: '💙', desc: 'มอนสเตอร์ขนสีฟ้าเทอร์ควอยซ์แต้มม่วง พร้อมเขาคู่โค้งมนบนหัวสุดน่ารัก' },
+  { id: 'disney_mike', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'mike_cyclops', skinHex: '#84CC16', colorHex: '#84CC16', bandColor: '#10B981', defaultArmor: 'armor_none', defaultShirtHex: '#84CC16', defaultPantsHex: '#65A30D', earStyle: 'human', name: 'ไมค์ วาซาวสกี้ ตาเดียวตัวกลม', nickname: 'ตัวกลมสีเขียวมีตาดวงเดียวทั้งตัว!', emoji: '👁️', desc: 'มอนสเตอร์ตัวเขียวทรงกลมปุ๊ก ตากลมโตสีเขียวมรกตดวงเดียวกลางหน้า!' },
+  { id: 'disney_boo', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'boo_twintails', skinHex: '#FFE4D6', colorHex: '#292524', bandColor: '#EC4899', defaultArmor: 'armor_ms_strawberry_milk', defaultShirtHex: '#F472B6', defaultPantsHex: '#7C3AED', earStyle: 'human', name: 'น้องบู แกละคู่จอมซน', nickname: 'คิตตี้!! วิ่งดุ๊กดิ๊กไม่รู้จักเหนื่อย', emoji: '👧', desc: 'หนูน้อยมัดผมแกละสองข้างผูกยางชมพู สวมเสื้อยืดชมพูคู่กางเกงม่วง' },
+  { id: 'disney_mr_incredible', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'incredible_mask', skinHex: '#FAD6B8', colorHex: '#FACC15', bandColor: '#18181B', defaultArmor: 'armor_gold_paladin', defaultShirtHex: '#EF4444', defaultPantsHex: '#18181B', earStyle: 'human', name: 'มิสเตอร์อินเครดิเบิ้ล', nickname: 'คุณพ่อยอดมนุษย์ฟิตหุ่นใส่ชุดฮีโร่แดง!', emoji: '🦸‍♂️', desc: 'ผมทองปาดเท่สวมหน้ากากดำคาดตา ชุดซูเปอร์ฮีโร่สีแดง-ดำสุดแกร่ง' },
+  { id: 'disney_vanellope', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'boo_twintails', skinHex: '#FFE4D4', colorHex: '#18181B', bandColor: '#F43F5E', defaultArmor: 'armor_ms_strawberry_milk', defaultShirtHex: '#2DD4BF', defaultPantsHex: '#78350F', earStyle: 'human', name: 'วาเนลโลปี้ นักซิ่งชูการ์รัช', nickname: 'กลิตช์วาร์ปพุ่งเข้าเส้นชัยสายของหวาน!', emoji: '🍬', desc: 'ผมดำติดกิ๊บลูกกวาดสีสด สวมเสื้อฮู้ดดี้สีมิ้นท์คู่กระโปรงช็อกโกแลต' },
+  { id: 'disney_joy', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'tinker_pom_bun', skinHex: '#FEF9C3', colorHex: '#2563EB', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#FDE047', defaultPantsHex: '#BEF264', earStyle: 'human', name: 'ลั้ลลา (Joy - Inside Out)', nickname: 'อารมณ์ดี๊ดีวิ่งยิ้มร่าตลอดเส้นทาง!', emoji: '🌟', desc: 'ผมซอยสั้นสีน้ำเงินสดใส ผิวเรืองประกายอุ่นๆ สวมชุดเดรสสีเหลืองมะนาว' },
+  { id: 'disney_anger', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'hades_flame_hair', skinHex: '#EF4444', colorHex: '#F97316', bandColor: '#FACC15', defaultArmor: 'armor_silver_knight', defaultShirtHex: '#FFFFFF', defaultPantsHex: '#78350F', earStyle: 'human', name: 'ฉุนเฉียว (Anger - Inside Out)', nickname: 'โมโหหิวแล้วไฟลุกท่วมหัวเผาแคลกระจาย!!', emoji: '🔥', desc: 'ตัวสีแดงสด มีเปลวไฟส้มเหลืองลุกโชนบนหัว สวมเสื้อเชิ้ตขาวกางเกงน้ำตาล!' },
+  { id: 'disney_sadness', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'mirabel_glasses_curls', skinHex: '#93C5FD', colorHex: '#1D4ED8', bandColor: '#1E3A8A', defaultArmor: 'armor_ice_cape', defaultShirtHex: '#DBEAFE', defaultPantsHex: '#1E40AF', earStyle: 'human', name: 'ซึมเศร้า (Sadness - Inside Out)', nickname: 'เดินช้าๆ แต่น้ำตาช่วยลดน้ำหนักนะ...', emoji: '💧', desc: 'ผิวและผมบ๊อบสีฟ้าน่ารัก สวมแว่นตากลมใหญ่และสเวตเตอร์ไหมพรมอุ่นๆ' },
+  { id: 'disney_mirabel', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'mirabel_glasses_curls', skinHex: '#D99B6C', colorHex: '#1C1917', bandColor: '#22C55E', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#FFFFFF', defaultPantsHex: '#0D9488', earStyle: 'human', name: 'มิราเบล (Encanto)', nickname: 'เต้นจังหวะละตินบ้านมาดริกัลสุดคึกคัก!', emoji: '🦋', desc: 'ผมดำหยิกสั้นสวมแว่นตากลมสีเขียวมรกต เสื้อขาวคู่กระโปรงสีเทอร์ควอยซ์' },
+  { id: 'disney_russell', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'cowboy_hat', skinHex: '#FAD6B8', colorHex: '#FACC15', bandColor: '#F97316', defaultArmor: 'armor_vest', defaultShirtHex: '#FACC15', defaultPantsHex: '#78350F', earStyle: 'human', name: 'รัสเซล ลูกเสือจอมป่วน (Up)', nickname: 'สะสมเข็มกลัดนักวิ่งพิชิตพุงกลม!', emoji: '🎈', desc: 'หนูน้อยแก้มยุ้ยสวมหมวกลูกเสือสีเหลือง เสื้อเหลืองผ้าพันคอส้มสดใส' },
+  { id: 'disney_olaf', category: 'mythical', isHero: true, heroCategory: 'pixar', heroStyle: 'olaf_snowman', skinHex: '#FFFFFF', colorHex: '#78350F', bandColor: '#F97316', defaultArmor: 'armor_none', defaultShirtHex: '#FFFFFF', defaultPantsHex: '#F8FAFC', earStyle: 'human', name: 'โอลาฟ ตุ๊กตาหิมะกอดอุ่น', nickname: 'วิ่งตากแดดชายหาดก็ไม่ละลายนะ!', emoji: '⛄', desc: 'ตุ๊กตาหิมะขาวกลม จมูกแครอทสีส้มยื่นน่ารัก มีกิ่งไม้สามแฉกชี้บนหัว!' },
 
   // ============================================================================
-  // 🥊 4. สายฟิตเนส & อาชีพสายปั่น (Fitness & Funny Jobs - 15 ตัวละครมนุษย์จิบิ)
+  // 😈 4. วายร้ายดิสนีย์สุดปัง (Iconic Disney Villains - 12 ตัวละคร)
   // ============================================================================
-  { id: 'hero_muaythai', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'muaythai_mongkhon', skinHex: '#D99B6C', colorHex: '#18181B', bandColor: '#FACC15', defaultArmor: 'armor_none', earStyle: 'human', name: 'ยอดมวยไทยสวมมงคลทอง', nickname: 'แข้งทองคำรำมวยไหว้ครู', emoji: '🥊', desc: 'สวมมงคลถักเชือกศักดิ์สิทธิ์บนศีรษะ ฟุตเวิร์กเตะกระสอบทรายรีดเหงื่อกระจาย' },
-  { id: 'hero_gym_bro', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'sport_headband', skinHex: '#E5AE86', colorHex: '#292524', bandColor: '#EF4444', defaultArmor: 'armor_none', earStyle: 'human', name: 'เทรนเนอร์กล้ามปูสายเวย์', nickname: 'โค้ชฟิตเนสผ้าคาดหัว', emoji: '💪', desc: 'ผมอันเดอร์คัทเท่ๆ คาดผ้าซับเหงื่อสปอร์ต ตะโกนเชียร์ "อีกเซ็ตเดียวน้อง!!"' },
-  { id: 'hero_yoga_bun', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'top_bun', skinHex: '#FFE2CE', colorHex: '#78350F', bandColor: '#F472B6', defaultArmor: 'armor_princess', earStyle: 'human', name: 'สาวโยคะมัดจุกสายคลีน', nickname: 'พิลาทิสเกิร์ลหุ่นเป๊ะ', emoji: '🧘‍♀️', desc: 'มัดจุกดังโงะกลมสูงพร้อมที่คาดผมพาสเทล ยืดเหยียดตัวอ่อนจัดระเบียบเอวเอส' },
-  { id: 'hero_marathon', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'runner_visor', skinHex: '#E8B48A', colorHex: '#1E293B', bandColor: '#22C55E', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'นักวิ่งมาราธอนล่าเหรียญ', nickname: 'หมวกไวเซอร์เพซสี่', emoji: '🏃', desc: 'สวมหมวกไวเซอร์เปิดหัวระบายเหงื่อ ตื่นตีสี่มาวิ่งโซนสองทุกเช้าไม่เคยขาด' },
-  { id: 'hero_aerobics', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'disco_afro', skinHex: '#F5C6A5', colorHex: '#92400E', bandColor: '#06B6D4', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'ตัวแม่แอโรบิกหน้าลาน 80s', nickname: 'เต้นยับรับเพลงเร็ว', emoji: '💃', desc: 'ผมฟูหยิกคาดผ้านีออนยุค 80s นำเต้นแอโรบิกหน้าห้างจนไขมันสะเทือน!' },
-  { id: 'hero_sumo', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'sumo_topknot', skinHex: '#FAD6B8', colorHex: '#18181B', bandColor: '#F8FAFC', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ริกิชิซูโม่จอมพลัง', nickname: 'จุกชงมาเกะสลัดไขมัน', emoji: '🥋', desc: 'เกล้าจุกชงมาเกะแบบโยโกซึนะ เปลี่ยนมวลพุงเป็นพลังพุ่งชนเส้นชัย!' },
-  { id: 'hero_lifeguard', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'lifeguard_cap', skinHex: '#D99868', colorHex: '#EF4444', bandColor: '#FFFFFF', defaultArmor: 'armor_none', earStyle: 'human', name: 'ไลฟ์การ์ดชายหาดกล้ามทอง', nickname: 'ผู้พิทักษ์หาดทราย', emoji: '🛟', desc: 'ผิวแทนแดดทะเลสวมหมวกแก๊ปไลฟ์การ์ด วิ่งสปรินต์เลียบชายหาดสุดเท่' },
-  { id: 'hero_chef', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'chef_toque', skinHex: '#FAD6B8', colorHex: '#FFFFFF', bandColor: '#EF4444', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'เชฟกระทะเหล็กสายคลีน', nickname: 'หมวกเชฟสูงคำนวณแคล', emoji: '👨‍🍳', desc: 'สวมหมวกเชฟมิชลินทรงสูง ชั่งตวงอกไก่ปั่นและบรอกโคลีแม่นระดับทศนิยม' },
-  { id: 'hero_rider', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'rider_helmet', skinHex: '#E5B28A', colorHex: '#22C55E', bandColor: '#FACC15', defaultArmor: 'armor_vest', earStyle: 'human', name: 'พี่ไรเดอร์ส่งด่วนสายซิ่ง', nickname: 'หมวกกันน็อกติดหูแมว', emoji: '🛵', desc: 'วันนี้จอดรถแล้ววิ่งส่งออเดอร์เองเพื่อเบิร์น! หมวกกันน็อกชิลด์ใสติดหูแมวสุดคิวท์' },
-  { id: 'hero_office', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'office_glasses', skinHex: '#FAD6B8', colorHex: '#1E293B', bandColor: '#EF4444', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'มนุษย์ออฟฟิศหนีประชุมมาวิ่ง', nickname: 'แว่นกรอบดำเนคไทโพกหัว', emoji: '💼', desc: 'ปิดคอมพ์ปุ๊บเอาเนคไทโพกหัวลงสนามปั๊บ แก้ปวดหลังออฟฟิศซินโดรมด้วยคาร์ดิโอ!' },
-  { id: 'hero_doctor', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'doctor_mirror', skinHex: '#FFE4D4', colorHex: '#1E293B', bandColor: '#38BDF8', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'คุณหมอตรวจจับคอเลสเตอรอล', nickname: 'กระจกคาดหัวสั่งงดของทอด', emoji: '🩺', desc: 'คุณหมอลงมาวิ่งคุมเองในสนาม! ใครแอบกินของมันเจอใบสั่งวิ่งเพิ่มสิบรอบ' },
-  { id: 'hero_disco', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'disco_afro', skinHex: '#C6865A', colorHex: '#18181B', bandColor: '#FACC15', defaultArmor: 'armor_gold_paladin', earStyle: 'human', name: 'ราชาดิสโก้หัวแอฟโฟรยักษ์', nickname: 'ฟลอร์แดนซ์สะท้านทรวง', emoji: '🪩', desc: 'ทรงผมแอฟโฟรกลมยักษ์ใหญ่ฟูฟ่อง เต้นมูนวอล์กเข้าเส้นชัยแบบมีสไตล์' },
-  { id: 'hero_rockstar', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'cyber_mohawk', skinHex: '#FAD6B8', colorHex: '#EF4444', bandColor: '#18181B', defaultArmor: 'armor_silver_knight', earStyle: 'human', name: 'ร็อกสตาร์พังก์หัวหนาม', nickname: 'ว้ากเผาผลาญแคลอรี่', emoji: '🎸', desc: 'เซ็ตผมหนามแหลมชี้ฟ้า โยกหัวเฮดแบงก์เบิร์นไขมันมันส์หยดติ๋ง!' },
-  { id: 'hero_gamer', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'gamer_headset', skinHex: '#FFE4D6', colorHex: '#6366F1', bandColor: '#22D3EE', defaultArmor: 'armor_ice_cape', earStyle: 'human', name: 'สตรีมเมอร์เกมเมอร์หูฟังไฟ', nickname: 'วางจอยมาซอยเท้า', emoji: '🎧', desc: 'สวมหูฟังเกมมิ่ง RGB พร้อมไมค์ไลฟ์สดวิ่งลดพุง ขอกำลังใจโดเนทเป็นอกไก่!' },
-  { id: 'hero_granny_turbo', category: 'mythical', isHero: true, heroCategory: 'fitness', heroStyle: 'top_bun', skinHex: '#FAD6B8', colorHex: '#CBD5E1', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', earStyle: 'human', name: 'อาม่าเทอร์โบสปรินต์แซงโค้ง', nickname: 'มวยผมเงินปิ่นทองซิ่งไว', emoji: '👵', desc: 'เห็นผมสีเงินใจดีแบบนี้ แต่เวลาป้ายลดราคาเปิด อาม่าสปรินต์แซงวัยรุ่นไม่เห็นฝุ่น!' },
+  { id: 'disney_maleficent', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'maleficent_horns', skinHex: '#DCFCE7', colorHex: '#0F172A', bandColor: '#A855F7', defaultArmor: 'armor_ice_cape', defaultShirtHex: '#18181B', defaultPantsHex: '#581C87', earStyle: 'human', name: 'มาเลฟิเซนต์ นางพญาปีศาจ', nickname: 'เขาคู่โค้งสง่าเสกคำสาปเผาผลาญไขมัน!', emoji: '🖤', desc: 'สวมหมวกเขาปีศาจโค้งเกลียวคู่สีดำขลับ ผิวอมเขียวอ่อน ชุดคลุมดำ-ม่วงทรงพลัง' },
+  { id: 'disney_evil_queen', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'queen_crown_veil', skinHex: '#F8FAFC', colorHex: '#0F172A', bandColor: '#FACC15', defaultArmor: 'armor_ice_cape', defaultShirtHex: '#6B21A8', defaultPantsHex: '#18181B', earStyle: 'human', name: 'ราชินีใจร้าย กระจกวิเศษ', nickname: 'กระจกวิเศษบอกข้าเถิด ใครเอวเอสสุดในปฐพี!', emoji: '🪞', desc: 'คลุมศีรษะสีดำสวมมงกุฎทองยอดแหลมสูง ชุดคลุมม่วง-ดำสุดสง่างาม' },
+  { id: 'disney_ursula', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'queen_crown_veil', skinHex: '#C084FC', colorHex: '#F8FAFC', bandColor: '#FACC15', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#18181B', defaultPantsHex: '#3B0764', earStyle: 'human', name: 'เออร์ซูล่า แม่มดแห่งท้องทะเล', nickname: 'ตัวแม่สายแซ่บแห่งมหาสมุทร!', emoji: '🐙', desc: 'ผิวกายสีม่วงลาเวนเดอร์ ผมขาวเซ็ตตั้งฟูสุดมั่น ชุดราตรีสีดำ-ม่วงเข้ม' },
+  { id: 'disney_cruella', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'cruella_half_hair', skinHex: '#FFF1F2', colorHex: '#F8FAFC', bandColor: '#EF4444', defaultArmor: 'armor_silver_knight', defaultShirtHex: '#F8FAFC', defaultPantsHex: '#18181B', earStyle: 'human', name: 'ครูเอลล่า เดอ วิล', nickname: 'แฟชั่นนิสต้าผมสองสีขาว-ดำตัวแม่!', emoji: '🐾', desc: 'ผมบ๊อบฟูแบ่งครึ่งขาว-ดำสุดจี๊ด เสื้อโค้ทขาวตัดดำ-แดงรันเวย์สะเทือน!' },
+  { id: 'disney_hades', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'hades_flame_hair', skinHex: '#94A3B8', colorHex: '#38BDF8', bandColor: '#0284C7', defaultArmor: 'armor_ice_cape', defaultShirtHex: '#1E293B', defaultPantsHex: '#0F172A', earStyle: 'human', name: 'ฮาเดส เจ้าแห่งยมโลกหัวไฟฟ้า', nickname: 'หัวไฟสีฟ้านีออนลุกโชนพูดรัวไฟแลบ!', emoji: '🔥', desc: 'ผิวกายสีเทาอมฟ้า ทรงผมเป็นเปลวไฟสีฟ้านีออนลุกโชติช่วงตลอดเวลา!' },
+  { id: 'disney_captain_hook', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'villain_tophat_plume', skinHex: '#FAD6B8', colorHex: '#991B1B', bandColor: '#A855F7', defaultArmor: 'armor_gold_paladin', defaultShirtHex: '#DC2626', defaultPantsHex: '#18181B', earStyle: 'human', name: 'กัปตันฮุก โจรสลัดหมวกขนนก', nickname: 'ได้ยินเสียงนาฬิกาจระเข้ทีไรวิ่งสับตีนแตก!', emoji: '🪝', desc: 'หมวกกัปตันสีแดงบานใหญ่ปักขนนกม่วงฟูฟ่อง เสื้อโค้ทแดงกัปตันสุดหรู' },
+  { id: 'disney_jafar', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'villain_tophat_plume', skinHex: '#C6865A', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_ice_cape', defaultShirtHex: '#18181B', defaultPantsHex: '#991B1B', earStyle: 'human', name: 'จาฟาร์ พ่อมดราชครู', nickname: 'สะกดจิตตัวเองให้งดของหวานยามดึก!', emoji: '🐍', desc: 'หมวกโพกหัวทรงสูงสีดำแถบแดงปักขนนก ชุดคลุมดำ-แดงทรงอำนาจ' },
+  { id: 'disney_queen_hearts', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'queen_crown_veil', skinHex: '#FFE4E6', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#EF4444', defaultPantsHex: '#18181B', earStyle: 'human', name: 'ราชินีโพแดง', nickname: 'ใครแอบกินชาบูตอนดึก... ตัดพุงมันซะ!!', emoji: '♥️', desc: 'ทรงผมดำพองสวมมงกุฎทองจิ๋ว ชุดกระโปรงแดง-ดำลายหัวใจสุดอลังการ' },
+  { id: 'disney_gaston', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'incredible_mask', skinHex: '#F5CBA7', colorHex: '#18181B', bandColor: '#FACC15', defaultArmor: 'armor_vest', defaultShirtHex: '#DC2626', defaultPantsHex: '#18181B', earStyle: 'human', name: 'แกสตัน นักล่ากล้ามโตกินไข่ห้าโหล', nickname: 'กินไข่ไก่วันละห้าโหลโปรตีนล้นกล้าม!', emoji: '💪', desc: 'หนุ่มล่ำผมดำมัดรวบ เสื้อแดงปกทองกางเกงดำ เบ่งกล้ามโชว์ตลอดทาง' },
+  { id: 'disney_yzma', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'villain_tophat_plume', skinHex: '#D8B4FE', colorHex: '#7E22CE', bandColor: '#EC4899', defaultArmor: 'armor_snow_dress', defaultShirtHex: '#581C87', defaultPantsHex: '#18181B', earStyle: 'human', name: 'อิซม่า แม่มดปรุงยาเปลี่ยนร่าง', nickname: 'สับคันโยกผิดชีวิตเปลี่ยนผอมเฉียบพลัน!', emoji: '🧪', desc: 'สวมหมวกขนนกสีม่วงบานเย็นทรงสูงอลังการ ผอมเพรียวเปรี้ยวจี๊ด' },
+  { id: 'disney_lotso', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'mickey_ears', skinHex: '#F472B6', colorHex: '#DB2777', bandColor: '#9D174D', defaultArmor: 'armor_none', defaultShirtHex: '#EC4899', defaultPantsHex: '#FFFBEB', earStyle: 'human', name: 'หมีล็อตโซ่ กลิ่นสตรอว์เบอร์รี', nickname: 'หน้าตาจิ้มลิ้มตัวหอมหวานแต่บอสใหญ่ตัวจริง!', emoji: '🍓', desc: 'พี่หมีสีชมพูบานเย็นหูกลมคู่ พุงกลมขาวนุ่มหอมกลิ่นสตรอว์เบอร์รี' },
+  { id: 'disney_dr_facilier', category: 'mythical', isHero: true, heroCategory: 'villain', heroStyle: 'villain_tophat_plume', skinHex: '#8D5524', colorHex: '#18181B', bandColor: '#EF4444', defaultArmor: 'armor_silver_knight', defaultShirtHex: '#581C87', defaultPantsHex: '#18181B', earStyle: 'human', name: 'ดร.ฟาซิเลียร์ หมอผีเงามืด', nickname: 'มีเพื่อนจากโลกมืดคอยช่วยเบิร์นแคล!', emoji: '🎩', desc: 'สวมหมวกทรงสูง Top Hat สีดำคาดแถบแดงสุดเท่ ชุดสูทม่วงดำมีสไตล์' },
 ];
+
+export function isAnimeSpecies(breedOrSpecies?: string): boolean {
+  if (!breedOrSpecies) return false;
+  if (breedOrSpecies.startsWith('anime_')) return true;
+  return ANIME_LIST.some((a) => a.id === breedOrSpecies);
+}
 
 export function isHeroSpecies(breedOrSpecies?: string): boolean {
   if (!breedOrSpecies) return false;
-  return HERO_LIST.some((h) => h.id === breedOrSpecies);
+  if (
+    breedOrSpecies.startsWith('hero_') ||
+    breedOrSpecies.startsWith('disney_') ||
+    breedOrSpecies.startsWith('anime_')
+  ) {
+    return true;
+  }
+  return (
+    HERO_LIST.some((h) => h.id === breedOrSpecies) ||
+    ANIME_LIST.some((a) => a.id === breedOrSpecies)
+  );
 }
 
 export function resolveBreedOption(breedOrSpecies?: string): SpeciesOption {
   const mappedId = breedOrSpecies ? LEGACY_SPECIES_FALLBACK[breedOrSpecies] || breedOrSpecies : 'bunny';
   const foundHero = HERO_LIST.find((h) => h.id === mappedId);
   if (foundHero) return foundHero;
+  const foundAnime = ANIME_LIST.find((a) => a.id === mappedId);
+  if (foundAnime) return foundAnime;
+  if (mappedId.startsWith('anime_')) {
+    return ANIME_LIST[0];
+  }
+  if (mappedId.startsWith('hero_') || mappedId.startsWith('disney_')) {
+    return HERO_LIST[0];
+  }
   const found = SPECIES_LIST.find((b) => b.id === mappedId);
   return found ?? SPECIES_LIST.find((b) => b.id === 'bunny') ?? SPECIES_LIST[0];
 }
 
 export type ShopCategory = 'hat' | 'face' | 'armor' | 'weapon' | 'wings' | 'aura' | 'pet' | 'mount';
 export type GachaRarity = 'rare' | 'epic' | 'legendary';
+export type PropColorKey = 'hat' | 'face' | 'shirt' | 'pants' | 'weapon' | 'wings' | 'aura' | 'pet' | 'mount';
+export type PropColorMap = Partial<Record<PropColorKey, string>>;
 
-export const GACHA_SPIN_COST = 80;
+export function parsePropColors(raw: unknown): PropColorMap {
+  if (!raw) return {};
+  try {
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!obj || typeof obj !== 'object') return {};
+    const out: PropColorMap = {};
+    const validKeys: PropColorKey[] = ['hat', 'face', 'shirt', 'pants', 'weapon', 'wings', 'aura', 'pet', 'mount'];
+    for (const k of validKeys) {
+      const val = (obj as Record<string, unknown>)[k];
+      if (typeof val === 'string' && /^#[0-9A-Fa-f]{6}$/.test(val)) {
+        out[k] = val.toUpperCase();
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export const GACHA_SPIN_COST = 180;
 
 export interface ShopItem {
   id: string;
@@ -518,84 +682,84 @@ export interface ShopItem {
 }
 
 export const SHOP_ITEMS: ShopItem[] = [
-  // Category 1: Hat (หมวก / เครื่องหัวแฟชั่น & สปอร์ต)
+  // Category 1: Hat (หมวก / เครื่องหัวแฟชั่น & สปอร์ต — ไล่ระดับ 60..380 🪙)
   { id: 'none', category: 'hat', name: 'ไม่สวมหมวก', icon: '➖', cost: 0, desc: 'โชว์หูน่ารักตามสายพันธุ์', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'hat_red_bow', category: 'hat', name: 'โบว์แดงสดใส', icon: '🎀', cost: 0, desc: 'โบว์แดงผูกผมสุดน่ารัก (ฟรี)', colorHex: 0xEF4444, accentHex: 0xFCA5A5 },
-  { id: 'hat_knight_helm', category: 'hat', name: 'หมวกแก๊ปสปอร์ตนักวิ่ง', icon: '🧢', cost: 50, desc: 'หมวกแก๊ปผ้าใบสายสตรีท & วิ่งมาราธอน', colorHex: 0x2563EB, accentHex: 0xF472B6 },
-  { id: 'hat_tiara', category: 'hat', name: 'มงกุฎปาร์ตี้มินิ', icon: '👑', cost: 75, desc: 'มงกุฎจิ๋วสีทองสายแฟชั่น', colorHex: 0xFACC15, accentHex: 0x38BDF8 },
-  { id: 'hat_ice_crown', category: 'hat', name: 'ที่คาดผมเกล็ดหิมะ', icon: '❄️', cost: 100, desc: 'ที่คาดผมคริสตัลสีฟ้าสดใส', colorHex: 0x38BDF8, accentHex: 0xE0F2FE },
-  { id: 'hat_robin', category: 'hat', name: 'หมวกบักเก็ตแคมป์ปิ้ง', icon: '👒', cost: 75, desc: 'หมวกผ้าเดินป่าสไตล์เอาท์ดอร์', colorHex: 0x16A34A, accentHex: 0xEF4444 },
+  { id: 'hat_knight_helm', category: 'hat', name: 'หมวกแก๊ปสปอร์ตนักวิ่ง', icon: '🧢', cost: 60, desc: 'หมวกแก๊ปผ้าใบสายสตรีท & วิ่งมาราธอน', colorHex: 0x2563EB, accentHex: 0xF472B6 },
   { id: 'hat_fez', category: 'hat', name: 'หมวกไหมพรมบีนนี่', icon: '🧶', cost: 75, desc: 'หมวกไหมพรมสีแดงอุ่นๆ สไตล์สตรีท', colorHex: 0xDC2626, accentHex: 0xFACC15 },
-  { id: 'hat_ms_orange_shroom', category: 'hat', name: 'หมวกเห็ดส้มเมเปิ้ล', icon: '🍄', cost: 80, desc: 'หมวกทรงเห็ดสีส้มจุดครีมนุ่มฟูสุดฮิต (สไตล์ MapleSim)', colorHex: 0xF97316, accentHex: 0xFEF3C7 },
-  { id: 'hat_ms_pink_beret', category: 'hat', name: 'หมวกเบเร่ต์ศิลปินชมพู', icon: '🎨', cost: 65, desc: 'หมวกเบเร่ต์ผ้าสักหลาดสีชมพูซากุระเอียงข้าง (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0xFFFFFF },
-  { id: 'hat_ms_floral_wreath', category: 'hat', name: 'มงกุฎดอกไม้ป่าเอลิน่า', icon: '🌼', cost: 70, desc: 'เถาวัลย์ดอกไม้หลากสีสวมรอบหัว (สไตล์ MapleSim)', colorHex: 0x4ADE80, accentHex: 0xFDE047 },
+  { id: 'hat_ms_pink_beret', category: 'hat', name: 'หมวกเบเร่ต์ศิลปินชมพู', icon: '🎨', cost: 80, desc: 'หมวกเบเร่ต์ผ้าสักหลาดสีชมพูซากุระเอียงข้าง (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0xFFFFFF },
+  { id: 'hat_robin', category: 'hat', name: 'หมวกบักเก็ตแคมป์ปิ้ง', icon: '👒', cost: 120, desc: 'หมวกผ้าเดินป่าสไตล์เอาท์ดอร์', colorHex: 0x16A34A, accentHex: 0xEF4444 },
+  { id: 'hat_ms_orange_shroom', category: 'hat', name: 'หมวกเห็ดส้มเมเปิ้ล', icon: '🍄', cost: 320, desc: 'หมวกทรงเห็ดสีส้มจุดครีมนุ่มฟูสุดฮิต (สไตล์ MapleSim)', colorHex: 0xF97316, accentHex: 0xFEF3C7 },
+  { id: 'hat_ms_floral_wreath', category: 'hat', name: 'มงกุฎดอกไม้ป่าเอลิน่า', icon: '🌼', cost: 320, desc: 'เถาวัลย์ดอกไม้หลากสีสวมรอบหัว (สไตล์ MapleSim)', colorHex: 0x4ADE80, accentHex: 0xFDE047 },
+  { id: 'hat_tiara', category: 'hat', name: 'มงกุฎปาร์ตี้มินิ', icon: '👑', cost: 350, desc: 'มงกุฎจิ๋วสีทองสายแฟชั่นระดับพรีเมียม', colorHex: 0xFACC15, accentHex: 0x38BDF8 },
+  { id: 'hat_ice_crown', category: 'hat', name: 'ที่คาดผมเกล็ดหิมะ', icon: '❄️', cost: 380, desc: 'ที่คาดผมคริสตัลสีฟ้าสดใสสุดหรู', colorHex: 0x38BDF8, accentHex: 0xE0F2FE },
 
-  // Category 2: Face / Glasses (แว่นตา & แอคเซสเซอรี่หน้า)
+  // Category 2: Face / Glasses (แว่นตา & แอคเซสเซอรี่หน้า — ของง่ายๆ ซื้อไว 35..130 🪙)
   { id: 'face_none', category: 'face', name: 'หน้าใสธรรมชาติ', icon: '➖', cost: 0, desc: 'โชว์โครงหน้าสัตว์แต่ละสายพันธุ์ชัดๆ', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'face_ms_bandaid', category: 'face', name: 'พลาสเตอร์แปะจมูกจอมซน', icon: '🩹', cost: 35, desc: 'พลาสเตอร์แปะสันจมูกสุดคลาสสิกสายแฟชั่น (สไตล์ MapleSim)', colorHex: 0xFDBA74, accentHex: 0xFFFFFF },
-  { id: 'face_ms_blush_hearts', category: 'face', name: 'สติกเกอร์แก้มหัวใจชมพู', icon: '💕', cost: 45, desc: 'แก้มชมพูระเรื่อพร้อมหัวใจคู่สองข้างแก้ม (สไตล์ MapleSim)', colorHex: 0xFB7185, accentHex: 0xF43F5E },
-  { id: 'face_sunglasses', category: 'face', name: 'แว่นกันแดดแฟชั่น', icon: '🕶️', cost: 40, desc: 'แว่นดำสุดคูลเดินชิลล์กลางแดด', colorHex: 0x18181B, accentHex: 0xFACC15 },
-  { id: 'face_nerd_glasses', category: 'face', name: 'แว่นกลมกรอบทอง', icon: '👓', cost: 40, desc: 'แว่นสายตาแฟชั่นสายคำนวณแคลอรี่', colorHex: 0xFACC15, accentHex: 0xE0F2FE },
-  { id: 'face_fox_mask', category: 'face', name: 'หน้ากากงานวัดญี่ปุ่น', icon: '🎭', cost: 75, desc: 'หน้ากากคาดข้างหัวสไตล์เที่ยวงานเทศกาล', colorHex: 0xF8FAFC, accentHex: 0xEF4444 },
-  { id: 'face_toast', category: 'face', name: 'คาบขนมปังปิ้งมื้อเช้า', icon: '🍞', cost: 50, desc: 'ตื่นสายรีบวิ่งมาเข้าลู่!', colorHex: 0xD97706, accentHex: 0xFEF3C7 },
+  { id: 'face_sunglasses', category: 'face', name: 'แว่นกันแดดแฟชั่น', icon: '🕶️', cost: 45, desc: 'แว่นดำสุดคูลเดินชิลล์กลางแดด', colorHex: 0x18181B, accentHex: 0xFACC15 },
+  { id: 'face_nerd_glasses', category: 'face', name: 'แว่นกลมกรอบทอง', icon: '👓', cost: 45, desc: 'แว่นสายตาแฟชั่นสายคำนวณแคลอรี่', colorHex: 0xFACC15, accentHex: 0xE0F2FE },
+  { id: 'face_ms_blush_hearts', category: 'face', name: 'สติกเกอร์แก้มหัวใจชมพู', icon: '💕', cost: 50, desc: 'แก้มชมพูระเรื่อพร้อมหัวใจคู่สองข้างแก้ม (สไตล์ MapleSim)', colorHex: 0xFB7185, accentHex: 0xF43F5E },
+  { id: 'face_toast', category: 'face', name: 'คาบขนมปังปิ้งมื้อเช้า', icon: '🍞', cost: 55, desc: 'ตื่นสายรีบวิ่งมาเข้าลู่!', colorHex: 0xD97706, accentHex: 0xFEF3C7 },
+  { id: 'face_fox_mask', category: 'face', name: 'หน้ากากงานวัดญี่ปุ่น', icon: '🎭', cost: 130, desc: 'หน้ากากคาดข้างหัวสไตล์เที่ยวงานเทศกาล', colorHex: 0xF8FAFC, accentHex: 0xEF4444 },
 
-  // Category 3: Outfit — เสื้อ & กางเกง (Casual / Sporty Shirts & Pants)
+  // Category 3: Outfit — เสื้อ & กางเกง (65..750 🪙)
   { id: 'armor_bare', category: 'armor', name: 'ไม่สวมชุด (ตัวกลมขนสัตว์)', icon: '🧸', cost: 0, desc: 'ถอดชุดโชว์พุงกลมขนสัตว์ธรรมชาติ (ฟรี)', colorHex: 0xF8FAFC, accentHex: 0xFFFBEB },
   { id: 'armor_none', category: 'armor', name: 'เสื้อยืดสปอร์ต & กางเกงวอร์ม', icon: '👕', cost: 0, desc: 'ชุดออกกำลังกายเสื้อยืดกางเกงขายาว (ฟรี)', colorHex: 0x3B82F6, accentHex: 0x1E293B },
   { id: 'armor_snow_dress', category: 'armor', name: 'เสื้อครอป & กระโปรงเทนนิส', icon: '👗', cost: 0, desc: 'เสื้อน้ำเงินกระโปรงเหลืองสดใสคล่องตัว (ฟรี)', colorHex: 0x2563EB, accentHex: 0xFACC15 },
-  { id: 'armor_ms_denim_overall', category: 'armor', name: 'ชุดเอี๊ยมยีนส์เสื้อเหลือง', icon: '👖', cost: 65, desc: 'เอี๊ยมยีนส์กระดุมทองทับเสื้อเหลืองสดใส (สไตล์ MapleSim)', colorHex: 0xFACC15, accentHex: 0x2563EB },
-  { id: 'armor_ms_sailor_uniform', category: 'armor', name: 'ชุดกะลาสีเรือปกน้ำเงินโบว์แดง', icon: '⚓', cost: 85, desc: 'ชุดนักเรียนกะลาสีเรือสุดคิวท์พร้อมกระโปรงกรมท่า (สไตล์ MapleSim)', colorHex: 0xFFFFFF, accentHex: 0x1D4ED8 },
-  { id: 'armor_ms_strawberry_milk', category: 'armor', name: 'ฮู้ดดี้โอเวอร์ไซส์นมสตรอว์เบอร์รี', icon: '🍓', cost: 90, desc: 'เสื้อฮู้ดชมพูพาสเทลคู่กางเกงขาสั้นขาว (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0xFFFBEB },
-  { id: 'armor_silver_knight', category: 'armor', name: 'เสื้อฮู้ดดี้ & กางเกงยีนส์', icon: '🧥', cost: 75, desc: 'แจ็คเก็ตฮู้ดสตรีทคู่กับกางเกงยีนส์ขายาว', colorHex: 0x64748B, accentHex: 0x1D4ED8 },
-  { id: 'armor_gold_paladin', category: 'armor', name: 'ชุดแทร็กสูทแชมเปี้ยนสีทอง', icon: '🎽', cost: 150, desc: 'เสื้อแจ็คเก็ตวอร์มแถบทอง & กางเกงสปอร์ต', colorHex: 0xFACC15, accentHex: 0x18181B },
-  { id: 'armor_princess', category: 'armor', name: 'เสื้อคาดิแกนฟ้า & กางเกงขาสั้น', icon: '👚', cost: 75, desc: 'ลุคคาเฟ่พาสเทลน่ารักสบายๆ', colorHex: 0x60A5FA, accentHex: 0xF8FAFC },
-  { id: 'armor_ice_cape', category: 'armor', name: 'สเวตเตอร์ไหมพรม & กางเกงชิโน่', icon: '🧣', cost: 100, desc: 'เสื้อแขนยาวสีฟ้าพาสเทลคู่กางเกงขายาว', colorHex: 0x38BDF8, accentHex: 0xE2E8F0 },
-  { id: 'armor_vest', category: 'armor', name: 'เสื้อกั๊กยีนส์ & กางเกงคาร์โก้', icon: '🦺', cost: 50, desc: 'ลุคแคมป์ปิ้งเสื้อกั๊กทับเสื้อยืดขาว', colorHex: 0x16A34A, accentHex: 0xD97706 },
+  { id: 'armor_vest', category: 'armor', name: 'เสื้อกั๊กยีนส์ & กางเกงคาร์โก้', icon: '🦺', cost: 65, desc: 'ลุคแคมป์ปิ้งเสื้อกั๊กทับเสื้อยืดขาว', colorHex: 0x16A34A, accentHex: 0xD97706 },
+  { id: 'armor_ms_denim_overall', category: 'armor', name: 'ชุดเอี๊ยมยีนส์เสื้อเหลือง', icon: '👖', cost: 150, desc: 'เอี๊ยมยีนส์กระดุมทองทับเสื้อเหลืองสดใส (สไตล์ MapleSim)', colorHex: 0xFACC15, accentHex: 0x2563EB },
+  { id: 'armor_silver_knight', category: 'armor', name: 'เสื้อฮู้ดดี้ & กางเกงยีนส์', icon: '🧥', cost: 160, desc: 'แจ็คเก็ตฮู้ดสตรีทคู่กับกางเกงยีนส์ขายาว', colorHex: 0x64748B, accentHex: 0x1D4ED8 },
+  { id: 'armor_princess', category: 'armor', name: 'เสื้อคาดิแกนฟ้า & กางเกงขาสั้น', icon: '👚', cost: 160, desc: 'ลุคคาเฟ่พาสเทลน่ารักสบายๆ', colorHex: 0x60A5FA, accentHex: 0xF8FAFC },
+  { id: 'armor_ms_sailor_uniform', category: 'armor', name: 'ชุดกะลาสีเรือปกน้ำเงินโบว์แดง', icon: '⚓', cost: 340, desc: 'ชุดนักเรียนกะลาสีเรือสุดคิวท์พร้อมกระโปรงกรมท่า (สไตล์ MapleSim)', colorHex: 0xFFFFFF, accentHex: 0x1D4ED8 },
+  { id: 'armor_ice_cape', category: 'armor', name: 'สเวตเตอร์ไหมพรม & กางเกงชิโน่', icon: '🧣', cost: 360, desc: 'เสื้อแขนยาวสีฟ้าพาสเทลคู่กางเกงขายาว', colorHex: 0x38BDF8, accentHex: 0xE2E8F0 },
+  { id: 'armor_ms_strawberry_milk', category: 'armor', name: 'ฮู้ดดี้โอเวอร์ไซส์นมสตรอว์เบอร์รี', icon: '🍓', cost: 380, desc: 'เสื้อฮู้ดชมพูพาสเทลคู่กางเกงขาสั้นขาว (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0xFFFBEB },
+  { id: 'armor_gold_paladin', category: 'armor', name: 'ชุดแทร็กสูทแชมเปี้ยนสีทอง', icon: '🎽', cost: 750, desc: 'ชุดแชมเปี้ยนแถบทองระดับตำนาน! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xFACC15, accentHex: 0x18181B },
   { id: 'armor_chibi_animal', category: 'armor', name: 'ร่างสัตว์จิบิ 4 ขาธรรมชาติ', icon: '🐾', cost: 0, desc: 'ร่างสัตว์จิบิดุ๊กดิ๊กไม่สวมเสื้อผ้า (ฟรี)', colorHex: 0x10B981, accentHex: 0xFEF08A },
 
-  // Category 4: Handheld Props (ของถือเล่น / เครื่องดื่ม / อุปกรณ์ฟิตเนส — ไม่ใช่อาวุธ)
+  // Category 4: Handheld Props (70..160 🪙)
   { id: 'weapon_none', category: 'weapon', name: 'มือเปล่าเดินชิลล์', icon: '➖', cost: 0, desc: 'แกว่งแขนวิ่งสบายๆ ตัวปลิว', colorHex: 0x000000, accentHex: 0x000000 },
-  { id: 'weapon_ms_lollipop', category: 'weapon', name: 'อมยิ้มสายรุ้งยักษ์ลูดิเบรียม', icon: '🍭', cost: 70, desc: 'อมยิ้มกลมลายเกลียวหวานแหววอันยักษ์ (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0x38BDF8 },
-  { id: 'weapon_light_sword', category: 'weapon', name: 'ขวดเวย์โปรตีนเชค', icon: '🥤', cost: 100, desc: 'เชคเกอร์โปรตีนสีฟ้าสดชื่นหลังเวิร์คเอาท์', colorHex: 0x38BDF8, accentHex: 0xFACC15 },
-  { id: 'weapon_magic_staff', category: 'weapon', name: 'แก้วชานมไข่มุกจัมโบ้', icon: '🧋', cost: 90, desc: 'ชานมไข่มุกแก้วโปรดเพิ่มพลังใจ', colorHex: 0xFDBA74, accentHex: 0x18181B },
-  { id: 'weapon_gold_dumbbell', category: 'weapon', name: 'ดัมเบลฟิตเนสสีทอง', icon: '🏋️', cost: 60, desc: 'ถือวิ่งกระชับต้นแขนคูณสอง', colorHex: 0xFACC15, accentHex: 0x94A3B8 },
-  { id: 'weapon_giant_fork', category: 'weapon', name: 'ไอศกรีมซอฟต์เสิร์ฟสตรอว์เบอร์รี', icon: '🍦', cost: 60, desc: 'ของหวานรางวัลวันชีทเดย์', colorHex: 0xF472B6, accentHex: 0xFDE68A },
-  { id: 'weapon_broom', category: 'weapon', name: 'ไม้แบดมินตันสปอร์ต', icon: '🏸', cost: 75, desc: 'พร้อมตีแบดเบิร์นแคลอรี่กับเพื่อน', colorHex: 0xEF4444, accentHex: 0xF8FAFC },
+  { id: 'weapon_gold_dumbbell', category: 'weapon', name: 'ดัมเบลฟิตเนสสีทอง', icon: '🏋️', cost: 70, desc: 'ถือวิ่งกระชับต้นแขนคูณสอง', colorHex: 0xFACC15, accentHex: 0x94A3B8 },
+  { id: 'weapon_giant_fork', category: 'weapon', name: 'ไอศกรีมซอฟต์เสิร์ฟสตรอว์เบอร์รี', icon: '🍦', cost: 70, desc: 'ของหวานรางวัลวันชีทเดย์', colorHex: 0xF472B6, accentHex: 0xFDE68A },
+  { id: 'weapon_light_sword', category: 'weapon', name: 'ขวดเวย์โปรตีนเชค', icon: '🥤', cost: 140, desc: 'เชคเกอร์โปรตีนสีฟ้าสดชื่นหลังเวิร์คเอาท์', colorHex: 0x38BDF8, accentHex: 0xFACC15 },
+  { id: 'weapon_broom', category: 'weapon', name: 'ไม้แบดมินตันสปอร์ต', icon: '🏸', cost: 140, desc: 'พร้อมตีแบดเบิร์นแคลอรี่กับเพื่อน', colorHex: 0xEF4444, accentHex: 0xF8FAFC },
+  { id: 'weapon_magic_staff', category: 'weapon', name: 'แก้วชานมไข่มุกจัมโบ้', icon: '🧋', cost: 150, desc: 'ชานมไข่มุกแก้วโปรดเพิ่มพลังใจ', colorHex: 0xFDBA74, accentHex: 0x18181B },
+  { id: 'weapon_ms_lollipop', category: 'weapon', name: 'อมยิ้มสายรุ้งยักษ์ลูดิเบรียม', icon: '🍭', cost: 160, desc: 'อมยิ้มกลมลายเกลียวหวานแหววอันยักษ์ (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0x38BDF8 },
 
-  // Category 5: Back / Bag (กระเป๋าเป้ & พรอพติดหลัง)
+  // Category 5: Back / Bag (150..850 🪙)
   { id: 'wings_none', category: 'wings', name: 'ไม่สะพายหลัง', icon: '➖', cost: 0, desc: 'หลังโล่งคล่องตัว', colorHex: 0x000000, accentHex: 0x000000 },
-  { id: 'wings_ms_teddy_pack', category: 'wings', name: 'เป้ตุ๊กตาหมีน้อยเกาะหลัง', icon: '🧸', cost: 95, desc: 'ตุ๊กตาหมีสีคาราเมลกอดคอเกาะหลังไปทุกที่ (สไตล์ MapleSim)', colorHex: 0xB45309, accentHex: 0xFEF3C7 },
-  { id: 'wings_apple_sword', category: 'wings', name: 'กระเป๋าเป้แคมป์ปิ้งสุดคิวท์', icon: '🎒', cost: 100, desc: 'เป้สะพายหลังสีแดง-เหลืองพร้อมพวงกุญแจ', colorHex: 0xEF4444, accentHex: 0xFACC15 },
-  { id: 'wings_fairy', category: 'wings', name: 'ปีกผีเสื้อแฟนซีพาสเทล', icon: '🦋', cost: 75, desc: 'พรอพปีกผีเสื้อสีมิ้นท์สดใส', colorHex: 0x6EE7B7, accentHex: 0xFDE68A },
-  { id: 'wings_gold_archangel', category: 'wings', name: 'ปีกนางฟ้าปาร์ตี้สีทอง', icon: '🪽', cost: 150, desc: 'พรอพปีกขนนกสีทองฉลองแชมป์', colorHex: 0xFACC15, accentHex: 0xFEF08A },
-  { id: 'wings_crystal', category: 'wings', name: 'โบว์ริบบิ้นยักษ์ติดหลัง', icon: '🎀', cost: 100, desc: 'โบว์สีฟ้าพาสเทลติดหลังสุดแบ๊ว', colorHex: 0x38BDF8, accentHex: 0xE0F2FE },
-  { id: 'wings_magic_carpet', category: 'wings', name: 'เสื่อโยคะม้วนสะพายหลัง', icon: '🧘', cost: 75, desc: 'เสื่อฟิตเนสสีม่วงพกพร้อมออกกำลังกาย', colorHex: 0x7C3AED, accentHex: 0xFACC15 },
+  { id: 'wings_magic_carpet', category: 'wings', name: 'เสื่อโยคะม้วนสะพายหลัง', icon: '🧘', cost: 150, desc: 'เสื่อฟิตเนสสีม่วงพกพร้อมออกกำลังกาย', colorHex: 0x7C3AED, accentHex: 0xFACC15 },
+  { id: 'wings_apple_sword', category: 'wings', name: 'กระเป๋าเป้แคมป์ปิ้งสุดคิวท์', icon: '🎒', cost: 180, desc: 'เป้สะพายหลังสีแดง-เหลืองพร้อมพวงกุญแจ', colorHex: 0xEF4444, accentHex: 0xFACC15 },
+  { id: 'wings_ms_teddy_pack', category: 'wings', name: 'เป้ตุ๊กตาหมีน้อยเกาะหลัง', icon: '🧸', cost: 390, desc: 'ตุ๊กตาหมีสีคาราเมลกอดคอเกาะหลังไปทุกที่ (สไตล์ MapleSim)', colorHex: 0xB45309, accentHex: 0xFEF3C7 },
+  { id: 'wings_fairy', category: 'wings', name: 'ปีกผีเสื้อแฟนซีพาสเทล', icon: '🦋', cost: 420, desc: 'พรอพปีกผีเสื้อสีมิ้นท์สดใส', colorHex: 0x6EE7B7, accentHex: 0xFDE68A },
+  { id: 'wings_crystal', category: 'wings', name: 'โบว์ริบบิ้นยักษ์ติดหลัง', icon: '🎀', cost: 420, desc: 'โบว์สีฟ้าพาสเทลติดหลังสุดแบ๊ว', colorHex: 0x38BDF8, accentHex: 0xE0F2FE },
+  { id: 'wings_gold_archangel', category: 'wings', name: 'ปีกนางฟ้าปาร์ตี้สีทอง', icon: '🪽', cost: 850, desc: 'ปีกขนนกสีทองอร่ามระดับมหาเทพ! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xFACC15, accentHex: 0xFEF08A },
 
-  // Category 6: Aura / Effect (ออร่าเรืองแสงสไตล์ Dragon Nest)
+  // Category 6: Aura / Effect (450..720 🪙)
   { id: 'aura_none', category: 'aura', name: 'ไม่มีออร่า', icon: '➖', cost: 0, desc: 'โหมดประหยัดพลังงาน', colorHex: 0x000000, accentHex: 0x000000 },
-  { id: 'aura_magic_circle', category: 'aura', name: 'วงเวทเรืองแสงใต้เท้า', icon: '🔮', cost: 80, desc: 'วงเวทสีฟ้าทองหมุนรอบตัว', colorHex: 0x38BDF8, accentHex: 0xFACC15 },
-  { id: 'aura_flame', category: 'aura', name: 'ออร่าเปลวไฟนักสู้', icon: '🔥', cost: 100, desc: 'ไฟลุกโชนรอบตัวเผาผลาญแคลอรี่', colorHex: 0xF97316, accentHex: 0xEF4444 },
-  { id: 'aura_stars', category: 'aura', name: 'ประกายดาววิบวับ', icon: '✨', cost: 90, desc: 'กลุ่มดาวทองคำลอยวนรอบกาย', colorHex: 0xFDE047, accentHex: 0xFEF9C3 },
-  { id: 'aura_sakura', category: 'aura', name: 'กลีบซากุระปลิว', icon: '🌸', cost: 90, desc: 'กลีบดอกไม้ชมพูละมุนรอบตัว', colorHex: 0xF472B6, accentHex: 0xFBCFE8 },
+  { id: 'aura_magic_circle', category: 'aura', name: 'วงเวทเรืองแสงใต้เท้า', icon: '🔮', cost: 450, desc: 'วงเวทสีฟ้าทองหมุนรอบตัว', colorHex: 0x38BDF8, accentHex: 0xFACC15 },
+  { id: 'aura_stars', category: 'aura', name: 'ประกายดาววิบวับ', icon: '✨', cost: 480, desc: 'กลุ่มดาวทองคำลอยวนรอบกาย', colorHex: 0xFDE047, accentHex: 0xFEF9C3 },
+  { id: 'aura_sakura', category: 'aura', name: 'กลีบซากุระปลิว', icon: '🌸', cost: 480, desc: 'กลีบดอกไม้ชมพูละมุนรอบตัว', colorHex: 0xF472B6, accentHex: 0xFBCFE8 },
+  { id: 'aura_flame', category: 'aura', name: 'ออร่าเปลวไฟนักสู้', icon: '🔥', cost: 720, desc: 'ไฟลุกโชนรอบตัวเผาผลาญแคลอรี่! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF97316, accentHex: 0xEF4444 },
 
-  // Category 7: Pet + Pet Gear (สัตว์เลี้ยงคู่ใจ + พรอพสัตว์เลี้ยง)
+  // Category 7: Pet + Pet Gear (180..700 🪙)
   { id: 'pet_none', category: 'pet', name: 'ไม่มีสัตว์เลี้ยงเดินตาม', icon: '➖', cost: 0, desc: 'ลุยเดี่ยวไม่ง้อใคร', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'pet_fox_scarf', category: 'pet', name: 'จิ้งจอกจิบิอัศวิน', icon: '🦊', cost: 0, desc: 'จิ้งจอกส้มจิบิพันผ้าคลุมวิ่งเคียงข้าง (ฟรี)', colorHex: 0xEA580C, accentHex: 0x2563EB },
   { id: 'pet_bear_shield', category: 'pet', name: 'หมีจิบิผู้พิทักษ์', icon: '🐻‍❄️', cost: 0, desc: 'หมีน้อยจิบิคอยคุ้มกันเข้าเส้นชัย (ฟรี)', colorHex: 0xF1F5F9, accentHex: 0xFACC15 },
-  { id: 'pet_corgi_cape', category: 'pet', name: 'คอร์กี้ผ้าคลุมฮีโร่', icon: '🐕', cost: 50, desc: 'น้องหมาคอร์กี้ใส่ผ้าคลุมแดงวิ่งนำ', colorHex: 0xF59E0B, accentHex: 0xEF4444 },
-  { id: 'pet_cat_crown', category: 'pet', name: 'แมวส้มสวมมงกุฎ', icon: '🐈', cost: 75, desc: 'แมวส้มผู้สูงศักดิ์ใส่สร้อยทอง', colorHex: 0xFB923C, accentHex: 0xFACC15 },
-  { id: 'pet_bunny_wings', category: 'pet', name: 'กระต่ายน้อยติดปีกนางฟ้า', icon: '🐇', cost: 100, desc: 'กระต่ายขาวติดปีกบินตามเจ้านาย', colorHex: 0xF8FAFC, accentHex: 0xF472B6 },
-  { id: 'pet_pig_chef', category: 'pet', name: 'หมูจิ๋วหมวกเชฟทอง', icon: '🐖', cost: 100, desc: 'ลูกหมูสีชมพูใส่หมวกเชฟคอยเชียร์', colorHex: 0xF472B6, accentHex: 0xFACC15 },
+  { id: 'pet_corgi_cape', category: 'pet', name: 'คอร์กี้ผ้าคลุมฮีโร่', icon: '🐕', cost: 180, desc: 'น้องหมาคอร์กี้ใส่ผ้าคลุมแดงวิ่งนำ', colorHex: 0xF59E0B, accentHex: 0xEF4444 },
+  { id: 'pet_cat_crown', category: 'pet', name: 'แมวส้มสวมมงกุฎ', icon: '🐈', cost: 380, desc: 'แมวส้มผู้สูงศักดิ์ใส่สร้อยทอง', colorHex: 0xFB923C, accentHex: 0xFACC15 },
+  { id: 'pet_pig_chef', category: 'pet', name: 'หมูจิ๋วหมวกเชฟทอง', icon: '🐖', cost: 420, desc: 'ลูกหมูสีชมพูใส่หมวกเชฟคอยเชียร์', colorHex: 0xF472B6, accentHex: 0xFACC15 },
+  { id: 'pet_bunny_wings', category: 'pet', name: 'กระต่ายน้อยติดปีกนางฟ้า', icon: '🐇', cost: 700, desc: 'กระต่ายขาวติดปีกนางฟ้าบินตามเจ้านาย! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF8FAFC, accentHex: 0xF472B6 },
 
-  // Category 8: Mounts (สัตว์ขี่ & พาหนะคู่ใจสไตล์ MapleSim)
+  // Category 8: Mounts (220..900 🪙)
   { id: 'mount_none', category: 'mount', name: 'เดิน-วิ่งเองฟิตจัด', icon: '➖', cost: 0, desc: 'วิ่งสองขาเบิร์นแคลอรี่ด้วยตัวเอง', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'mount_cloud', category: 'mount', name: 'เมฆวิเศษสีขาวนุ่มฟู', icon: '☁️', cost: 0, desc: 'ก้อนเมฆปุยนุ่นลอยฟ้านุ่มนิ่มสไตล์ MapleSim (ฟรี)', colorHex: 0xFFFFFF, accentHex: 0xBAE6FD },
-  { id: 'mount_sunny_egg', category: 'mount', name: 'พรมไข่ดาวเยิ้มลอยฟ้า', icon: '🍳', cost: 65, desc: 'ไข่ดาวขอบกรอบไข่แดงเด้งดึ๋งขี่ลอยเหนือพื้น (MapleSim)', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
-  { id: 'mount_pudding', category: 'mount', name: 'พุดดิ้งคาราเมลจานยักษ์', icon: '🍮', cost: 75, desc: 'พุดดิ้งเด้งดึ๋งราดซอสคาราเมลแต่งคุกกี้โอรีโอ้ (MapleSim)', colorHex: 0xFBBF24, accentHex: 0x78350F },
-  { id: 'mount_green_slime', category: 'mount', name: 'บิ๊กสไลม์เขียวเด้งดึ๋ง', icon: '💧', cost: 80, desc: 'ขี่สไลม์ยักษ์สีเขียวมะนาวกระโดดดึ๋งดั๋งเข้าเส้นชัย (MapleSim)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7 },
-  { id: 'mount_red_pig', category: 'mount', name: 'หมูแดงผูกโบว์ซิ่งสายฟ้า', icon: '🐷', cost: 85, desc: 'หมูสีแดงผูกริบบิ้นฟ้าในตำนานของนักผจญภัย (MapleSim)', colorHex: 0xEF4444, accentHex: 0x38BDF8 },
-  { id: 'mount_mochi_bunny', category: 'mount', name: 'กระต่ายโมจิซ้อนสองชั้น', icon: '🐰', cost: 95, desc: 'ก้อนโมจิกระต่ายขาวนุ่มนิ่มซ้อนตัวเด้งดึ๋ง (MapleSim)', colorHex: 0xFFFFFF, accentHex: 0x4ADE80 },
-  { id: 'mount_unicorn', category: 'mount', name: 'ยูนิคอร์นขาวพาสเทล', icon: '🦄', cost: 120, desc: 'ม้ายูนิคอร์นสีขาวบริสุทธิ์เขาทองแผงคอพาสเทล (MapleSim)', colorHex: 0xFFFFFF, accentHex: 0xC084FC },
+  { id: 'mount_sunny_egg', category: 'mount', name: 'พรมไข่ดาวเยิ้มลอยฟ้า', icon: '🍳', cost: 220, desc: 'ไข่ดาวขอบกรอบไข่แดงเด้งดึ๋งขี่ลอยเหนือพื้น (MapleSim)', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
+  { id: 'mount_pudding', category: 'mount', name: 'พุดดิ้งคาราเมลจานยักษ์', icon: '🍮', cost: 250, desc: 'พุดดิ้งเด้งดึ๋งราดซอสคาราเมลแต่งคุกกี้โอรีโอ้ (MapleSim)', colorHex: 0xFBBF24, accentHex: 0x78350F },
+  { id: 'mount_green_slime', category: 'mount', name: 'บิ๊กสไลม์เขียวเด้งดึ๋ง', icon: '💧', cost: 420, desc: 'ขี่สไลม์ยักษ์สีเขียวมะนาวกระโดดดึ๋งดั๋งเข้าเส้นชัย (MapleSim)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7 },
+  { id: 'mount_red_pig', category: 'mount', name: 'หมูแดงผูกโบว์ซิ่งสายฟ้า', icon: '🐷', cost: 480, desc: 'หมูสีแดงผูกริบบิ้นฟ้าในตำนานของนักผจญภัย (MapleSim)', colorHex: 0xEF4444, accentHex: 0x38BDF8 },
+  { id: 'mount_mochi_bunny', category: 'mount', name: 'กระต่ายโมจิซ้อนสองชั้น', icon: '🐰', cost: 520, desc: 'ก้อนโมจิกระต่ายขาวนุ่มนิ่มซ้อนตัวเด้งดึ๋ง (MapleSim)', colorHex: 0xFFFFFF, accentHex: 0x4ADE80 },
+  { id: 'mount_unicorn', category: 'mount', name: 'ยูนิคอร์นขาวพาสเทล', icon: '🦄', cost: 900, desc: 'ม้ายูนิคอร์นบริสุทธิ์เขาทองระดับแรร์สุดหรู! (สะสม ~2 สัปดาห์)', colorHex: 0xFFFFFF, accentHex: 0xC084FC },
 
   // =========================================================================
   // 🎰 GACHAPON EXCLUSIVE ITEMS (หาซื้อไม่ได้! สุ่มได้จากตู้กาชาปองเท่านั้น!)

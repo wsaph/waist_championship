@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
-import { computeGoalProgress, FREE_DEFAULT_ITEMS, getGoalTypeMeta } from '@/lib/rpg_catalog';
+import { computeBmiMeta, computeGoalProgress, FREE_DEFAULT_ITEMS, getGoalTypeMeta, parsePropColors } from '@/lib/rpg_catalog';
+import { getOrSpawnLunchCoins } from '@/lib/lunch_coins';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,18 +86,29 @@ export async function GET(req: Request) {
       else cheerByUser[uid] = cnt;
     }
 
+    const todayKey = new Date().toISOString().slice(0, 10);
+
     const participants = usersRes.rows.map((u) => {
       const uid = Number(u.id);
       const isOwner = viewerId > 0 && uid === viewerId;
       const entry = entryByUser[uid];
       const goalType = entry ? String(entry.goal_type) : 'weight_loss';
+      const isCumulative = goalType === 'reps_accumulate' || goalType === 'distance_accumulate';
       const startVal = entry ? Number(entry.start_val) : Number(u.start_weight || 65);
       const currentVal = entry ? Number(entry.current_val) : Number(u.current_weight || startVal);
       const targetVal = entry ? Number(entry.target_val) : Number(u.goal_weight || 55);
       const { pct: progressPct, diffLabel, isInFoodStall } = computeGoalProgress(goalType, startVal, currentVal, targetVal);
+      const heightCm = Number(u.height_cm || 0);
+      const gender = u.gender === 'male' ? 'male' : 'female';
+      const storedBodyWeight = Number(u.body_weight || u.start_weight || 0);
+      const liveWeightKg = !isCumulative && currentVal > 0 ? currentVal : storedBodyWeight;
+      const bmiMeta = computeBmiMeta(liveWeightKg, heightCm, gender);
       const unlocked = Array.from(
         new Set([...Array.from(FREE_DEFAULT_ITEMS), ...(itemsByUser[uid] || [])])
       );
+      const checkedInToday = String(u.last_checkin_date || '') === todayKey;
+      const beachCoinsToday =
+        String(u.coin_pickups_date || '') === todayKey ? Number(u.coin_pickups_count ?? 0) : 0;
 
       return {
         id: uid,
@@ -114,6 +126,9 @@ export async function GET(req: Request) {
               startWeight: startVal,
               currentWeight: currentVal,
               goalWeight: targetVal,
+              bodyWeight: liveWeightKg > 0 ? liveWeightKg : undefined,
+              heightCm: heightCm > 0 ? heightCm : undefined,
+              gender,
               startVal,
               currentVal,
               targetVal,
@@ -123,7 +138,10 @@ export async function GET(req: Request) {
         goalType,
         progressPct,
         isInFoodStall,
+        bmiBellyScale: bmiMeta.isValid ? bmiMeta.bellyScale : undefined,
         points: Number(u.points ?? 100),
+        checkedInToday,
+        beachCoinsToday,
         species: u.species ? String(u.species) : 'bunny',
         breed: u.breed ? String(u.breed) : '',
         themeId: u.theme_id ? String(u.theme_id) : 'none',
@@ -135,6 +153,7 @@ export async function GET(req: Request) {
         equipAura: u.equip_aura ? String(u.equip_aura) : 'aura_none',
         equipPetGear: u.equip_pet_gear ? String(u.equip_pet_gear) : 'pet_none',
         equipMount: u.equip_mount ? String(u.equip_mount) : 'mount_none',
+        propColors: parsePropColors(u.prop_colors),
         unlockedItems: unlocked,
         taunt: String(u.latest_taunt),
         cheerCount: cheerByUser[uid] ?? 0,
@@ -142,11 +161,14 @@ export async function GET(req: Request) {
       };
     });
 
+    const lunchRush = await getOrSpawnLunchCoins();
+
     return NextResponse.json(
       {
         participants,
         seasons,
         activeSeason,
+        lunchRush,
         feed: [],
       },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
@@ -216,12 +238,20 @@ export async function POST(req: Request) {
 
     const { pct: nextPct, isInFoodStall } = computeGoalProgress(goalType, startVal, nextVal, targetVal);
     const nextIntPct = Math.floor(nextPct);
-    let earnedPoints = 0;
+    let progressBonus = 0;
     let nextMaxAwarded = prevMaxAwarded;
     if (nextIntPct > prevMaxAwarded) {
-      earnedPoints = (nextIntPct - prevMaxAwarded) * 25;
+      progressBonus = (nextIntPct - prevMaxAwarded) * 15;
       nextMaxAwarded = nextIntPct;
     }
+
+    // โบนัสขยันส่งผลภารกิจประจำวัน: บันทึกครั้งแรกของวัน รับเพิ่ม +10 🪙!
+    const loggedTodayRes = await turso.execute({
+      sql: `SELECT COUNT(*) AS cnt FROM weight_logs WHERE user_id = ? AND date(logged_at) = date('now')`,
+      args: [userId],
+    });
+    const dailyLogBonus = Number(loggedTodayRes.rows[0]?.cnt ?? 0) === 0 ? 10 : 0;
+    const earnedPoints = progressBonus + dailyLogBonus;
 
     await turso.execute({
       sql: `UPDATE season_entries SET current_val = ?, max_progress_awarded = ?, updated_at = CURRENT_TIMESTAMP WHERE season_id = ? AND user_id = ?`,
@@ -229,7 +259,12 @@ export async function POST(req: Request) {
     });
 
     const nextPoints = Number(user.points ?? 100) + earnedPoints;
-    if (earnedPoints > 0) {
+    if (!meta.isCumulative) {
+      await turso.execute({
+        sql: `UPDATE users SET points = ?, body_weight = ? WHERE id = ?`,
+        args: [nextPoints, nextVal, userId],
+      });
+    } else if (earnedPoints > 0) {
       await turso.execute({
         sql: `UPDATE users SET points = ? WHERE id = ?`,
         args: [nextPoints, userId],
@@ -239,6 +274,87 @@ export async function POST(req: Request) {
     const isGoodProgress =
       (goalType === 'weight_loss' && diff < 0) ||
       (goalType !== 'weight_loss' && diff > 0);
+    const isRegressed =
+      (goalType === 'weight_loss' && diff > 0) ||
+      (!meta.isCumulative && goalType !== 'weight_loss' && diff < 0);
+
+    // =========================================================================
+    // 🤝 ระบบเล่นแชร์ปันผลสายเชียร์ (Cheer Dividend) & แทงสวนแกล้งเพื่อน (Sabotage Bounty)
+    // =========================================================================
+    const dividends: Array<{
+      userId: number;
+      name: string;
+      emoji: string;
+      kind: 'cheer' | 'tempt';
+      stacks: number;
+      payout: number;
+      jackpot?: boolean;
+    }> = [];
+
+    if (isGoodProgress || progressBonus > 0 || isRegressed) {
+      const backersRes = await turso.execute({
+        sql: `
+          SELECT i.sender_id, i.kind, COUNT(*) AS cnt, u.name, u.avatar_emoji
+          FROM interactions i
+          JOIN users u ON u.id = i.sender_id
+          WHERE i.target_user_id = ?
+            AND i.dividend_claimed = 0
+            AND i.sender_id IS NOT NULL
+            AND i.sender_id != ?
+          GROUP BY i.sender_id, i.kind
+        `,
+        args: [userId, userId],
+      });
+
+      const shareBonusFromProgress = Math.round(progressBonus * 0.25);
+
+      for (const bRow of backersRes.rows) {
+        const sid = Number(bRow.sender_id);
+        const bKind = String(bRow.kind) === 'tempt' ? 'tempt' : 'cheer';
+        const stacks = Math.min(3, Math.max(1, Number(bRow.cnt)));
+
+        if ((isGoodProgress || progressBonus > 0) && bKind === 'cheer') {
+          // เพื่อนพัฒนาขึ้น/ได้แต้ม -> คนส่งไฟได้ปันผลเหมือนเล่นแชร์! (+8🪙/ดวง + 25% แต้มความคืบหน้าเพื่อน สูงสุด 60🪙)
+          const payout = Math.min(60, stacks * 8 + shareBonusFromProgress);
+          await turso.execute({
+            sql: `UPDATE users SET points = points + ? WHERE id = ?`,
+            args: [payout, sid],
+          });
+          dividends.push({
+            userId: sid,
+            name: String(bRow.name),
+            emoji: String(bRow.avatar_emoji),
+            kind: 'cheer',
+            stacks,
+            payout,
+          });
+        } else if (isRegressed && bKind === 'tempt') {
+          // เพื่อนพัฒนาถอยหลัง -> สายมารที่ส่งของกินแกล้งรับทรัพย์! (ถ้าร่วงเข้าซุ้มอาหารรับแจ็กพอต 20🪙/ชิ้น!)
+          const perTempt = isInFoodStall ? 20 : 12;
+          const payout = Math.min(60, stacks * perTempt);
+          await turso.execute({
+            sql: `UPDATE users SET points = points + ? WHERE id = ?`,
+            args: [payout, sid],
+          });
+          dividends.push({
+            userId: sid,
+            name: String(bRow.name),
+            emoji: String(bRow.avatar_emoji),
+            kind: 'tempt',
+            stacks,
+            payout,
+            jackpot: isInFoodStall,
+          });
+        }
+      }
+
+      // เคลียร์รอบบิลเชียร์/แกล้งของตานี้ เพื่อเปิดรอบลงขันใหม่ในการอัปเดตครั้งถัดไป!
+      await turso.execute({
+        sql: `UPDATE interactions SET dividend_claimed = 1 WHERE target_user_id = ? AND dividend_claimed = 0`,
+        args: [userId],
+      });
+    }
+
     const baseRoast = isGoodProgress
       ? ROAST_GOOD[Math.floor(Math.random() * ROAST_GOOD.length)]
       : diff === 0
@@ -260,7 +376,10 @@ export async function POST(req: Request) {
       roast: roastText,
       progressPct: nextPct,
       isInFoodStall,
+      progressBonus,
+      dailyLogBonus,
       earnedPoints,
+      dividends,
       points: nextPoints,
       currentVal: nextVal,
     });
