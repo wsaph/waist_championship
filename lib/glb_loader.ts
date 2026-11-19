@@ -95,11 +95,17 @@ export const PET_GLB_MAP: Record<string, string> = {
   bear: '/models/bear.glb',
   pet_bear_shield: '/models/bear.glb',
   cat: '/models/cat.glb',
-  pet_cat_crown: '/models/cat.glb',
   pig: '/models/pig.glb',
   pet_pig_chef: '/models/pig.glb',
   dog: '/models/corgi_pet.glb',
   pet_corgi_cape: '/models/corgi_pet.glb',
+  pet_hamster: '/models/hamster_hero.glb',
+  pet_shiba: '/models/dog_chibi.glb',
+  pet_duckling: '/models/duck_hero.glb',
+  pet_panda: '/models/panda_hero.glb',
+  pet_frog: '/models/frog_hero.glb',
+  pet_capybara: '/models/capybara_hero.glb',
+  pet_seal: '/models/seal_hero.glb',
 };
 
 const gltfCache = new Map<string, Promise<GLTF>>();

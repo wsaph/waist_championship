@@ -214,14 +214,17 @@ body {
 
 .player-tag {
   position: absolute;
-  transform: translate(-50%, -100%);
+  left: 0;
+  top: 0;
+  will-change: transform;
+  transform: translate3d(var(--tag-x, -9999px), var(--tag-y, -9999px), 0) translate(-50%, -100%);
   transition: opacity 0.2s ease;
   pointer-events: auto;
   cursor: pointer;
 }
 .player-tag:hover {
   z-index: 50 !important;
-  transform: translate(-50%, -104%) scale(1.05);
+  transform: translate3d(var(--tag-x, -9999px), var(--tag-y, -9999px), 0) translate(-50%, -104%) scale(1.05);
 }
 
 @keyframes thoughtFloat {
@@ -260,6 +263,119 @@ body {
 }
 .shake-active {
   animation: screenShake 0.45s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+@keyframes gachaCapsuleShake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  20% { transform: translate(-6px, -4px) rotate(-8deg) scale(1.04); }
+  40% { transform: translate(6px, 2px) rotate(8deg) scale(1.06); }
+  60% { transform: translate(-5px, -3px) rotate(-6deg) scale(1.05); }
+  80% { transform: translate(5px, 2px) rotate(6deg) scale(1.07); }
+}
+.gacha-shake {
+  animation: gachaCapsuleShake 0.42s ease-in-out infinite;
+}
+
+@keyframes gachaMegaShake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1.12); }
+  15% { transform: translate(-12px, -8px) rotate(-14deg) scale(1.18); }
+  30% { transform: translate(12px, 6px) rotate(14deg) scale(1.22); }
+  45% { transform: translate(-10px, 8px) rotate(-12deg) scale(1.16); }
+  60% { transform: translate(10px, -8px) rotate(12deg) scale(1.24); }
+  75% { transform: translate(-8px, 5px) rotate(-10deg) scale(1.2); }
+}
+.gacha-mega-shake {
+  animation: gachaMegaShake 0.24s ease-in-out infinite;
+}
+
+@keyframes gachaRaysSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+.gacha-rays-spin {
+  animation: gachaRaysSpin 9s linear infinite;
+}
+
+@keyframes gachaPopIn {
+  0% { opacity: 0; transform: scale(0.35) translateY(30px); }
+  65% { opacity: 1; transform: scale(1.08) translateY(-4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.gacha-pop-in {
+  animation: gachaPopIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes nnkRuneSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.nnk-rune-spin {
+  animation: nnkRuneSpin 18s linear infinite;
+}
+.nnk-rune-spin-rev {
+  animation: nnkRuneSpin 12s linear infinite reverse;
+}
+.nnk-rune-spin-fast {
+  animation: nnkRuneSpin 4.5s linear infinite;
+}
+
+@keyframes nnkFlashBurst {
+  0% { opacity: 0; transform: scale(0.4); }
+  25% { opacity: 0.95; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+.nnk-flash-burst {
+  animation: nnkFlashBurst 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes nnkCardReveal {
+  0% {
+    opacity: 0;
+    transform: perspective(700px) rotateY(75deg) scale(0.65) translateY(24px);
+  }
+  65% {
+    opacity: 1;
+    transform: perspective(700px) rotateY(-6deg) scale(1.04) translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(700px) rotateY(0deg) scale(1) translateY(0);
+  }
+}
+.nnk-card-reveal {
+  opacity: 0;
+  animation: nnkCardReveal 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes nnkShimmer {
+  0% { transform: translateX(-140%) skewX(-22deg); }
+  100% { transform: translateX(240%) skewX(-22deg); }
+}
+.nnk-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+  animation: nnkShimmer 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes nnkOrbPulse {
+  0%, 100% { transform: scale(0.92); filter: brightness(1); }
+  50% { transform: scale(1.18); filter: brightness(1.45); }
+}
+.nnk-orb-pulse {
+  animation: nnkOrbPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes nnkBeamRise {
+  0% { opacity: 0.25; transform: scaleY(0.7); }
+  50% { opacity: 0.85; transform: scaleY(1.08); }
+  100% { opacity: 0.25; transform: scaleY(0.7); }
+}
+.nnk-beam-rise {
+  animation: nnkBeamRise 1.6s ease-in-out infinite;
+  transform-origin: bottom center;
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }

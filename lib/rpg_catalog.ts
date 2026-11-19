@@ -4,10 +4,37 @@ import {
   type AnimeCategoryId,
   type AnimeCategoryMeta,
 } from '@/lib/anime_catalog';
+import {
+  MONSTER_CATEGORIES,
+  MONSTER_LIST,
+  type MonsterCategoryId,
+  type MonsterCategoryMeta,
+} from '@/lib/monster_catalog';
+import {
+  JOB_CATEGORIES,
+  JOB_LIST,
+  type JobCategoryId,
+  type JobCategoryMeta,
+} from '@/lib/job_catalog';
+import { EXTRA_SHOP_ITEMS, EXTRA_FREE_ITEM_IDS } from '@/lib/extra_shop_items';
 
-export { ANIME_CATEGORIES, ANIME_LIST, type AnimeCategoryId, type AnimeCategoryMeta };
+export {
+  ANIME_CATEGORIES,
+  ANIME_LIST,
+  MONSTER_CATEGORIES,
+  MONSTER_LIST,
+  JOB_CATEGORIES,
+  JOB_LIST,
+  type AnimeCategoryId,
+  type AnimeCategoryMeta,
+  type MonsterCategoryId,
+  type MonsterCategoryMeta,
+  type JobCategoryId,
+  type JobCategoryMeta,
+};
 
 export type GoalType =
+  | 'none'
   | 'weight_loss'
   | 'weight_gain'
   | 'muscle_gain'
@@ -26,6 +53,16 @@ export interface GoalTypeMeta {
 }
 
 export const GOAL_TYPES: GoalTypeMeta[] = [
+  {
+    id: 'none',
+    label: 'ไม่รับภารกิจเสริม (แข่ง Step Challenge อย่างเดียว)',
+    shortTag: 'ไม่มีภารกิจเสริม',
+    unit: 'ก้าว',
+    icon: '👟',
+    badgeColor: '#64748B',
+    isCumulative: true,
+    description: 'เน้นแข่งสะสมก้าวเดินหลักอย่างเดียว ไม่ต้องตั้งเป้าหมายเสริม (กลับมาเลือกทีหลังได้)',
+  },
   {
     id: 'weight_loss',
     label: 'ลดน้ำหนัก (Weight Loss)',
@@ -79,7 +116,11 @@ export const GOAL_TYPES: GoalTypeMeta[] = [
 ];
 
 export function getGoalTypeMeta(goalType?: string): GoalTypeMeta {
-  return GOAL_TYPES.find((g) => g.id === goalType) || GOAL_TYPES[0];
+  return (
+    GOAL_TYPES.find((g) => g.id === goalType) ||
+    GOAL_TYPES.find((g) => g.id === 'weight_loss') ||
+    GOAL_TYPES[0]
+  );
 }
 
 export function computeGoalProgress(
@@ -88,6 +129,9 @@ export function computeGoalProgress(
   currentVal: number,
   targetVal: number
 ): { pct: number; diffLabel: string; isInFoodStall: boolean } {
+  if (goalType === 'none') {
+    return { pct: 0, diffLabel: '👟 Step Challenge', isInFoodStall: false };
+  }
   const meta = getGoalTypeMeta(goalType);
   let rawPct = 0;
   let diffLabel = '';
@@ -124,6 +168,46 @@ export function computeGoalProgress(
   return { pct: clamped, diffLabel, isInFoodStall };
 }
 
+export const SIDE_QUEST_SEASON_CAP = 500;
+
+/**
+ * คำนวณเหรียญสะสมสูงสุดที่ควรได้รับจาก "ภารกิจรอง" ตามปริมาณที่ทำได้จริง (ไม่สน % เป้าที่ตั้งเอง)
+ * เพดานสูงสุด 500 🪙/ซีซั่น เพื่อป้องกันการตั้งเป้าง่ายเกินไปจนปั๊มกาชาเฟ้อ
+ */
+export function computeSideQuestCoins(
+  goalType: string,
+  startVal: number,
+  currentVal: number
+): number {
+  if (goalType === 'weight_loss') {
+    const achievedKg = Math.max(0, startVal - currentVal);
+    return Math.min(SIDE_QUEST_SEASON_CAP, Math.floor(achievedKg * 80));
+  }
+  if (goalType === 'weight_gain' || goalType === 'muscle_gain') {
+    const achievedKg = Math.max(0, currentVal - startVal);
+    return Math.min(SIDE_QUEST_SEASON_CAP, Math.floor(achievedKg * 80));
+  }
+  if (goalType === 'distance_accumulate') {
+    const achievedKm = Math.max(0, currentVal);
+    return Math.min(SIDE_QUEST_SEASON_CAP, Math.floor(achievedKm * 10));
+  }
+  if (goalType === 'reps_accumulate') {
+    const achievedReps = Math.max(0, currentVal);
+    return Math.min(SIDE_QUEST_SEASON_CAP, Math.floor(achievedReps / 10));
+  }
+  return 0;
+}
+
+export function getSideQuestRewardHint(goalType?: string): string {
+  if (goalType === 'distance_accumulate') {
+    return 'สะสมจริง +10 💰/กม. (สูงสุด 500 💰/ซีซั่น) + โบนัสส่งผลรายวัน +10 💰';
+  }
+  if (goalType === 'reps_accumulate') {
+    return 'สะสมจริง +1 💰/10 ครั้ง (สูงสุด 500 💰/ซีซั่น) + โบนัสส่งผลรายวัน +10 💰';
+  }
+  return 'ทำได้จริง +80 💰/กก. (สูงสุด 500 💰/ซีซั่น) + โบนัสส่งผลรายวัน +10 💰';
+}
+
 export type GenderType = 'female' | 'male';
 
 export interface BmiMeta {
@@ -144,7 +228,7 @@ export function computeBmiMeta(
   heightCm: number,
   gender: GenderType = 'female'
 ): BmiMeta {
-  const valid = Number.isFinite(weightKg) && Number.isFinite(heightCm) && weightKg > 15 && heightCm >= 80 && heightCm <= 250;
+  const valid = Number.isFinite(weightKg) && Number.isFinite(heightCm) && weightKg >= 16 && weightKg <= 300 && heightCm >= 80 && heightCm <= 250;
   if (!valid) {
     return {
       isValid: false,
@@ -319,7 +403,25 @@ export type HeroHeadStyle =
   | 'anime_ninja_mask_silver'
   | 'anime_chainsaw_head'
   | 'anime_korosensei_smile'
-  | 'anime_jotaro_cap';
+  | 'anime_jotaro_cap'
+  | 'monster_thai_ghost'
+  | 'monster_sheet_ghost'
+  | 'monster_jiangshi'
+  | 'monster_mummy'
+  | 'monster_pumpkin'
+  | 'monster_vampire'
+  | 'monster_frankenstein'
+  | 'monster_kaiju_spikes'
+  | 'monster_alien_eyes'
+  | 'monster_yokai'
+  | 'job_knight_helm'
+  | 'job_samurai_kabuto'
+  | 'job_wizard_hat'
+  | 'job_priest_mitre'
+  | 'job_assassin_hood'
+  | 'job_cowboy_ranger'
+  | 'job_mechanic_goggles'
+  | 'job_astronaut_chef';
 
 export interface SpeciesOption {
   id: string;
@@ -371,6 +473,8 @@ export interface SpeciesOption {
   isHero?: boolean;
   heroCategory?: HeroCategoryId;
   animeCategory?: AnimeCategoryId;
+  monsterCategory?: MonsterCategoryId;
+  jobCategory?: JobCategoryId;
   heroStyle?: HeroHeadStyle;
   skinHex?: string;
   defaultArmor?: string;
@@ -611,18 +715,34 @@ export function isAnimeSpecies(breedOrSpecies?: string): boolean {
   return ANIME_LIST.some((a) => a.id === breedOrSpecies);
 }
 
+export function isMonsterSpecies(breedOrSpecies?: string): boolean {
+  if (!breedOrSpecies) return false;
+  if (breedOrSpecies.startsWith('monster_')) return true;
+  return MONSTER_LIST.some((m) => m.id === breedOrSpecies);
+}
+
+export function isJobSpecies(breedOrSpecies?: string): boolean {
+  if (!breedOrSpecies) return false;
+  if (breedOrSpecies.startsWith('job_')) return true;
+  return JOB_LIST.some((j) => j.id === breedOrSpecies);
+}
+
 export function isHeroSpecies(breedOrSpecies?: string): boolean {
   if (!breedOrSpecies) return false;
   if (
     breedOrSpecies.startsWith('hero_') ||
     breedOrSpecies.startsWith('disney_') ||
-    breedOrSpecies.startsWith('anime_')
+    breedOrSpecies.startsWith('anime_') ||
+    breedOrSpecies.startsWith('monster_') ||
+    breedOrSpecies.startsWith('job_')
   ) {
     return true;
   }
   return (
     HERO_LIST.some((h) => h.id === breedOrSpecies) ||
-    ANIME_LIST.some((a) => a.id === breedOrSpecies)
+    ANIME_LIST.some((a) => a.id === breedOrSpecies) ||
+    MONSTER_LIST.some((m) => m.id === breedOrSpecies) ||
+    JOB_LIST.some((j) => j.id === breedOrSpecies)
   );
 }
 
@@ -632,6 +752,16 @@ export function resolveBreedOption(breedOrSpecies?: string): SpeciesOption {
   if (foundHero) return foundHero;
   const foundAnime = ANIME_LIST.find((a) => a.id === mappedId);
   if (foundAnime) return foundAnime;
+  const foundMonster = MONSTER_LIST.find((m) => m.id === mappedId);
+  if (foundMonster) return foundMonster;
+  const foundJob = JOB_LIST.find((j) => j.id === mappedId);
+  if (foundJob) return foundJob;
+  if (mappedId.startsWith('job_')) {
+    return JOB_LIST[0];
+  }
+  if (mappedId.startsWith('monster_')) {
+    return MONSTER_LIST[0];
+  }
   if (mappedId.startsWith('anime_')) {
     return ANIME_LIST[0];
   }
@@ -642,7 +772,7 @@ export function resolveBreedOption(breedOrSpecies?: string): SpeciesOption {
   return found ?? SPECIES_LIST.find((b) => b.id === 'bunny') ?? SPECIES_LIST[0];
 }
 
-export type ShopCategory = 'hat' | 'face' | 'armor' | 'weapon' | 'wings' | 'aura' | 'pet' | 'mount';
+export type ShopCategory = 'hat' | 'face' | 'armor' | 'weapon' | 'wings' | 'aura' | 'pet' | 'mount' | 'marker';
 export type GachaRarity = 'rare' | 'epic' | 'legendary';
 export type PropColorKey = 'hat' | 'face' | 'shirt' | 'pants' | 'weapon' | 'wings' | 'aura' | 'pet' | 'mount';
 export type PropColorMap = Partial<Record<PropColorKey, string>>;
@@ -667,6 +797,19 @@ export function parsePropColors(raw: unknown): PropColorMap {
 }
 
 export const GACHA_SPIN_COST = 180;
+export const GACHA_MULTI_COUNT = 8;
+export const GACHA_MULTI_COST = 1280;
+export const GACHA_DUPLICATE_REFUND: Record<GachaRarity, number> = {
+  rare: 50,
+  epic: 90,
+  legendary: 150,
+};
+
+export interface GachaRollResult {
+  item: ShopItem;
+  isDuplicate: boolean;
+  refundPoints: number;
+}
 
 export interface ShopItem {
   id: string;
@@ -723,7 +866,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'weapon_giant_fork', category: 'weapon', name: 'ไอศกรีมซอฟต์เสิร์ฟสตรอว์เบอร์รี', icon: '🍦', cost: 70, desc: 'ของหวานรางวัลวันชีทเดย์', colorHex: 0xF472B6, accentHex: 0xFDE68A },
   { id: 'weapon_light_sword', category: 'weapon', name: 'ขวดเวย์โปรตีนเชค', icon: '🥤', cost: 140, desc: 'เชคเกอร์โปรตีนสีฟ้าสดชื่นหลังเวิร์คเอาท์', colorHex: 0x38BDF8, accentHex: 0xFACC15 },
   { id: 'weapon_broom', category: 'weapon', name: 'ไม้แบดมินตันสปอร์ต', icon: '🏸', cost: 140, desc: 'พร้อมตีแบดเบิร์นแคลอรี่กับเพื่อน', colorHex: 0xEF4444, accentHex: 0xF8FAFC },
-  { id: 'weapon_magic_staff', category: 'weapon', name: 'แก้วชานมไข่มุกจัมโบ้', icon: '🧋', cost: 150, desc: 'ชานมไข่มุกแก้วโปรดเพิ่มพลังใจ', colorHex: 0xFDBA74, accentHex: 0x18181B },
+  { id: 'weapon_magic_staff', category: 'weapon', name: 'แก้วชานมไข่มุกจัมโบ้', icon: '🥤', cost: 150, desc: 'ชานมไข่มุกแก้วโปรดเพิ่มพลังใจ', colorHex: 0xFDBA74, accentHex: 0x18181B },
   { id: 'weapon_ms_lollipop', category: 'weapon', name: 'อมยิ้มสายรุ้งยักษ์ลูดิเบรียม', icon: '🍭', cost: 160, desc: 'อมยิ้มกลมลายเกลียวหวานแหววอันยักษ์ (สไตล์ MapleSim)', colorHex: 0xF472B6, accentHex: 0x38BDF8 },
 
   // Category 5: Back / Bag (150..850 🪙)
@@ -733,7 +876,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'wings_ms_teddy_pack', category: 'wings', name: 'เป้ตุ๊กตาหมีน้อยเกาะหลัง', icon: '🧸', cost: 390, desc: 'ตุ๊กตาหมีสีคาราเมลกอดคอเกาะหลังไปทุกที่ (สไตล์ MapleSim)', colorHex: 0xB45309, accentHex: 0xFEF3C7 },
   { id: 'wings_fairy', category: 'wings', name: 'ปีกผีเสื้อแฟนซีพาสเทล', icon: '🦋', cost: 420, desc: 'พรอพปีกผีเสื้อสีมิ้นท์สดใส', colorHex: 0x6EE7B7, accentHex: 0xFDE68A },
   { id: 'wings_crystal', category: 'wings', name: 'โบว์ริบบิ้นยักษ์ติดหลัง', icon: '🎀', cost: 420, desc: 'โบว์สีฟ้าพาสเทลติดหลังสุดแบ๊ว', colorHex: 0x38BDF8, accentHex: 0xE0F2FE },
-  { id: 'wings_gold_archangel', category: 'wings', name: 'ปีกนางฟ้าปาร์ตี้สีทอง', icon: '🪽', cost: 850, desc: 'ปีกขนนกสีทองอร่ามระดับมหาเทพ! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xFACC15, accentHex: 0xFEF08A },
+  { id: 'wings_gold_archangel', category: 'wings', name: 'ปีกนางฟ้าปาร์ตี้สีทอง', icon: '👼', cost: 850, desc: 'ปีกขนนกสีทองอร่ามระดับมหาเทพ! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xFACC15, accentHex: 0xFEF08A },
 
   // Category 6: Aura / Effect (450..720 🪙)
   { id: 'aura_none', category: 'aura', name: 'ไม่มีออร่า', icon: '➖', cost: 0, desc: 'โหมดประหยัดพลังงาน', colorHex: 0x000000, accentHex: 0x000000 },
@@ -742,24 +885,52 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'aura_sakura', category: 'aura', name: 'กลีบซากุระปลิว', icon: '🌸', cost: 480, desc: 'กลีบดอกไม้ชมพูละมุนรอบตัว', colorHex: 0xF472B6, accentHex: 0xFBCFE8 },
   { id: 'aura_flame', category: 'aura', name: 'ออร่าเปลวไฟนักสู้', icon: '🔥', cost: 720, desc: 'ไฟลุกโชนรอบตัวเผาผลาญแคลอรี่! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF97316, accentHex: 0xEF4444 },
 
-  // Category 7: Pet + Pet Gear (180..700 🪙)
+  // Category 7: Pet + Pet Gear — 20 ชนิด! (ฟรี 2 + ร้านค้า 14 + กาชาปอง 4)
   { id: 'pet_none', category: 'pet', name: 'ไม่มีสัตว์เลี้ยงเดินตาม', icon: '➖', cost: 0, desc: 'ลุยเดี่ยวไม่ง้อใคร', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'pet_fox_scarf', category: 'pet', name: 'จิ้งจอกจิบิอัศวิน', icon: '🦊', cost: 0, desc: 'จิ้งจอกส้มจิบิพันผ้าคลุมวิ่งเคียงข้าง (ฟรี)', colorHex: 0xEA580C, accentHex: 0x2563EB },
   { id: 'pet_bear_shield', category: 'pet', name: 'หมีจิบิผู้พิทักษ์', icon: '🐻‍❄️', cost: 0, desc: 'หมีน้อยจิบิคอยคุ้มกันเข้าเส้นชัย (ฟรี)', colorHex: 0xF1F5F9, accentHex: 0xFACC15 },
   { id: 'pet_corgi_cape', category: 'pet', name: 'คอร์กี้ผ้าคลุมฮีโร่', icon: '🐕', cost: 180, desc: 'น้องหมาคอร์กี้ใส่ผ้าคลุมแดงวิ่งนำ', colorHex: 0xF59E0B, accentHex: 0xEF4444 },
-  { id: 'pet_cat_crown', category: 'pet', name: 'แมวส้มสวมมงกุฎ', icon: '🐈', cost: 380, desc: 'แมวส้มผู้สูงศักดิ์ใส่สร้อยทอง', colorHex: 0xFB923C, accentHex: 0xFACC15 },
+  { id: 'pet_orange_tabby', category: 'pet', name: 'แมวส้มอ้วนกระดิ่งทอง', icon: '🐈', cost: 180, desc: 'น้องแมวส้มลายสลิดพุงกลมผูกกระดิ่งทอง (ย้อมสีได้!)', colorHex: 0xFB923C, accentHex: 0xFACC15 },
+  { id: 'pet_hamster', category: 'pet', name: 'แฮมสเตอร์แก้มป่อง', icon: '🐹', cost: 200, desc: 'หนูแฮมสเตอร์ตัวจิ๋วตุนเมล็ดทานตะวันเต็มแก้ม', colorHex: 0xFBBF24, accentHex: 0xFEF3C7 },
+  { id: 'pet_shiba', category: 'pet', name: 'ชิบะอินุผ้าพันคอแดง', icon: '🐶', cost: 220, desc: 'น้องชิบะยิ้มหวานพันผ้าพันคอแดงสุดคิวท์', colorHex: 0xD97706, accentHex: 0xEF4444 },
+  { id: 'pet_duckling', category: 'pet', name: 'ลูกเป็ดเหลืองจอมซน', icon: '🐥', cost: 240, desc: 'ลูกเป็ดสีเหลืองสดเดินต๊อกแต๊กตามติดไม่ห่าง', colorHex: 0xFACC15, accentHex: 0xF97316 },
+  { id: 'pet_panda', category: 'pet', name: 'แพนด้าจิ๋วคาบไผ่', icon: '🐼', cost: 260, desc: 'หมีแพนด้ากลมดุ๊กดิ๊กคาบใบไผ่เขียวสดชื่น', colorHex: 0xF8FAFC, accentHex: 0x18181B },
+  { id: 'pet_frog', category: 'pet', name: 'กบเขียวตาโตเด้งดึ๋ง', icon: '🐸', cost: 280, desc: 'กบน้อยสีเขียวมะนาวตาโตกระโดดเชียร์ข้างสนาม', colorHex: 0x22C55E, accentHex: 0xDCFCE7 },
+  { id: 'pet_capybara', category: 'pet', name: 'คาปิบาร่าวางส้มบนหัว', icon: '🦫', cost: 300, desc: 'น้องคาปิบาร่าหน้านิ่งวางส้มจี๊ดบนหัวสุดชิล', colorHex: 0xA16207, accentHex: 0xF97316 },
+  { id: 'pet_penguin', category: 'pet', name: 'เพนกวินจิ๋วหูกระต่าย', icon: '🐧', cost: 320, desc: 'เพนกวินอ้วนกลมผูกหูกระต่ายแดงเดินเตาะแตะ', colorHex: 0x1E293B, accentHex: 0xEF4444 },
+  { id: 'pet_seal', category: 'pet', name: 'แมวน้ำอุ๋งๆ สีขาว', icon: '🦭', cost: 340, desc: 'แมวน้ำหิมะตัวนุ่มนิ่มคลานดุ๊กดิ๊กตามเจ้านาย', colorHex: 0xE2E8F0, accentHex: 0x38BDF8 },
+  { id: 'pet_black_cat', category: 'pet', name: 'แมวดำหมวกแม่มด', icon: '🐈‍⬛', cost: 360, desc: 'แมวดำตาสีทองสวมหมวกแม่มดจิ๋วสุดลึกลับ', colorHex: 0x1E293B, accentHex: 0xA855F7 },
+  { id: 'pet_cat_crown', category: 'pet', name: 'แมวส้มสวมมงกุฎ', icon: '👑', cost: 380, desc: 'แมวส้มผู้สูงศักดิ์สวมมงกุฎทองคำ', colorHex: 0xFB923C, accentHex: 0xFACC15 },
   { id: 'pet_pig_chef', category: 'pet', name: 'หมูจิ๋วหมวกเชฟทอง', icon: '🐖', cost: 420, desc: 'ลูกหมูสีชมพูใส่หมวกเชฟคอยเชียร์', colorHex: 0xF472B6, accentHex: 0xFACC15 },
   { id: 'pet_bunny_wings', category: 'pet', name: 'กระต่ายน้อยติดปีกนางฟ้า', icon: '🐇', cost: 700, desc: 'กระต่ายขาวติดปีกนางฟ้าบินตามเจ้านาย! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF8FAFC, accentHex: 0xF472B6 },
 
-  // Category 8: Mounts (220..900 🪙)
+  // Category 8: Mounts — 30 ชนิด! (ฟรี 1 + ร้านค้า 20 + กาชาปอง 9)
   { id: 'mount_none', category: 'mount', name: 'เดิน-วิ่งเองฟิตจัด', icon: '➖', cost: 0, desc: 'วิ่งสองขาเบิร์นแคลอรี่ด้วยตัวเอง', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'mount_cloud', category: 'mount', name: 'เมฆวิเศษสีขาวนุ่มฟู', icon: '☁️', cost: 0, desc: 'ก้อนเมฆปุยนุ่นลอยฟ้านุ่มนิ่มสไตล์ MapleSim (ฟรี)', colorHex: 0xFFFFFF, accentHex: 0xBAE6FD },
+  // 🟢 Tier 1: สายกิน & ชิลริมหาด (180..280)
+  { id: 'mount_skateboard', category: 'mount', name: 'สเก็ตบอร์ดไฟนีออน', icon: '🛹', cost: 180, desc: 'สเก็ตบอร์ดสายสตรีทติดล้อไฟนีออนไถซิ่งเข้าเส้นชัย', colorHex: 0x38BDF8, accentHex: 0xF472B6 },
+  { id: 'mount_duck_ring', category: 'mount', name: 'ห่วงยางเป็ดเหลืองยักษ์', icon: '🦆', cost: 200, desc: 'ห่วงยางเป็ดเหลืองริมหาดสุดคิวท์ ลอยเด้งดึ๋งกลางสนาม', colorHex: 0xFACC15, accentHex: 0xF97316 },
   { id: 'mount_sunny_egg', category: 'mount', name: 'พรมไข่ดาวเยิ้มลอยฟ้า', icon: '🍳', cost: 220, desc: 'ไข่ดาวขอบกรอบไข่แดงเด้งดึ๋งขี่ลอยเหนือพื้น (MapleSim)', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
   { id: 'mount_pudding', category: 'mount', name: 'พุดดิ้งคาราเมลจานยักษ์', icon: '🍮', cost: 250, desc: 'พุดดิ้งเด้งดึ๋งราดซอสคาราเมลแต่งคุกกี้โอรีโอ้ (MapleSim)', colorHex: 0xFBBF24, accentHex: 0x78350F },
+  { id: 'mount_donut', category: 'mount', name: 'โดนัทสตรอว์เบอร์รีลอยฟ้า', icon: '🍩', cost: 260, desc: 'โดนัทเคลือบชมพูโรยเกล็ดน้ำตาลหลากสีลอยนุ่มนิ่ม', colorHex: 0xF472B6, accentHex: 0xFDE047 },
+  { id: 'mount_tricycle', category: 'mount', name: 'จักรยานสามล้อวินเทจ', icon: '🚲', cost: 280, desc: 'จักรยานสามล้อปั่นชิลๆ พร้อมตะกร้าหน้าสุดน่ารัก', colorHex: 0xEF4444, accentHex: 0xFACC15 },
+  // 🔵 Tier 2: สัตว์น่ารัก & สายซิ่ง (320..480)
+  { id: 'mount_sea_turtle', category: 'mount', name: 'เต่าทะเลจิบิโต้คลื่น', icon: '🐢', cost: 320, desc: 'น้องเต่ากระดองเขียวว่ายโต้คลื่นพาลุยไปข้างหน้า', colorHex: 0x22C55E, accentHex: 0x38BDF8 },
+  { id: 'mount_scooter', category: 'mount', name: 'สกู๊ตเตอร์ไฟฟ้าเทอร์โบ', icon: '🛴', cost: 350, desc: 'สกู๊ตเตอร์ไฟฟ้าแถบไฟนีออนสีฟ้า ซิ่งเงียบแต่แรงจัด', colorHex: 0x1E293B, accentHex: 0x38BDF8 },
+  { id: 'mount_moodeng', category: 'mount', name: 'หมูเด้งยักษ์พุงกระเพื่อม', icon: '🦛', cost: 380, desc: 'ขี่น้องหมูเด้งฮิปโปแคระแก้มชมพูเด้งดึ๋งขโมยซีนทั้งลู่!', colorHex: 0x94A3B8, accentHex: 0xF472B6 },
   { id: 'mount_green_slime', category: 'mount', name: 'บิ๊กสไลม์เขียวเด้งดึ๋ง', icon: '💧', cost: 420, desc: 'ขี่สไลม์ยักษ์สีเขียวมะนาวกระโดดดึ๋งดั๋งเข้าเส้นชัย (MapleSim)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7 },
+  { id: 'mount_corgi', category: 'mount', name: 'น้องหมาคอร์กี้ขาสั้นจัมโบ้', icon: '🐕', cost: 450, desc: 'คอร์กี้ตัวกลมก้นเด้งสับขาสั้นวิ่งรัวๆ น่ารักเกินต้าน!', colorHex: 0xF59E0B, accentHex: 0xFFFFFF },
   { id: 'mount_red_pig', category: 'mount', name: 'หมูแดงผูกโบว์ซิ่งสายฟ้า', icon: '🐷', cost: 480, desc: 'หมูสีแดงผูกริบบิ้นฟ้าในตำนานของนักผจญภัย (MapleSim)', colorHex: 0xEF4444, accentHex: 0x38BDF8 },
+  // 🟣 Tier 3: แฟนตาซี & พาหนะสุดเท่ (520..750)
   { id: 'mount_mochi_bunny', category: 'mount', name: 'กระต่ายโมจิซ้อนสองชั้น', icon: '🐰', cost: 520, desc: 'ก้อนโมจิกระต่ายขาวนุ่มนิ่มซ้อนตัวเด้งดึ๋ง (MapleSim)', colorHex: 0xFFFFFF, accentHex: 0x4ADE80 },
-  { id: 'mount_unicorn', category: 'mount', name: 'ยูนิคอร์นขาวพาสเทล', icon: '🦄', cost: 900, desc: 'ม้ายูนิคอร์นบริสุทธิ์เขาทองระดับแรร์สุดหรู! (สะสม ~2 สัปดาห์)', colorHex: 0xFFFFFF, accentHex: 0xC084FC },
+  { id: 'mount_witch_broom', category: 'mount', name: 'ไม้กวาดแม่มดเรืองแสง', icon: '🧹', cost: 560, desc: 'ไม้กวาดเวทมนตร์ห้อยโคมดาวม่วงเหาะฉิวเหนือลู่วิ่ง', colorHex: 0x92400E, accentHex: 0xA855F7 },
+  { id: 'mount_blue_whale', category: 'mount', name: 'วาฬสีน้ำเงินพ่นน้ำพุ', icon: '🐳', cost: 620, desc: 'น้องวาฬยักษ์สีฟ้าพ่นน้ำพุหมุนติ้วลอยแหวกอากาศสุดอลัง', colorHex: 0x2563EB, accentHex: 0xBAE6FD },
+  { id: 'mount_gokart', category: 'mount', name: 'รถโกคาร์ทแชมเปี้ยนสายซิ่ง', icon: '🏎️', cost: 680, desc: 'รถแข่งโกคาร์ทสีแดงติดสปอยเลอร์ซิ่งแซงโค้งทุกคัน!', colorHex: 0xEF4444, accentHex: 0xFACC15 },
+  { id: 'mount_trex', category: 'mount', name: 'ทีเร็กซ์จิบิขาสั้นวิ่งดุ๊กดิ๊ก', icon: '🦖', cost: 750, desc: 'ไดโนเสาร์ทีเร็กซ์เขียวมิ้นท์ขาสั้นวิ่งสับตีนแตกเข้าเส้นชัย!', colorHex: 0x10B981, accentHex: 0xF97316 },
+  // 🟡 Tier 4: ระดับพรีเมียม (900..1,200)
+  { id: 'mount_unicorn', category: 'mount', name: 'ยูนิคอร์นขาวพาสเทล', icon: '🦄', cost: 900, desc: 'ม้ายูนิคอร์นบริสุทธิ์เขาทองระดับแรร์สุดหรู!', colorHex: 0xFFFFFF, accentHex: 0xC084FC },
+  { id: 'mount_rocket_shark', category: 'mount', name: 'ฉลามขาวติดไอพ่นจรวด', icon: '🦈', cost: 1000, desc: 'ฉลามเจ้าสมุทรติดท่อไอพ่นคู่พ่นไฟทะยานเข้าเส้นชัย!', colorHex: 0x64748B, accentHex: 0xF97316 },
+  { id: 'mount_gold_pegasus', category: 'mount', name: 'เพกาซัสทองคำติดปีกนางฟ้า', icon: '🐎', cost: 1200, desc: 'อาชาสวรรค์สีทองอร่ามสยายปีกขนนกโบยบินเหนือทุกสาย!', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
 
   // =========================================================================
   // 🎰 GACHAPON EXCLUSIVE ITEMS (หาซื้อไม่ได้! สุ่มได้จากตู้กาชาปองเท่านั้น!)
@@ -771,8 +942,14 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'weapon_gacha_jumbo_drumstick', category: 'weapon', name: 'น่องไก่ทอดกรอบจัมโบ้', icon: '🍗', cost: 0, desc: 'น่องไก่ทอดสีทองชิ้นยักษ์ยั่วน้ำลาย (เฉพาะกาชาปอง)', colorHex: 0xD97706, accentHex: 0xFEF3C7, isGachaOnly: true, rarity: 'rare' },
   { id: 'hat_gacha_slime_crown', category: 'hat', name: 'สไลม์เขียวนุ่มนิ่มเกาะหัว', icon: '💧', cost: 0, desc: 'น้องสไลม์หยดน้ำสีเขียวมะนาวดุ๊กดิ๊กบนหัว (MapleSim SSB)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7, isGachaOnly: true, rarity: 'rare' },
   { id: 'weapon_gacha_bunny_plush', category: 'weapon', name: 'ตุ๊กตากระต่ายชมพูกอดอุ่น', icon: '🐰', cost: 0, desc: 'ตุ๊กตาผ้ากระต่ายหูยาวถืออุ้มสุดคิวท์ (MapleSim SSB)', colorHex: 0xF9A8D4, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_banana_boat', category: 'mount', name: 'เรือกล้วยบานาน่าโบ๊ท', icon: '🍌', cost: 0, desc: 'เรือกล้วยสีเหลืองสดลอยโต้ลมทะเลสุดมันส์! (Rare กาชาปอง)', colorHex: 0xFACC15, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_butter_toast', category: 'mount', name: 'ขนมปังปิ้งทาเนยลอยฟ้า', icon: '🍞', cost: 0, desc: 'ขนมปังปิ้งขอบกรอบโปะเนยสดก้อนโตลอยหอมฉุย! (Rare กาชาปอง)', colorHex: 0xD97706, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_pepe_frog', category: 'mount', name: 'กบอ้วนเปเป้กระโดดดึ๋ง', icon: '🐸', cost: 0, desc: 'น้องกบอ้วนตาโตบนใบบัวกระโดดเด้งดึ๋งดั๋ง! (Rare กาชาปอง)', colorHex: 0x22C55E, accentHex: 0x86EFAC, isGachaOnly: true, rarity: 'rare' },
+  { id: 'pet_gacha_slime', category: 'pet', name: 'สไลม์คริสตัลเด้งดึ๋ง', icon: '🟢', cost: 0, desc: 'น้องสไลม์ใสสีเขียวมะนาวกระโดดดึ๋งตามข้างตัว! (Rare กาชาปอง)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7, isGachaOnly: true, rarity: 'rare' },
 
   // 💜 EPIC (33%)
+  { id: 'pet_gacha_ghost', category: 'pet', name: 'ผีน้อยน่ารักลอยตาม', icon: '👻', cost: 0, desc: 'ผีน้อยผ้าคลุมขาวตาแป๋วลอยปลิวตามเจ้านาย! (Epic กาชาปอง)', colorHex: 0xF8FAFC, accentHex: 0xC084FC, isGachaOnly: true, rarity: 'epic' },
+  { id: 'pet_gacha_unicorn', category: 'pet', name: 'ลูกยูนิคอร์นพาสเทล', icon: '🦄', cost: 0, desc: 'ลูกม้ายูนิคอร์นเขาทองแผงคอชมพูวิ่งเคียงข้าง! (Epic กาชาปอง)', colorHex: 0xFDF4FF, accentHex: 0xF472B6, isGachaOnly: true, rarity: 'epic' },
   { id: 'armor_gacha_shiba_pajama', category: 'armor', name: 'ชุดนอนพาสเทลกระดุมดาว', icon: '🔮', cost: 0, desc: 'ชุดนอนลาเวนเดอร์พาสเทลสุดนุ่มนิ่ม (เฉพาะกาชาปอง)', colorHex: 0xC084FC, accentHex: 0xFDE047, isGachaOnly: true, rarity: 'epic' },
   { id: 'hat_gacha_angel_halo', category: 'hat', name: 'วงแหวนเทวดาเรืองแสง', icon: '😇', cost: 0, desc: 'วงแหวนทองคำเปล่งแสงลอยเหนือหัว (เฉพาะกาชาปอง)', colorHex: 0xFDE047, accentHex: 0xFEF9C3, isGachaOnly: true, rarity: 'epic' },
   { id: 'wings_gacha_ufo_cape', category: 'wings', name: 'พวงลูกโป่งพาสเทลลอยฟ้า', icon: '🎈', cost: 0, desc: 'ลูกโป่ง 3 สีผูกหลังเด้งดึ๋งเวลาวิ่ง (เฉพาะกาชาปอง)', colorHex: 0xF472B6, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'epic' },
@@ -780,16 +957,34 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'hat_gacha_pepe_hood', category: 'hat', name: 'หมวกเพนกวินราชาเปเป้', icon: '🐧', cost: 0, desc: 'หมวกหัวเพนกวินอ้วนกลมมีปากส้มและมงกุฎจิ๋ว (MapleSim SSB)', colorHex: 0x1D4ED8, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
   { id: 'weapon_gacha_cloud_umbrella', category: 'weapon', name: 'ร่มก้อนเมฆพาสเทลลอยฟ้า', icon: '☂️', cost: 0, desc: 'ร่มโดมสีฟ้าพาสเทลประดับปุยเมฆนุ่มฟู (MapleSim SSB)', colorHex: 0x38BDF8, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'epic' },
   { id: 'mount_gacha_pink_bear', category: 'mount', name: 'หมีชมพูคอปเตอร์ไม้ไผ่', icon: '🐻', cost: 0, desc: 'สัตว์ขี่ตุ๊กตาหมีชมพูติดใบพัดไม้ไผ่หมุนติ้วพาบิน! (MapleSim SSB)', colorHex: 0xF472B6, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
+  { id: 'mount_gacha_cat_bus', category: 'mount', name: 'รถบัสน้องแมวเหมียว', icon: '🐱', cost: 0, desc: 'รถบัสแมวส้มลายเสือตาส่องไฟหน้ารีบวิ่งพาไปเส้นชัย! (Epic กาชาปอง)', colorHex: 0xF97316, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'epic' },
+  { id: 'mount_gacha_magic_carpet', category: 'mount', name: 'พรมวิเศษอะลาดินลอยลม', icon: '🧞', cost: 0, desc: 'พรมวิเศษสีม่วงขลิบทองพู่ 4 มุมลอยพริ้วกลางอากาศ! (Epic กาชาปอง)', colorHex: 0x7C3AED, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
 
   // 🌈 LEGENDARY (12%)
   { id: 'armor_gacha_dino', category: 'armor', name: 'ชุดมาสคอตไดโนเสาร์พุงกลม', icon: '🦖', cost: 0, desc: 'ชุดวันซี่ไดโนเสาร์เขียวมิ้นท์มีหนามหลัง! (Legendary กาชาปอง)', colorHex: 0x10B981, accentHex: 0xF97316, isGachaOnly: true, rarity: 'legendary' },
-  { id: 'armor_gacha_pink_bean', category: 'armor', name: 'ชุดวันซี่พิงก์บีนพุงเด้ง', icon: '🩷', cost: 0, desc: 'ชุดมอนสเตอร์สีชมพูบับเบิ้ลกัมสุดแรร์ในตำนาน! (MapleSim SSB)', colorHex: 0xF472B6, accentHex: 0xFBCFE8, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'armor_gacha_pink_bean', category: 'armor', name: 'ชุดวันซี่พิงก์บีนพุงเด้ง', icon: '💖', cost: 0, desc: 'ชุดมอนสเตอร์สีชมพูบับเบิ้ลกัมสุดแรร์ในตำนาน! (MapleSim SSB)', colorHex: 0xF472B6, accentHex: 0xFBCFE8, isGachaOnly: true, rarity: 'legendary' },
   { id: 'wings_gacha_jetpack', category: 'wings', name: 'เจ็ทแพ็คเทอร์โบพ่นไฟ', icon: '🚀', cost: 0, desc: 'กระเป๋าจรวดคู่พ่นไอพ่นสีฟ้า-ส้มสุดล้ำ! (Legendary กาชาปอง)', colorHex: 0xE2E8F0, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_rainbow', category: 'aura', name: 'ออร่าสายรุ้งปริซึมเจ็ดสี', icon: '🌈', cost: 0, desc: 'วงแหวนสายรุ้ง 5 ชั้นและคริสตัลหลากสีหมุนรอบตัว! (Legendary)', colorHex: 0xEC4899, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_snack_orbit', category: 'aura', name: 'ออร่าโดนัท & ชานมโคจร', icon: '🍩', cost: 0, desc: 'โดนัทเคลือบชมพูและชานม 3D ลอยโคจรรอบพุง! (Legendary)', colorHex: 0xF472B6, accentHex: 0xFBBF24, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_maple_leaves', category: 'aura', name: 'ออร่าพายุใบเมเปิ้ลสีทอง', icon: '🍁', cost: 0, desc: 'ใบเมเปิ้ลสีส้มทองปลิวหมุนวนรอบตัวสุดคลาสสิก! (MapleSim SSB)', colorHex: 0xF97316, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
   { id: 'mount_gacha_red_dragon', category: 'mount', name: 'มังกรแดงจิบิติดปีกเพลิง', icon: '🐉', cost: 0, desc: 'ขี่มังกรแดงเขาทองกระพือปีกบินโฉบเข้าเส้นชัย! (MapleSim Legendary)', colorHex: 0xEF4444, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
   { id: 'mount_gacha_ufo', category: 'mount', name: 'จานบิน UFO ลำแสงนีออน', icon: '🛸', cost: 0, desc: 'ขี่จานบินอวกาศไฟนีออนหมุนรอบลำพร้อมลำแสงแทรกเตอร์! (MapleSim Legendary)', colorHex: 0x94A3B8, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'mount_gacha_phoenix', category: 'mount', name: 'นกฟีนิกซ์เพลิงอมตะ', icon: '🔥', cost: 0, desc: 'พญาฟีนิกซ์สีเพลิงสยายปีกไฟศักดิ์สิทธิ์ทะยานฟ้า! (Legendary กาชาปอง)', colorHex: 0xF97316, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'pet_gacha_dragon', category: 'pet', name: 'ลูกมังกรทองพ่นไฟ', icon: '🐉', cost: 0, desc: 'ลูกมังกรทองคำติดปีกเพลิงบินวนตามเจ้านาย! (Legendary กาชาปอง)', colorHex: 0xF59E0B, accentHex: 0xEF4444, isGachaOnly: true, rarity: 'legendary' },
+
+  // Category 9: Marker (ป้ายจองลู่ 3D — 10 ชนิด! อัปเกรดได้ตั้งแต่ฟรีถึง 1,200 🪙!)
+  { id: 'marker_wood', category: 'marker', name: 'ป้ายไม้ตอกตะปูบ้านๆ', icon: '📍', cost: 0, desc: 'แผ่นไม้ปักดินเอียงนิดๆ จองคิวบนลู่ตอนแวะไปเดินเล่น (ฟรี)', colorHex: 0x92400E, accentHex: 0xFDE68A },
+  { id: 'marker_cone', category: 'marker', name: 'กรวยจราจรจองลู่สายฮา', icon: '🚧', cost: 100, desc: 'กรวยส้มคาดแถบขาวสะท้อนแสงตั้งจองลู่แบบชัดเจน!', colorHex: 0xF97316, accentHex: 0xFFFFFF },
+  { id: 'marker_flag', category: 'marker', name: 'เสาธงอัศวินโบกสะบัด', icon: '🚩', cost: 150, desc: 'เสาธงประจำตระกูลขลิบทองโบกพริ้วบนลู่วิ่ง', colorHex: 0xEF4444, accentHex: 0xFACC15 },
+  { id: 'marker_shrine', category: 'marker', name: 'เสาโทริอิแดงมงคล', icon: '⛩️', cost: 280, desc: 'ซุ้มเสาโทริอิสีแดงสดสไตล์ญี่ปุ่นตั้งตระหง่านกลางลู่', colorHex: 0xDC2626, accentHex: 0x18181B },
+  { id: 'marker_scarecrow', category: 'marker', name: 'หุ่นฟางตัวแทนคาดหัว', icon: '🎃', cost: 350, desc: 'ตุ๊กตาหุ่นฟางหน้ายิ้มสวมผ้าคาดหัวยืนเฝ้าลู่แทนเจ้าตัว!', colorHex: 0xF59E0B, accentHex: 0x38BDF8 },
+  { id: 'marker_cat_statue', category: 'marker', name: 'แมวกวักทองนำโชค', icon: '🐱', cost: 480, desc: 'น้องแมวกวักสีทองโบกมือกวักแต้มและโชคลาภบนลู่!', colorHex: 0xFACC15, accentHex: 0xEF4444 },
+  { id: 'marker_bubble_tea', category: 'marker', name: 'แก้วชานมไข่มุกยักษ์', icon: '🥤', cost: 550, desc: 'แก้วชานมไข่มุกจัมโบ้ปักหลอดยักษ์จองที่แบบสายกิน!', colorHex: 0xD97706, accentHex: 0xFDE68A },
+  { id: 'marker_crystal', category: 'marker', name: 'แท่นคริสตัลเวทมนตร์ลอยหมุน', icon: '💎', cost: 650, desc: 'เสาคริสตัลสีฟ้าเรืองแสงหมุนลอยตัวพร้อมวงเวทบนพื้นลู่', colorHex: 0x38BDF8, accentHex: 0xA855F7 },
+  { id: 'marker_rocket', category: 'marker', name: 'แท่นปล่อยจรวดอวกาศ', icon: '🚀', cost: 900, desc: 'จรวดสีขาวแดงพร้อมไฟไอพ่นเตรียมทะยานเข้าเส้นชัย!', colorHex: 0xE2E8F0, accentHex: 0xEF4444 },
+  { id: 'marker_monument', category: 'marker', name: 'อนุสาวรีย์ถ้วยทองปีกนางฟ้า', icon: '🏆', cost: 1200, desc: 'แท่นหินอ่อนถ้วยทองคำติดปีกนางฟ้าส่องประกายขิงทั้งสนาม!', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
+
+  ...EXTRA_SHOP_ITEMS,
 ];
 
 export const GACHA_EXCLUSIVE_ITEMS = SHOP_ITEMS.filter((it) => it.isGachaOnly);
@@ -810,4 +1005,6 @@ export const FREE_DEFAULT_ITEMS = new Set([
   'pet_bear_shield',
   'mount_none',
   'mount_cloud',
+  'marker_wood',
+  ...EXTRA_FREE_ITEM_IDS,
 ]);

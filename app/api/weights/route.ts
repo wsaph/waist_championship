@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
-import { computeBmiMeta, computeGoalProgress, FREE_DEFAULT_ITEMS, getGoalTypeMeta, parsePropColors } from '@/lib/rpg_catalog';
+import {
+  computeBmiMeta,
+  computeGoalProgress,
+  computeSideQuestCoins,
+  FREE_DEFAULT_ITEMS,
+  getGoalTypeMeta,
+  parsePropColors,
+} from '@/lib/rpg_catalog';
 import { getOrSpawnLunchCoins } from '@/lib/lunch_coins';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +35,7 @@ export async function GET(req: Request) {
       id: Number(r.id),
       name: String(r.name),
       endDate: String(r.end_date || ''),
+      stepTarget: Math.max(1000, Number(r.step_target || 300000)),
       isActive: Number(r.is_active) === 1,
       createdAt: String(r.created_at || ''),
     }));
@@ -37,6 +45,7 @@ export async function GET(req: Request) {
       seasons[0] ||
       null;
     const seasonId = activeSeason ? activeSeason.id : 1;
+    const seasonStepTarget = activeSeason ? activeSeason.stepTarget : 300000;
 
     const usersRes = await turso.execute(`
       SELECT 
@@ -97,7 +106,9 @@ export async function GET(req: Request) {
       const startVal = entry ? Number(entry.start_val) : Number(u.start_weight || 65);
       const currentVal = entry ? Number(entry.current_val) : Number(u.current_weight || startVal);
       const targetVal = entry ? Number(entry.target_val) : Number(u.goal_weight || 55);
-      const { pct: progressPct, diffLabel, isInFoodStall } = computeGoalProgress(goalType, startVal, currentVal, targetVal);
+      const { pct: sideGoalProgressPct, diffLabel, isInFoodStall } = computeGoalProgress(goalType, startVal, currentVal, targetVal);
+      const stepCount = entry ? Math.max(0, Number(entry.step_count ?? 0)) : 0;
+      const stepProgressPct = Math.round((stepCount / Math.max(1, seasonStepTarget)) * 1000) / 10;
       const heightCm = Number(u.height_cm || 0);
       const gender = u.gender === 'male' ? 'male' : 'female';
       const storedBodyWeight = Number(u.body_weight || u.start_weight || 0);
@@ -117,7 +128,8 @@ export async function GET(req: Request) {
         colorHex: String(u.color_hex),
         accessory: u.accessory ? String(u.accessory) : undefined,
         bandColor: u.band_color ? String(u.band_color) : undefined,
-        role: u.role === 'spectator' ? 'spectator' : 'competitor',
+        role: 'competitor',
+        isRoaming: Number(u.is_roaming ?? 0) === 1,
         workoutType: u.workout_type ? String(u.workout_type) : 'cheer',
         petType: u.pet_type ? String(u.pet_type) : 'none',
         statusText: u.status_text ? String(u.status_text) : '',
@@ -136,7 +148,11 @@ export async function GET(req: Request) {
             }
           : {}),
         goalType,
-        progressPct,
+        stepCount,
+        stepTarget: seasonStepTarget,
+        stepProgressPct,
+        sideGoalProgressPct,
+        progressPct: stepProgressPct,
         isInFoodStall,
         bmiBellyScale: bmiMeta.isValid ? bmiMeta.bellyScale : undefined,
         points: Number(u.points ?? 100),
@@ -153,6 +169,7 @@ export async function GET(req: Request) {
         equipAura: u.equip_aura ? String(u.equip_aura) : 'aura_none',
         equipPetGear: u.equip_pet_gear ? String(u.equip_pet_gear) : 'pet_none',
         equipMount: u.equip_mount ? String(u.equip_mount) : 'mount_none',
+        equipMarker: u.equip_marker ? String(u.equip_marker) : 'marker_wood',
         propColors: parsePropColors(u.prop_colors),
         unlockedItems: unlocked,
         taunt: String(u.latest_taunt),
@@ -181,7 +198,19 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { userId, pinCode, isSelf, weight, value, seasonId, excuseTag } = await req.json();
+    const {
+      userId,
+      pinCode,
+      isSelf,
+      logType,
+      steps,
+      stepMode,
+      weight,
+      value,
+      seasonId,
+      excuseTag,
+    } = await req.json();
+    const isStepLog = logType === 'steps';
     const rawInput = value !== undefined ? Number(value) : Number(weight);
 
     const userCheck = await turso.execute({
@@ -198,11 +227,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'รหัส PIN ไม่ถูกต้อง! อย่าแอบโกงเพื่อนนะ 👀' }, { status: 401 });
     }
 
-    // Resolve active season
+    // Resolve active season & step target
     let targetSeasonId = Number(seasonId || 0);
-    if (!targetSeasonId) {
-      const sRes = await turso.execute(`SELECT id FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1`);
-      targetSeasonId = sRes.rows.length > 0 ? Number(sRes.rows[0].id) : 1;
+    let seasonStepTarget = 300000;
+    if (targetSeasonId > 0) {
+      const sRes = await turso.execute({
+        sql: `SELECT id, step_target FROM seasons WHERE id = ? LIMIT 1`,
+        args: [targetSeasonId],
+      });
+      if (sRes.rows.length > 0) {
+        seasonStepTarget = Math.max(1000, Number(sRes.rows[0].step_target || 300000));
+      }
+    } else {
+      const sRes = await turso.execute(`SELECT id, step_target FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1`);
+      if (sRes.rows.length > 0) {
+        targetSeasonId = Number(sRes.rows[0].id);
+        seasonStepTarget = Math.max(1000, Number(sRes.rows[0].step_target || 300000));
+      } else {
+        targetSeasonId = 1;
+      }
     }
 
     const entryRes = await turso.execute({
@@ -215,6 +258,9 @@ export async function POST(req: Request) {
     let prevVal = Number(user.start_weight || 65);
     let targetVal = Number(user.goal_weight || 55);
     let prevMaxAwarded = 0;
+    let prevSideCoinsAwarded = 0;
+    let prevStepCount = 0;
+    let prevMaxStepsPct = 0;
 
     if (entryRes.rows.length > 0) {
       const eRow = entryRes.rows[0];
@@ -223,64 +269,150 @@ export async function POST(req: Request) {
       prevVal = Number(eRow.current_val);
       targetVal = Number(eRow.target_val);
       prevMaxAwarded = Number(eRow.max_progress_awarded ?? 0);
+      prevSideCoinsAwarded = Number(eRow.side_coins_awarded ?? 0);
+      // กรณีข้อมูลเก่าก่อนเพิ่มคอลัมน์ side_coins_awarded: กันจ่ายซ้ำสำหรับผลงานเดิมที่เคยรับเหรียญไปแล้ว
+      if (prevSideCoinsAwarded === 0 && prevMaxAwarded > 0) {
+        prevSideCoinsAwarded = computeSideQuestCoins(goalType, startVal, prevVal);
+      }
+      prevStepCount = Math.max(0, Number(eRow.step_count ?? 0));
+      prevMaxStepsPct = Number(eRow.max_steps_pct_awarded ?? 0);
     } else {
       await turso.execute({
-        sql: `INSERT INTO season_entries (season_id, user_id, goal_type, start_val, current_val, target_val, max_progress_awarded) VALUES (?, ?, ?, ?, ?, ?, 0)`,
+        sql: `INSERT INTO season_entries (season_id, user_id, goal_type, start_val, current_val, target_val, max_progress_awarded, side_coins_awarded, step_count, max_steps_pct_awarded) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0)`,
         args: [targetSeasonId, userId, goalType, startVal, prevVal, targetVal],
       });
     }
 
-    const meta = getGoalTypeMeta(goalType);
-    const nextVal = meta.isCumulative
-      ? Number((prevVal + Math.max(0, rawInput)).toFixed(2))
-      : Number(rawInput.toFixed(2));
-    const diff = Number((nextVal - prevVal).toFixed(2));
+    // โบนัสขยันส่งผลภารกิจประจำวัน (แชร์ร่วมกันระหว่างก้าวเดินและภารกิจรอง): บันทึกครั้งแรกของวัน รับเพิ่ม +10 🪙!
+    const [wTodayRes, sTodayRes] = await Promise.all([
+      turso.execute({
+        sql: `SELECT COUNT(*) AS cnt FROM weight_logs WHERE user_id = ? AND date(logged_at) = date('now')`,
+        args: [userId],
+      }),
+      turso.execute({
+        sql: `SELECT COUNT(*) AS cnt FROM step_logs WHERE user_id = ? AND date(logged_at) = date('now')`,
+        args: [userId],
+      }),
+    ]);
+    const loggedAnyToday =
+      Number(wTodayRes.rows[0]?.cnt ?? 0) + Number(sTodayRes.rows[0]?.cnt ?? 0) > 0;
+    const dailyLogBonus = loggedAnyToday ? 0 : 10;
 
-    const { pct: nextPct, isInFoodStall } = computeGoalProgress(goalType, startVal, nextVal, targetVal);
-    const nextIntPct = Math.floor(nextPct);
     let progressBonus = 0;
-    let nextMaxAwarded = prevMaxAwarded;
-    if (nextIntPct > prevMaxAwarded) {
-      progressBonus = (nextIntPct - prevMaxAwarded) * 15;
-      nextMaxAwarded = nextIntPct;
-    }
+    let earnedPoints = 0;
+    let nextPoints = Number(user.points ?? 100);
+    let diff = 0;
+    let nextPct = 0;
+    let isInFoodStall = false;
+    let isGoodProgress = false;
+    let isRegressed = false;
+    let nextVal = prevVal;
+    let nextStepCount = prevStepCount;
 
-    // โบนัสขยันส่งผลภารกิจประจำวัน: บันทึกครั้งแรกของวัน รับเพิ่ม +10 🪙!
-    const loggedTodayRes = await turso.execute({
-      sql: `SELECT COUNT(*) AS cnt FROM weight_logs WHERE user_id = ? AND date(logged_at) = date('now')`,
-      args: [userId],
-    });
-    const dailyLogBonus = Number(loggedTodayRes.rows[0]?.cnt ?? 0) === 0 ? 10 : 0;
-    const earnedPoints = progressBonus + dailyLogBonus;
+    if (isStepLog) {
+      const rawSteps = Math.round(Number(steps));
+      const mode = stepMode === 'set' ? 'set' : 'add';
+      if (Number.isNaN(rawSteps) || (mode === 'add' && (rawSteps < 1 || rawSteps > 500000)) || (mode === 'set' && (rawSteps < 0 || rawSteps > 10000000))) {
+        return NextResponse.json(
+          { error: mode === 'add' ? 'กรุณากรอกจำนวนก้าวที่เพิ่มระหว่าง 1 – 500,000 ก้าว' : 'กรุณากรอกยอดก้าวรวมระหว่าง 0 – 10,000,000 ก้าว' },
+          { status: 400 }
+        );
+      }
 
-    await turso.execute({
-      sql: `UPDATE season_entries SET current_val = ?, max_progress_awarded = ?, updated_at = CURRENT_TIMESTAMP WHERE season_id = ? AND user_id = ?`,
-      args: [nextVal, nextMaxAwarded, targetSeasonId, userId],
-    });
+      nextStepCount = mode === 'set' ? rawSteps : prevStepCount + rawSteps;
+      diff = nextStepCount - prevStepCount;
+      nextPct = Math.round((nextStepCount / Math.max(1, seasonStepTarget)) * 1000) / 10;
+      const nextIntStepPct = Math.min(100, Math.floor(nextPct));
 
-    const nextPoints = Number(user.points ?? 100) + earnedPoints;
-    if (!meta.isCumulative) {
+      // แบ่งโควต้ากันเฟ้อ: ก้าวเดินครบ 100% รับ 1,000 🪙 (+10 🪙 / +1%)
+      let nextMaxStepsPct = prevMaxStepsPct;
+      if (nextIntStepPct > prevMaxStepsPct) {
+        progressBonus = (nextIntStepPct - prevMaxStepsPct) * 10;
+        nextMaxStepsPct = nextIntStepPct;
+      }
+
+      earnedPoints = progressBonus + dailyLogBonus;
+      nextPoints = Number(user.points ?? 100) + earnedPoints;
+
       await turso.execute({
-        sql: `UPDATE users SET points = ?, body_weight = ? WHERE id = ?`,
-        args: [nextPoints, nextVal, userId],
+        sql: `UPDATE season_entries SET step_count = ?, max_steps_pct_awarded = ?, updated_at = CURRENT_TIMESTAMP WHERE season_id = ? AND user_id = ?`,
+        args: [nextStepCount, nextMaxStepsPct, targetSeasonId, userId],
       });
-    } else if (earnedPoints > 0) {
-      await turso.execute({
-        sql: `UPDATE users SET points = ? WHERE id = ?`,
-        args: [nextPoints, userId],
-      });
-    }
 
-    const isGoodProgress =
-      (goalType === 'weight_loss' && diff < 0) ||
-      (goalType !== 'weight_loss' && diff > 0);
-    const isRegressed =
-      (goalType === 'weight_loss' && diff > 0) ||
-      (!meta.isCumulative && goalType !== 'weight_loss' && diff < 0);
+      if (earnedPoints > 0) {
+        await turso.execute({
+          sql: `UPDATE users SET points = ? WHERE id = ?`,
+          args: [nextPoints, userId],
+        });
+      }
+
+      await turso.execute({
+        sql: `INSERT INTO step_logs (season_id, user_id, steps_added, total_steps, note) VALUES (?, ?, ?, ?, ?)`,
+        args: [targetSeasonId, userId, diff, nextStepCount, excuseTag || 'อัปเดตก้าวเดิน Step Challenge'],
+      });
+
+      isGoodProgress = diff > 0;
+      isRegressed = false;
+      isInFoodStall = false;
+    } else {
+      if (Number.isNaN(rawInput) || rawInput <= 0) {
+        return NextResponse.json({ error: 'กรุณากรอกตัวเลขที่ถูกต้องมากกว่า 0' }, { status: 400 });
+      }
+      const meta = getGoalTypeMeta(goalType);
+      nextVal = meta.isCumulative
+        ? Number((prevVal + Math.max(0, rawInput)).toFixed(2))
+        : Number(rawInput.toFixed(2));
+      diff = Number((nextVal - prevVal).toFixed(2));
+
+      const sideCalc = computeGoalProgress(goalType, startVal, nextVal, targetVal);
+      nextPct = sideCalc.pct;
+      isInFoodStall = sideCalc.isInFoodStall;
+
+      // แนวทาง A: แจกเหรียญภารกิจรองตาม "ปริมาณที่ทำได้จริง" (ไม่สน % เป้าที่ตั้งเอง) สูงสุด 500 🪙/ซีซั่น
+      // - ลด/เพิ่มน้ำหนัก/ปั้นกล้าม: +80 🪙/กก. | สะสมระยะทาง: +10 🪙/กม. | สะสมครั้ง: +1 🪙/10 ครั้ง
+      const nextIntPct = Math.min(100, Math.floor(nextPct));
+      const nextMaxAwarded = Math.max(prevMaxAwarded, nextIntPct);
+      const totalEligibleSideCoins = computeSideQuestCoins(goalType, startVal, nextVal);
+      let nextSideCoinsAwarded = prevSideCoinsAwarded;
+      if (totalEligibleSideCoins > prevSideCoinsAwarded) {
+        progressBonus = totalEligibleSideCoins - prevSideCoinsAwarded;
+        nextSideCoinsAwarded = totalEligibleSideCoins;
+      }
+
+      earnedPoints = progressBonus + dailyLogBonus;
+      nextPoints = Number(user.points ?? 100) + earnedPoints;
+
+      await turso.execute({
+        sql: `UPDATE season_entries SET current_val = ?, max_progress_awarded = ?, side_coins_awarded = ?, updated_at = CURRENT_TIMESTAMP WHERE season_id = ? AND user_id = ?`,
+        args: [nextVal, nextMaxAwarded, nextSideCoinsAwarded, targetSeasonId, userId],
+      });
+
+      if (!meta.isCumulative) {
+        await turso.execute({
+          sql: `UPDATE users SET points = ?, body_weight = ? WHERE id = ?`,
+          args: [nextPoints, nextVal, userId],
+        });
+      } else if (earnedPoints > 0) {
+        await turso.execute({
+          sql: `UPDATE users SET points = ? WHERE id = ?`,
+          args: [nextPoints, userId],
+        });
+      }
+
+      isGoodProgress =
+        (goalType === 'weight_loss' && diff < 0) ||
+        (goalType !== 'weight_loss' && diff > 0);
+      isRegressed =
+        (goalType === 'weight_loss' && diff > 0) ||
+        (!meta.isCumulative && goalType !== 'weight_loss' && diff < 0);
+    }
 
     // =========================================================================
     // 🤝 ระบบเล่นแชร์ปันผลสายเชียร์ (Cheer Dividend) & แทงสวนแกล้งเพื่อน (Sabotage Bounty)
+    // จำกัดเพดานปันผลสูงสุด 40 🪙/คน/วัน (รีเซ็ต 07:00 น. เวลาไทย = 00:00 UTC) เพื่อกันปั๊มเหรียญกาชาเฟ้อ
     // =========================================================================
+    const DAILY_DIVIDEND_CAP = 40;
+    const todayKey = new Date().toISOString().slice(0, 10);
     const dividends: Array<{
       userId: number;
       name: string;
@@ -294,7 +426,8 @@ export async function POST(req: Request) {
     if (isGoodProgress || progressBonus > 0 || isRegressed) {
       const backersRes = await turso.execute({
         sql: `
-          SELECT i.sender_id, i.kind, COUNT(*) AS cnt, u.name, u.avatar_emoji
+          SELECT i.sender_id, i.kind, COUNT(*) AS cnt, u.name, u.avatar_emoji,
+                 u.dividend_earned_date, u.dividend_earned_today
           FROM interactions i
           JOIN users u ON u.id = i.sender_id
           WHERE i.target_user_id = ?
@@ -307,44 +440,64 @@ export async function POST(req: Request) {
       });
 
       const shareBonusFromProgress = Math.round(progressBonus * 0.25);
+      const earnedTodayMap = new Map<number, number>();
 
       for (const bRow of backersRes.rows) {
         const sid = Number(bRow.sender_id);
         const bKind = String(bRow.kind) === 'tempt' ? 'tempt' : 'cheer';
         const stacks = Math.min(3, Math.max(1, Number(bRow.cnt)));
 
+        if (!earnedTodayMap.has(sid)) {
+          const prevDate = String(bRow.dividend_earned_date || '');
+          const prevAmt = prevDate === todayKey ? Number(bRow.dividend_earned_today ?? 0) : 0;
+          earnedTodayMap.set(sid, prevAmt);
+        }
+        const alreadyToday = earnedTodayMap.get(sid) ?? 0;
+        const remainingCap = Math.max(0, DAILY_DIVIDEND_CAP - alreadyToday);
+        if (remainingCap <= 0) continue;
+
         if ((isGoodProgress || progressBonus > 0) && bKind === 'cheer') {
-          // เพื่อนพัฒนาขึ้น/ได้แต้ม -> คนส่งไฟได้ปันผลเหมือนเล่นแชร์! (+8🪙/ดวง + 25% แต้มความคืบหน้าเพื่อน สูงสุด 60🪙)
-          const payout = Math.min(60, stacks * 8 + shareBonusFromProgress);
-          await turso.execute({
-            sql: `UPDATE users SET points = points + ? WHERE id = ?`,
-            args: [payout, sid],
-          });
-          dividends.push({
-            userId: sid,
-            name: String(bRow.name),
-            emoji: String(bRow.avatar_emoji),
-            kind: 'cheer',
-            stacks,
-            payout,
-          });
+          // เพื่อนพัฒนาขึ้น/ได้แต้ม -> คนส่งไฟได้ปันผลเหมือนเล่นแชร์! (+8🪙/ดวง + 25% แต้มความคืบหน้าเพื่อน สูงสุดไม่เกินเพดาน 40🪙/วัน)
+          const rawPayout = Math.min(DAILY_DIVIDEND_CAP, stacks * 8 + shareBonusFromProgress);
+          const payout = Math.min(rawPayout, remainingCap);
+          if (payout > 0) {
+            const nextToday = alreadyToday + payout;
+            earnedTodayMap.set(sid, nextToday);
+            await turso.execute({
+              sql: `UPDATE users SET points = points + ?, dividend_earned_date = ?, dividend_earned_today = ? WHERE id = ?`,
+              args: [payout, todayKey, nextToday, sid],
+            });
+            dividends.push({
+              userId: sid,
+              name: String(bRow.name),
+              emoji: String(bRow.avatar_emoji),
+              kind: 'cheer',
+              stacks,
+              payout,
+            });
+          }
         } else if (isRegressed && bKind === 'tempt') {
-          // เพื่อนพัฒนาถอยหลัง -> สายมารที่ส่งของกินแกล้งรับทรัพย์! (ถ้าร่วงเข้าซุ้มอาหารรับแจ็กพอต 20🪙/ชิ้น!)
+          // เพื่อนพัฒนาถอยหลัง -> สายมารที่ส่งของกินแกล้งรับทรัพย์! (ถ้าร่วงเข้าซุ้มอาหารรับแจ็กพอต 20🪙/ชิ้น สูงสุดไม่เกินเพดาน 40🪙/วัน)
           const perTempt = isInFoodStall ? 20 : 12;
-          const payout = Math.min(60, stacks * perTempt);
-          await turso.execute({
-            sql: `UPDATE users SET points = points + ? WHERE id = ?`,
-            args: [payout, sid],
-          });
-          dividends.push({
-            userId: sid,
-            name: String(bRow.name),
-            emoji: String(bRow.avatar_emoji),
-            kind: 'tempt',
-            stacks,
-            payout,
-            jackpot: isInFoodStall,
-          });
+          const rawPayout = Math.min(DAILY_DIVIDEND_CAP, stacks * perTempt);
+          const payout = Math.min(rawPayout, remainingCap);
+          if (payout > 0) {
+            const nextToday = alreadyToday + payout;
+            earnedTodayMap.set(sid, nextToday);
+            await turso.execute({
+              sql: `UPDATE users SET points = points + ?, dividend_earned_date = ?, dividend_earned_today = ? WHERE id = ?`,
+              args: [payout, todayKey, nextToday, sid],
+            });
+            dividends.push({
+              userId: sid,
+              name: String(bRow.name),
+              emoji: String(bRow.avatar_emoji),
+              kind: 'tempt',
+              stacks,
+              payout,
+              jackpot: isInFoodStall,
+            });
+          }
         }
       }
 
@@ -355,26 +508,33 @@ export async function POST(req: Request) {
       });
     }
 
-    const baseRoast = isGoodProgress
+    const roastText = isStepLog
+      ? diff > 0
+        ? `👟 สับขาสุดปัง! สะสมเพิ่ม +${diff.toLocaleString()} ก้าว รวม ${nextStepCount.toLocaleString()} / ${seasonStepTarget.toLocaleString()} ก้าว (${nextPct}%)`
+        : `👟 อัปเดตยอดก้าวเดินรวมเป็น ${nextStepCount.toLocaleString()} / ${seasonStepTarget.toLocaleString()} ก้าว (${nextPct}%)`
+      : isInFoodStall && !isGoodProgress
+      ? `🍖 ตบะแตกขั้นสุด! ถูกส่งตัวไปนอนเฝ้าซุ้มอาหารริมหาดเรียบร้อย (${nextPct}%)`
+      : isGoodProgress
       ? ROAST_GOOD[Math.floor(Math.random() * ROAST_GOOD.length)]
       : diff === 0
       ? '⚖️ ค่าคงที่เป๊ะ รักษามาตรฐานผู้กล้า!'
       : ROAST_BAD[Math.floor(Math.random() * ROAST_BAD.length)];
-    const roastText =
-      isInFoodStall && !isGoodProgress
-        ? `🍖 ตบะแตกขั้นสุด! ถูกส่งตัวไปนอนเฝ้าซุ้มอาหารริมหาดเรียบร้อย (${nextPct}%)`
-        : baseRoast;
 
-    await turso.execute({
-      sql: 'INSERT INTO weight_logs (user_id, weight, excuse_tag, roast_message) VALUES (?, ?, ?, ?)',
-      args: [userId, nextVal, excuseTag || 'อัปเดตภารกิจผู้กล้า', roastText],
-    });
+    if (!isStepLog) {
+      await turso.execute({
+        sql: 'INSERT INTO weight_logs (user_id, weight, excuse_tag, roast_message) VALUES (?, ?, ?, ?)',
+        args: [userId, nextVal, excuseTag || 'อัปเดตภารกิจผู้กล้า', roastText],
+      });
+    }
 
     return NextResponse.json({
       success: true,
+      logType: isStepLog ? 'steps' : 'side_goal',
       diff,
       roast: roastText,
       progressPct: nextPct,
+      stepCount: nextStepCount,
+      stepTarget: seasonStepTarget,
       isInFoodStall,
       progressBonus,
       dailyLogBonus,

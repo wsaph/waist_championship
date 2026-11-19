@@ -51,10 +51,14 @@ async function ensureSchema() {
           equip_aura TEXT DEFAULT 'aura_none',
           equip_pet_gear TEXT DEFAULT 'pet_none',
           equip_mount TEXT DEFAULT 'mount_none',
+          equip_marker TEXT DEFAULT 'marker_wood',
+          is_roaming INTEGER NOT NULL DEFAULT 0,
           prop_colors TEXT DEFAULT '{}',
           last_checkin_date TEXT DEFAULT '',
           coin_pickups_date TEXT DEFAULT '',
           coin_pickups_count INTEGER NOT NULL DEFAULT 0,
+          dividend_earned_date TEXT DEFAULT '',
+          dividend_earned_today INTEGER NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -72,6 +76,9 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_aura TEXT DEFAULT 'aura_none'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_pet_gear TEXT DEFAULT 'pet_none'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN equip_mount TEXT DEFAULT 'mount_none'`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN equip_marker TEXT DEFAULT 'marker_wood'`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN is_roaming INTEGER NOT NULL DEFAULT 0`);
+      await client.execute(`UPDATE users SET role = 'competitor' WHERE role = 'spectator'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN prop_colors TEXT DEFAULT '{}'`);
       await safeAlter(`ALTER TABLE users ADD COLUMN body_weight REAL NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN height_cm REAL NOT NULL DEFAULT 0`);
@@ -79,16 +86,20 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN last_checkin_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_count INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_date TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_today INTEGER NOT NULL DEFAULT 0`);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS seasons (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
           end_date TEXT DEFAULT '',
+          step_target INTEGER NOT NULL DEFAULT 300000,
           is_active INTEGER NOT NULL DEFAULT 1,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      await safeAlter(`ALTER TABLE seasons ADD COLUMN step_target INTEGER NOT NULL DEFAULT 300000`);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS season_entries (
@@ -100,8 +111,28 @@ async function ensureSchema() {
           current_val REAL NOT NULL DEFAULT 0,
           target_val REAL NOT NULL DEFAULT 0,
           max_progress_awarded INTEGER NOT NULL DEFAULT 0,
+          side_coins_awarded INTEGER NOT NULL DEFAULT 0,
+          step_count INTEGER NOT NULL DEFAULT 0,
+          max_steps_pct_awarded INTEGER NOT NULL DEFAULT 0,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(season_id, user_id),
+          FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      await safeAlter(`ALTER TABLE season_entries ADD COLUMN side_coins_awarded INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE season_entries ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE season_entries ADD COLUMN max_steps_pct_awarded INTEGER NOT NULL DEFAULT 0`);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS step_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          season_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          steps_added INTEGER NOT NULL DEFAULT 0,
+          total_steps INTEGER NOT NULL DEFAULT 0,
+          note TEXT DEFAULT '',
+          logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
@@ -147,6 +178,21 @@ async function ensureSchema() {
       `);
       await safeAlter(`ALTER TABLE interactions ADD COLUMN sender_id INTEGER DEFAULT NULL`);
       await safeAlter(`ALTER TABLE interactions ADD COLUMN dividend_claimed INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN last_feedback_bonus_date TEXT DEFAULT ''`);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS beta_feedback (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER DEFAULT NULL,
+          user_name TEXT NOT NULL DEFAULT 'ผู้เล่นนิรนาม',
+          user_emoji TEXT NOT NULL DEFAULT '💬',
+          category TEXT NOT NULL DEFAULT 'bug',
+          message TEXT NOT NULL,
+          device_info TEXT DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'open',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS arena_coins (

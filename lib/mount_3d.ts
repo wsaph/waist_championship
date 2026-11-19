@@ -439,6 +439,579 @@ export function buildMountMesh(mountId?: string): MountMeshParts | null {
     }
     bodyBounceGroup.add(lightsRing);
     spinPart = lightsRing;
+  } else if (mountId === 'mount_skateboard') {
+    // 🛹 สเก็ตบอร์ดไฟนีออน
+    saddleY = 0.42;
+    kind = 'hover';
+    const deckMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45 });
+    const neonCyan = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const neonPink = new THREE.MeshBasicMaterial({ color: 0xf472b6 });
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.09, 0.56), deckMat);
+    deck.position.y = 0.3;
+    deck.castShadow = true;
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.1, 0.18), neonCyan);
+    stripe.position.y = 0.3;
+    [-0.78, 0.78].forEach((tx) => {
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.09, 14), deckMat);
+      tip.position.set(tx, 0.33, 0);
+      tip.rotation.z = tx > 0 ? 0.24 : -0.24;
+      bodyBounceGroup.add(tip);
+    });
+    const underGlow = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.42), neonPink);
+    underGlow.position.y = 0.24;
+    bodyBounceGroup.add(deck, stripe, underGlow);
+    [-0.5, 0.5].forEach((wx) => {
+      [-0.28, 0.28].forEach((wz) => {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.09, 12), neonPink);
+        wheel.rotation.x = Math.PI / 2;
+        wheel.position.set(wx, 0.14, wz);
+        bodyBounceGroup.add(wheel);
+      });
+    });
+  } else if (mountId === 'mount_duck_ring') {
+    // 🦆 ห่วงยางเป็ดเหลืองยักษ์
+    saddleY = 0.62;
+    kind = 'jelly';
+    const duckYellow = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.32 });
+    const beakOrange = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.68, 0.28, 14, 24), duckYellow);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.36;
+    ring.castShadow = true;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.35, 12), duckYellow);
+    neck.position.set(0.66, 0.68, 0);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 14), duckYellow);
+    head.position.set(0.74, 0.98, 0);
+    head.castShadow = true;
+    const beak = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), beakOrange);
+    beak.scale.set(1.4, 0.5, 1.1);
+    beak.position.set(1.06, 0.94, 0);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.36, 10), duckYellow);
+    tail.rotation.z = 0.72;
+    tail.position.set(-0.92, 0.62, 0);
+    bodyBounceGroup.add(ring, neck, head, beak, tail);
+    [-0.16, 0.16].forEach((ez) => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), darkEyeMat);
+      eye.position.set(0.96, 1.05, ez);
+      bodyBounceGroup.add(eye);
+    });
+  } else if (mountId === 'mount_donut') {
+    // 🍩 โดนัทสตรอว์เบอร์รีลอยฟ้า
+    saddleY = 0.58;
+    kind = 'hover';
+    const doughMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.6 });
+    const glazeMat = new THREE.MeshPhysicalMaterial({ color: 0xf472b6, roughness: 0.22, clearcoat: 0.65 });
+    const base = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.3, 16, 28), doughMat);
+    base.rotation.x = Math.PI / 2;
+    base.position.y = 0.42;
+    base.castShadow = true;
+    const glaze = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.27, 14, 28), glazeMat);
+    glaze.rotation.x = Math.PI / 2;
+    glaze.position.y = 0.48;
+    bodyBounceGroup.add(base, glaze);
+    const sprinkleCols = [0xfef08a, 0x38bdf8, 0x4ade80, 0xffffff, 0xc084fc];
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      const r = 0.56 + (i % 2) * 0.2;
+      const sp = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.04, 0.045),
+        new THREE.MeshBasicMaterial({ color: sprinkleCols[i % sprinkleCols.length] })
+      );
+      sp.position.set(Math.cos(a) * r, 0.74, Math.sin(a) * r);
+      sp.rotation.y = a + i;
+      bodyBounceGroup.add(sp);
+    }
+  } else if (mountId === 'mount_tricycle') {
+    // 🚲 จักรยานสามล้อวินเทจ
+    saddleY = 0.84;
+    kind = 'gallop';
+    const frameRed = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.35, metalness: 0.35 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
+    const basketMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.75 });
+    const frameBar = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.15, 10), frameRed);
+    frameBar.rotation.z = Math.PI / 2;
+    frameBar.position.set(0.08, 0.58, 0);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.75, 10), frameRed);
+    stem.position.set(0.64, 0.82, 0);
+    stem.rotation.z = 0.18;
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.76, 10), goldMat);
+    handle.rotation.x = Math.PI / 2;
+    handle.position.set(0.58, 1.18, 0);
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.26, 0.42), basketMat);
+    basket.position.set(0.84, 1.04, 0);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.1, 0.42), basketMat);
+    seat.position.set(-0.22, 0.76, 0);
+    const frontWheel = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.065, 10, 20), tireMat);
+    frontWheel.position.set(0.72, 0.38, 0);
+    bodyBounceGroup.add(frameBar, stem, handle, basket, seat, frontWheel);
+    [-0.44, 0.44].forEach((wz) => {
+      const rw = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.06, 10, 18), tireMat);
+      rw.position.set(-0.46, 0.32, wz);
+      bodyBounceGroup.add(rw);
+    });
+  } else if (mountId === 'mount_sea_turtle') {
+    // 🐢 เต่าทะเลจิบิโต้คลื่น
+    saddleY = 0.86;
+    kind = 'hover';
+    const shellGreen = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.45 });
+    const skinLime = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.5 });
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.76, 20, 16), shellGreen);
+    shell.scale.set(1.18, 0.65, 1.02);
+    shell.position.set(0, 0.52, 0);
+    shell.castShadow = true;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.09, 10, 24), creamMat);
+    rim.rotation.x = Math.PI / 2;
+    rim.scale.set(1.18, 1.02, 1);
+    rim.position.y = 0.44;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), skinLime);
+    head.position.set(0.95, 0.62, 0);
+    bodyBounceGroup.add(shell, rim, head);
+    [-0.14, 0.14].forEach((ez) => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), darkEyeMat);
+      eye.position.set(1.18, 0.68, ez);
+      bodyBounceGroup.add(eye);
+    });
+    const makeFlipper = (side: -1 | 1, fx: number, fz: number) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(fx, 0.42, side * fz);
+      const fin = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skinLime);
+      fin.scale.set(1.25, 0.25, 0.72);
+      fin.position.set(0, 0, side * 0.24);
+      pivot.add(fin);
+      bodyBounceGroup.add(pivot);
+      return pivot;
+    };
+    wingL = makeFlipper(-1, 0.35, 0.56);
+    wingR = makeFlipper(1, 0.35, 0.56);
+    makeFlipper(-1, -0.52, 0.45);
+    makeFlipper(1, -0.52, 0.45);
+  } else if (mountId === 'mount_scooter') {
+    // 🛴 สกู๊ตเตอร์ไฟฟ้าเทอร์โบ
+    saddleY = 0.46;
+    kind = 'hover';
+    const bodySlate = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.5, roughness: 0.35 });
+    const cyanGlow = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.1, 0.42), bodySlate);
+    deck.position.y = 0.32;
+    deck.castShadow = true;
+    const led = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.05, 0.46), cyanGlow);
+    led.position.y = 0.3;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 1.08, 10), bodySlate);
+    stem.position.set(0.62, 0.85, 0);
+    stem.rotation.z = 0.15;
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.72, 10), cyanGlow);
+    bar.rotation.x = Math.PI / 2;
+    bar.position.set(0.55, 1.36, 0);
+    const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), new THREE.MeshBasicMaterial({ color: 0xfef08a }));
+    headlight.position.set(0.7, 1.22, 0);
+    bodyBounceGroup.add(deck, led, stem, bar, headlight);
+    [-0.56, 0.62].forEach((wx) => {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 14), bodySlate);
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(wx, 0.18, 0);
+      bodyBounceGroup.add(wheel);
+    });
+  } else if (mountId === 'mount_moodeng') {
+    // 🦛 หมูเด้งยักษ์พุงกระเพื่อม (Viral Pygmy Hippo!)
+    saddleY = 0.96;
+    kind = 'jelly';
+    const hippoMat = new THREE.MeshPhysicalMaterial({ color: 0x64748b, roughness: 0.18, clearcoat: 0.85 });
+    const hippoBelly = new THREE.MeshPhysicalMaterial({ color: 0xfbcfe8, roughness: 0.22, clearcoat: 0.7 });
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.62, 22, 18), hippoMat);
+    torso.scale.set(1.34, 0.92, 1.06);
+    torso.position.set(0, 0.66, 0);
+    torso.castShadow = true;
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.52, 18, 14), hippoBelly);
+    belly.scale.set(1.18, 0.65, 0.95);
+    belly.position.set(0.05, 0.45, 0);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.44, 18, 16), hippoMat);
+    head.scale.set(1.12, 0.94, 1.02);
+    head.position.set(0.76, 0.82, 0);
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 14), hippoBelly);
+    snout.scale.set(1.1, 0.78, 1.18);
+    snout.position.set(1.1, 0.72, 0);
+    bodyBounceGroup.add(torso, belly, head, snout);
+    [-0.22, 0.22].forEach((ez) => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), darkEyeMat);
+      eye.position.set(1.04, 0.94, ez);
+      const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), pinkBlushMat);
+      cheek.position.set(1.06, 0.78, ez * 1.4);
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 10), hippoBelly);
+      ear.position.set(0.68, 1.2, ez * 1.1);
+      bodyBounceGroup.add(eye, cheek, ear);
+    });
+    makeQuadLegs(hippoMat, hippoBelly, 0.14, 0.34, 0.44, 0.36, 0.38);
+  } else if (mountId === 'mount_corgi') {
+    // 🐕 น้องหมาคอร์กี้ขาสั้นจัมโบ้
+    saddleY = 0.92;
+    kind = 'gallop';
+    const corgiOrange = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5 });
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.44, 0.76, 12, 18), corgiOrange);
+    torso.rotation.z = Math.PI / 2;
+    torso.position.set(0, 0.64, 0);
+    torso.castShadow = true;
+    const chest = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 14), whiteMat);
+    chest.position.set(0.56, 0.62, 0);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 18, 16), corgiOrange);
+    head.position.set(0.8, 0.92, 0);
+    const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 12), whiteMat);
+    muzzle.position.set(1.14, 0.84, 0);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), darkEyeMat);
+    nose.position.set(1.32, 0.88, 0);
+    const butt = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), whiteMat);
+    butt.position.set(-0.68, 0.66, 0);
+    bodyBounceGroup.add(torso, chest, head, muzzle, nose, butt);
+    [-0.22, 0.22].forEach((ez) => {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.36, 8), corgiOrange);
+      ear.position.set(0.76, 1.32, ez * 1.15);
+      ear.rotation.x = ez < 0 ? -0.25 : 0.25;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), darkEyeMat);
+      eye.position.set(1.12, 0.98, ez * 0.85);
+      bodyBounceGroup.add(ear, eye);
+    });
+    makeQuadLegs(whiteMat, corgiOrange, 0.11, 0.3, 0.46, 0.28, 0.36);
+  } else if (mountId === 'mount_witch_broom') {
+    // 🧹 ไม้กวาดแม่มดเรืองแสง
+    saddleY = 0.66;
+    kind = 'hover';
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.75 });
+    const strawMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.8 });
+    const purpleGlow = new THREE.MeshBasicMaterial({ color: 0xa855f7 });
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.08, 2.2, 10), woodMat);
+    stick.rotation.z = Math.PI / 2;
+    stick.position.set(0.15, 0.56, 0);
+    stick.castShadow = true;
+    const bristles = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.85, 14), strawMat);
+    bristles.rotation.z = -Math.PI / 2;
+    bristles.position.set(-1.12, 0.56, 0);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.14, 12), purpleGlow);
+    band.rotation.z = Math.PI / 2;
+    band.position.set(-0.74, 0.56, 0);
+    const starLantern = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), purpleGlow);
+    starLantern.position.set(1.24, 0.48, 0);
+    bodyBounceGroup.add(stick, bristles, band, starLantern);
+    spinPart = starLantern;
+  } else if (mountId === 'mount_blue_whale') {
+    // 🐳 วาฬสีน้ำเงินพ่นน้ำพุ
+    saddleY = 1.02;
+    kind = 'hover';
+    const whaleBlue = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.35 });
+    const waterCyan = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.85 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.68, 22, 18), whaleBlue);
+    body.scale.set(1.52, 0.88, 1.02);
+    body.position.set(0.08, 0.68, 0);
+    body.castShadow = true;
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.58, 18, 14), whiteMat);
+    belly.scale.set(1.42, 0.55, 0.92);
+    belly.position.set(0.14, 0.44, 0);
+    const tailStem = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.72, 10), whaleBlue);
+    tailStem.rotation.z = Math.PI / 2 + 0.25;
+    tailStem.position.set(-1.05, 0.72, 0);
+    [-0.36, 0.36].forEach((fz) => {
+      const fluke = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), whaleBlue);
+      fluke.scale.set(0.8, 0.22, 1.45);
+      fluke.position.set(-1.35, 0.82, fz);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), darkEyeMat);
+      eye.position.set(0.95, 0.66, fz * 1.25);
+      bodyBounceGroup.add(fluke, eye);
+    });
+    const spout = new THREE.Group();
+    spout.position.set(0.55, 1.26, 0);
+    const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.11, 0.42, 10), waterCyan);
+    jet.position.y = 0.2;
+    spout.add(jet);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      const drop = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), waterCyan);
+      drop.position.set(Math.cos(a) * 0.24, 0.42, Math.sin(a) * 0.24);
+      spout.add(drop);
+    }
+    bodyBounceGroup.add(body, belly, tailStem, spout);
+    spinPart = spout;
+  } else if (mountId === 'mount_gokart') {
+    // 🏎️ รถโกคาร์ทแชมเปี้ยนสายซิ่ง
+    saddleY = 0.68;
+    kind = 'gallop';
+    const kartRed = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.28, metalness: 0.35 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.32, 0.92), kartRed);
+    chassis.position.set(0.05, 0.36, 0);
+    chassis.castShadow = true;
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.24, 0.64), kartRed);
+    nose.position.set(1.02, 0.32, 0);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.34, 0.22), goldMat);
+    stripe.position.set(0.18, 0.37, 0);
+    const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 1.06), goldMat);
+    spoilerWing.position.set(-0.78, 0.84, 0);
+    const steering = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.035, 8, 16), tireMat);
+    steering.rotation.y = Math.PI / 2;
+    steering.position.set(0.56, 0.72, 0);
+    bodyBounceGroup.add(chassis, nose, stripe, spoilerWing, steering);
+    [-0.58, 0.68].forEach((wx) => {
+      [-0.54, 0.54].forEach((wz) => {
+        const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.18, 14), tireMat);
+        tire.rotation.x = Math.PI / 2;
+        tire.position.set(wx, 0.22, wz);
+        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.2, 10), goldMat);
+        rim.rotation.x = Math.PI / 2;
+        rim.position.set(wx, 0.22, wz);
+        bodyBounceGroup.add(tire, rim);
+      });
+    });
+  } else if (mountId === 'mount_trex') {
+    // 🦖 ทีเร็กซ์จิบิขาสั้นวิ่งดุ๊กดิ๊ก
+    saddleY = 1.04;
+    kind = 'gallop';
+    const dinoGreen = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.45 });
+    const spikeOrange = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.56, 20, 16), dinoGreen);
+    body.scale.set(1.32, 0.94, 0.98);
+    body.position.set(0, 0.72, 0);
+    body.castShadow = true;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.52, 0.54), dinoGreen);
+    head.position.set(0.78, 1.18, 0);
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.18, 0.48), creamMat);
+    jaw.position.set(0.84, 0.88, 0);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.95, 10), dinoGreen);
+    tail.rotation.z = Math.PI / 2 + 0.18;
+    tail.position.set(-0.92, 0.74, 0);
+    bodyBounceGroup.add(body, head, jaw, tail);
+    [-0.22, 0.22].forEach((ez) => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), darkEyeMat);
+      eye.position.set(1.06, 1.28, ez);
+      const tinyArm = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.1), dinoGreen);
+      tinyArm.position.set(0.58, 0.68, ez * 1.6);
+      bodyBounceGroup.add(eye, tinyArm);
+    });
+    for (let s = 0; s < 4; s++) {
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 6), spikeOrange);
+      sp.position.set(0.55 - s * 0.35, 1.46 - s * 0.12, 0);
+      bodyBounceGroup.add(sp);
+    }
+    makeQuadLegs(dinoGreen, spikeOrange, 0.15, 0.44, 0.22, 0.34, 0.48);
+  } else if (mountId === 'mount_rocket_shark') {
+    // 🦈 ฉลามขาวติดไอพ่นจรวด
+    saddleY = 0.94;
+    kind = 'hover';
+    const sharkGray = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.35, metalness: 0.2 });
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.46, 1.05, 12, 18), sharkGray);
+    body.rotation.z = Math.PI / 2;
+    body.position.set(0.08, 0.68, 0);
+    body.castShadow = true;
+    const belly = new THREE.Mesh(new THREE.CapsuleGeometry(0.38, 0.92, 10, 14), whiteMat);
+    belly.rotation.z = Math.PI / 2;
+    belly.position.set(0.12, 0.5, 0);
+    const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.56, 6), sharkGray);
+    dorsalFin.rotation.z = 0.35;
+    dorsalFin.position.set(-0.08, 1.24, 0);
+    const tailFin = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.68, 6), sharkGray);
+    tailFin.scale.set(0.85, 1, 0.22);
+    tailFin.position.set(-1.08, 0.72, 0);
+    bodyBounceGroup.add(body, belly, dorsalFin, tailFin);
+    [-0.56, 0.56].forEach((tz) => {
+      const thruster = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.62, 12), goldMat);
+      thruster.rotation.z = Math.PI / 2;
+      thruster.position.set(-0.18, 0.64, tz);
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.46, 8), flameMat);
+      flame.rotation.z = Math.PI / 2;
+      flame.position.set(-0.68, 0.64, tz);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), darkEyeMat);
+      eye.position.set(0.88, 0.78, tz * 0.58);
+      bodyBounceGroup.add(thruster, flame, eye);
+    });
+  } else if (mountId === 'mount_gold_pegasus') {
+    // 🐎 เพกาซัสทองคำติดปีกนางฟ้า
+    saddleY = 1.12;
+    kind = 'fly';
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.64, 12, 18), goldMat);
+    body.rotation.z = Math.PI / 2;
+    body.position.set(0, 0.8, 0);
+    body.castShadow = true;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 0.6, 14), goldMat);
+    neck.position.set(0.58, 1.15, 0);
+    neck.rotation.z = -0.35;
+    const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.26, 10, 14), goldMat);
+    head.rotation.z = Math.PI / 2 + 0.22;
+    head.position.set(0.82, 1.42, 0);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 8, 20), new THREE.MeshBasicMaterial({ color: 0xfef08a }));
+    halo.rotation.x = Math.PI / 2;
+    halo.position.set(0.8, 1.78, 0);
+    bodyBounceGroup.add(body, neck, head, halo);
+    const wingWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfef08a, emissiveIntensity: 0.25, roughness: 0.25 });
+    const makeAngelWing = (side: -1 | 1) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(0.08, 1.08, side * 0.38);
+      for (let w = 0; w < 3; w++) {
+        const feather = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.15 - w * 0.18, 8), w % 2 === 0 ? wingWhite : goldMat);
+        feather.rotation.x = side * (Math.PI / 2 - 0.15 - w * 0.12);
+        feather.position.set(-0.12 * w, 0.15 + w * 0.08, side * (0.48 + w * 0.16));
+        pivot.add(feather);
+      }
+      bodyBounceGroup.add(pivot);
+      return pivot;
+    };
+    wingL = makeAngelWing(-1);
+    wingR = makeAngelWing(1);
+    makeQuadLegs(goldMat, whiteMat, 0.1, 0.52, 0.46, 0.26, 0.54);
+  } else if (mountId === 'mount_gacha_banana_boat') {
+    // 🍌 เรือกล้วยบานาน่าโบ๊ท (Rare Gachapon)
+    saddleY = 0.62;
+    kind = 'hover';
+    const bananaMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.28 });
+    const tipDark = new THREE.MeshStandardMaterial({ color: 0x713f12, roughness: 0.7 });
+    const tube = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 1.38, 12, 18), bananaMat);
+    tube.rotation.z = Math.PI / 2;
+    tube.position.set(0, 0.42, 0);
+    tube.castShadow = true;
+    const tipF = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.42, 10), tipDark);
+    tipF.rotation.z = -Math.PI / 2 + 0.35;
+    tipF.position.set(1.04, 0.56, 0);
+    const tipB = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.38, 10), tipDark);
+    tipB.rotation.z = Math.PI / 2 - 0.35;
+    tipB.position.set(-1.02, 0.54, 0);
+    bodyBounceGroup.add(tube, tipF, tipB);
+    [-0.46, 0.46].forEach((pz) => {
+      const pontoon = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 1.05, 8, 12), bananaMat);
+      pontoon.rotation.z = Math.PI / 2;
+      pontoon.position.set(0, 0.24, pz);
+      bodyBounceGroup.add(pontoon);
+    });
+  } else if (mountId === 'mount_gacha_butter_toast') {
+    // 🍞 ขนมปังปิ้งทาเนยลอยฟ้า (Rare Gachapon)
+    saddleY = 0.56;
+    kind = 'hover';
+    const crustMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.72 });
+    const crumbMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.78 });
+    const butterMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.25 });
+    const crust = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.22, 1.32), crustMat);
+    crust.position.y = 0.38;
+    crust.castShadow = true;
+    const crumb = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.24, 1.14), crumbMat);
+    crumb.position.y = 0.39;
+    const butter = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.14, 0.46), butterMat);
+    butter.position.set(0.12, 0.54, 0);
+    butter.rotation.y = 0.38;
+    bodyBounceGroup.add(crust, crumb, butter);
+  } else if (mountId === 'mount_gacha_pepe_frog') {
+    // 🐸 กบอ้วนเปเป้กระโดดดึ๋ง (Rare Gachapon)
+    saddleY = 0.92;
+    kind = 'jelly';
+    const frogGreen = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.42 });
+    const padGreen = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.55 });
+    const lilyPad = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 22), padGreen);
+    lilyPad.position.y = 0.12;
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.64, 20, 16), frogGreen);
+    body.scale.set(1.22, 0.82, 1.08);
+    body.position.set(0, 0.56, 0);
+    body.castShadow = true;
+    const lips = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.56), new THREE.MeshStandardMaterial({ color: 0xfb7185 }));
+    lips.position.set(0.76, 0.54, 0);
+    bodyBounceGroup.add(lilyPad, body, lips);
+    [-0.24, 0.24].forEach((ez) => {
+      const eyeBump = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), whiteMat);
+      eyeBump.position.set(0.48, 1.06, ez);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), darkEyeMat);
+      pupil.position.set(0.62, 1.08, ez);
+      bodyBounceGroup.add(eyeBump, pupil);
+    });
+  } else if (mountId === 'mount_gacha_cat_bus') {
+    // 🐱 รถบัสน้องแมวเหมียว (Epic Gachapon)
+    saddleY = 1.1;
+    kind = 'gallop';
+    const catOrange = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.48 });
+    const stripeBrown = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.55 });
+    const windowGlow = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    const busBody = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.68, 0.92), catOrange);
+    busBody.position.set(0, 0.72, 0);
+    busBody.castShadow = true;
+    const face = new THREE.Mesh(new THREE.SphereGeometry(0.44, 16, 14), catOrange);
+    face.scale.set(0.85, 0.95, 1.12);
+    face.position.set(0.88, 0.76, 0);
+    const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.78, 8, 12), stripeBrown);
+    tail.rotation.z = 0.65;
+    tail.position.set(-1.12, 0.92, 0);
+    bodyBounceGroup.add(busBody, face, tail);
+    [-0.42, 0, 0.42].forEach((wx) => {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.24, 0.96), windowGlow);
+      win.position.set(wx, 0.78, 0);
+      bodyBounceGroup.add(win);
+    });
+    [-0.24, 0.24].forEach((ez) => {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.28, 8), stripeBrown);
+      ear.position.set(0.84, 1.24, ez * 1.1);
+      const headlightEye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), windowGlow);
+      headlightEye.position.set(1.22, 0.84, ez * 0.95);
+      bodyBounceGroup.add(ear, headlightEye);
+    });
+    makeQuadLegs(catOrange, stripeBrown, 0.11, 0.4, 0.56, 0.36, 0.44);
+  } else if (mountId === 'mount_gacha_magic_carpet') {
+    // 🧞 พรมวิเศษอะลาดินลอยลม (Epic Gachapon)
+    saddleY = 0.56;
+    kind = 'hover';
+    const carpetPurple = new THREE.MeshStandardMaterial({ color: 0x7c3AED, roughness: 0.55 });
+    const carpetRed = new THREE.MeshStandardMaterial({ color: 0xdb2777, roughness: 0.5 });
+    const mainMat = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.08, 1.16), carpetPurple);
+    mainMat.position.y = 0.42;
+    mainMat.castShadow = true;
+    const inner = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.095, 0.82), carpetRed);
+    inner.position.y = 0.42;
+    const goldBorder = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.09, 0.98), goldMat);
+    goldBorder.position.y = 0.42;
+    bodyBounceGroup.add(mainMat, goldBorder, inner);
+    [-0.86, 0.86].forEach((tx) => {
+      [-0.58, 0.58].forEach((tz) => {
+        const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.24, 8), goldMat);
+        tassel.position.set(tx, 0.32, tz);
+        bodyBounceGroup.add(tassel);
+      });
+    });
+  } else if (mountId === 'mount_gacha_phoenix') {
+    // 🔥 นกฟีนิกซ์เพลิงอมตะ (Legendary Gachapon)
+    saddleY = 1.06;
+    kind = 'fly';
+    const fireRed = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.35, roughness: 0.3 });
+    const fireOrange = new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.45, roughness: 0.28 });
+    const fireYellow = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.52, 20, 16), fireRed);
+    body.scale.set(1.38, 0.86, 0.92);
+    body.position.set(0, 0.78, 0);
+    body.castShadow = true;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.54, 12), fireOrange);
+    neck.position.set(0.62, 1.1, 0);
+    neck.rotation.z = -0.35;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 14), fireRed);
+    head.position.set(0.84, 1.38, 0);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.28, 8), goldMat);
+    beak.rotation.z = -Math.PI / 2;
+    beak.position.set(1.16, 1.36, 0);
+    const crest = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.45, 6), fireYellow);
+    crest.rotation.z = 0.45;
+    crest.position.set(0.76, 1.66, 0);
+    bodyBounceGroup.add(body, neck, head, beak, crest);
+    for (let t = 0; t < 3; t++) {
+      const plume = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.15, 8), t % 2 === 0 ? fireOrange : fireYellow);
+      plume.rotation.z = Math.PI / 2 + 0.15;
+      plume.position.set(-1.12, 0.8 + (t - 1) * 0.12, (t - 1) * 0.24);
+      bodyBounceGroup.add(plume);
+    }
+    const makeFireWing = (side: -1 | 1) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(0.06, 1.02, side * 0.38);
+      for (let w = 0; w < 4; w++) {
+        const feather = new THREE.Mesh(
+          new THREE.ConeGeometry(0.22, 1.32 - w * 0.16, 8),
+          w % 2 === 0 ? fireOrange : fireYellow
+        );
+        feather.rotation.x = side * (Math.PI / 2 - 0.15 - w * 0.1);
+        feather.position.set(-0.14 * w, 0.16 + w * 0.06, side * (0.52 + w * 0.16));
+        pivot.add(feather);
+      }
+      bodyBounceGroup.add(pivot);
+      return pivot;
+    };
+    wingL = makeFireWing(-1);
+    wingR = makeFireWing(1);
   } else {
     return null;
   }

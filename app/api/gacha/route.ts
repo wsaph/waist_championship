@@ -3,8 +3,12 @@ import { turso } from '@/lib/turso_client';
 import {
   GACHA_EXCLUSIVE_ITEMS,
   GACHA_SPIN_COST,
+  GACHA_MULTI_COUNT,
+  GACHA_MULTI_COST,
+  GACHA_DUPLICATE_REFUND,
   FREE_DEFAULT_ITEMS,
   type GachaRarity,
+  type GachaRollResult,
 } from '@/lib/rpg_catalog';
 
 function rollTargetRarity(): GachaRarity {
@@ -14,9 +18,16 @@ function rollTargetRarity(): GachaRarity {
   return 'rare';
 }
 
+const RARITY_RANK: Record<GachaRarity, number> = {
+  rare: 1,
+  epic: 2,
+  legendary: 3,
+};
+
 export async function POST(req: Request) {
   try {
-    const { userId } = await req.json();
+    const body = await req.json();
+    const { userId, count } = body;
     if (!userId) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบหรือเลือกตัวละครก่อนสุ่มกาชาปอง' }, { status: 400 });
     }
@@ -40,66 +51,117 @@ export async function POST(req: Request) {
       ...ownedRes.rows.map((r) => String(r.item_id)),
     ]);
 
-    const unownedAll = GACHA_EXCLUSIVE_ITEMS.filter((it) => !ownedSet.has(it.id));
-    if (unownedAll.length === 0) {
+    const actualCount = Number(count) === GACHA_MULTI_COUNT ? GACHA_MULTI_COUNT : 1;
+    const totalCost = actualCount === GACHA_MULTI_COUNT ? GACHA_MULTI_COST : GACHA_SPIN_COST;
+
+    if (currentPoints < totalCost) {
       return NextResponse.json(
-        { error: `🏆 สุดยอด! คุณสะสมไอเทมแรร์จากตู้กาชาปองครบทั้ง ${GACHA_EXCLUSIVE_ITEMS.length} ชิ้นแล้ว!` },
+        { error: `แต้มไม่พอสุ่มกาชาปอง ×${actualCount}! ใช้ ${totalCost.toLocaleString()} 🪙 (คุณมี ${currentPoints.toLocaleString()} 🪙)` },
         { status: 400 }
       );
     }
 
-    if (currentPoints < GACHA_SPIN_COST) {
-      return NextResponse.json(
-        { error: `แต้มไม่พอหมุนกาชาปอง! ใช้ ${GACHA_SPIN_COST} 🪙 (คุณมี ${currentPoints} 🪙)` },
-        { status: 400 }
+    // สุ่มจากตู้ทั้งหมด (Legendary 12% / Epic 33% / Rare 55%) — ออกซ้ำได้พร้อมคืนแต้มทันที!
+    // ถ้าสุ่ม ×8 การันตีอย่างน้อย 1 ชิ้นระดับ Epic ขึ้นไป
+    const results: GachaRollResult[] = [];
+    const newItemIds: string[] = [];
+    let totalRefund = 0;
+
+    for (let i = 0; i < actualCount; i++) {
+      const isLastOfMulti = actualCount >= GACHA_MULTI_COUNT && i === actualCount - 1;
+      const hasHighTierAlready = results.some(
+        (r) => r.item.rarity === 'epic' || r.item.rarity === 'legendary'
       );
+
+      let candidatePool = GACHA_EXCLUSIVE_ITEMS;
+      if (isLastOfMulti && !hasHighTierAlready) {
+        const highTier = GACHA_EXCLUSIVE_ITEMS.filter(
+          (it) => it.rarity === 'epic' || it.rarity === 'legendary'
+        );
+        if (highTier.length > 0) candidatePool = highTier;
+      } else {
+        const rolledRarity = rollTargetRarity();
+        const inTier = GACHA_EXCLUSIVE_ITEMS.filter((it) => it.rarity === rolledRarity);
+        if (inTier.length > 0) candidatePool = inTier;
+      }
+
+      const picked = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+      const isDuplicate = ownedSet.has(picked.id);
+      const refundPoints = isDuplicate ? GACHA_DUPLICATE_REFUND[picked.rarity || 'rare'] : 0;
+
+      if (isDuplicate) {
+        totalRefund += refundPoints;
+      } else {
+        ownedSet.add(picked.id);
+        newItemIds.push(picked.id);
+      }
+
+      results.push({ item: picked, isDuplicate, refundPoints });
     }
 
-    // สุ่มระดับความแรร์ (Legendary 12% / Epic 33% / Rare 55%) พร้อมระบบการันตีไม่ซ้ำ!
-    const rolledRarity = rollTargetRarity();
-    const unownedInTier = unownedAll.filter((it) => it.rarity === rolledRarity);
-    const candidatePool = unownedInTier.length > 0 ? unownedInTier : unownedAll;
-    const wonItem = candidatePool[Math.floor(Math.random() * candidatePool.length)];
-
-    const nextPoints = currentPoints - GACHA_SPIN_COST;
+    const nextPoints = currentPoints - totalCost + totalRefund;
     await turso.execute({
       sql: `UPDATE users SET points = ? WHERE id = ?`,
       args: [nextPoints, Number(userId)],
     });
-    await turso.execute({
-      sql: `INSERT OR IGNORE INTO user_items (user_id, item_id) VALUES (?, ?)`,
-      args: [Number(userId), wonItem.id],
-    });
-    ownedSet.add(wonItem.id);
 
-    // สวมใส่ไอเทมที่เพิ่งสุ่มได้ให้ทันทีเพื่อเห็นผลบนตัวละครเลย!
-    const col =
-      wonItem.category === 'hat'
-        ? 'equip_hat'
-        : wonItem.category === 'face'
-        ? 'equip_face'
-        : wonItem.category === 'armor'
-        ? 'equip_armor'
-        : wonItem.category === 'weapon'
-        ? 'equip_weapon'
-        : wonItem.category === 'wings'
-        ? 'equip_wings'
-        : wonItem.category === 'aura'
-        ? 'equip_aura'
-        : wonItem.category === 'mount'
-        ? 'equip_mount'
-        : 'equip_pet_gear';
-    await turso.execute({
-      sql: `UPDATE users SET ${col} = ? WHERE id = ?`,
-      args: [wonItem.id, Number(userId)],
-    });
+    for (const itemId of newItemIds) {
+      await turso.execute({
+        sql: `INSERT OR IGNORE INTO user_items (user_id, item_id) VALUES (?, ?)`,
+        args: [Number(userId), itemId],
+      });
+    }
+
+    const wonItems = results.map((r) => r.item);
+    const bestNew = results
+      .filter((r) => !r.isDuplicate)
+      .sort(
+        (a, b) =>
+          (RARITY_RANK[b.item.rarity || 'rare'] || 1) - (RARITY_RANK[a.item.rarity || 'rare'] || 1)
+      )[0]?.item;
+
+    const bestItem =
+      bestNew ||
+      [...wonItems].sort(
+        (a, b) => (RARITY_RANK[b.rarity || 'rare'] || 1) - (RARITY_RANK[a.rarity || 'rare'] || 1)
+      )[0];
+
+    // สวมใส่ชิ้นใหม่ที่แรร์ที่สุดให้อัตโนมัติ (ถ้าออกซ้ำทั้งหมดจะไม่ไปเปลี่ยนชุดที่ใส่อยู่)
+    if (bestNew) {
+      const col =
+        bestNew.category === 'hat'
+          ? 'equip_hat'
+          : bestNew.category === 'face'
+          ? 'equip_face'
+          : bestNew.category === 'armor'
+          ? 'equip_armor'
+          : bestNew.category === 'weapon'
+          ? 'equip_weapon'
+          : bestNew.category === 'wings'
+          ? 'equip_wings'
+          : bestNew.category === 'aura'
+          ? 'equip_aura'
+          : bestNew.category === 'mount'
+          ? 'equip_mount'
+          : 'equip_pet_gear';
+      await turso.execute({
+        sql: `UPDATE users SET ${col} = ? WHERE id = ?`,
+        args: [bestNew.id, Number(userId)],
+      });
+    }
+
+    const remainingUnowned = GACHA_EXCLUSIVE_ITEMS.filter((it) => !ownedSet.has(it.id)).length;
 
     return NextResponse.json({
       success: true,
-      wonItem,
+      wonItem: bestItem,
+      wonItems,
+      results,
+      totalRefund,
       points: nextPoints,
+      spentPoints: totalCost,
       unlockedItems: Array.from(ownedSet),
-      remainingUnowned: unownedAll.length - 1,
+      remainingUnowned,
     });
   } catch (error) {
     console.error('POST /api/gacha error:', error);

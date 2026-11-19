@@ -56,6 +56,13 @@ export async function POST(req: Request) {
       }
     }
 
+    if (validSenderId && validSenderId === Number(targetUserId)) {
+      return NextResponse.json(
+        { error: 'ไม่สามารถเติมไฟหรือส่งของกินแกล้งตัวเองได้! กรุณาเลือกเพื่อนคนอื่นในสนาม 🔥' },
+        { status: 400 }
+      );
+    }
+
     const finalKind = kind === 'tempt' ? 'tempt' : 'cheer';
     const pool = finalKind === 'tempt' ? TEMPT_FOODS : CHEER_GIFTS;
     const giftItem = pool[Math.floor(Math.random() * pool.length)];
@@ -90,28 +97,14 @@ export async function POST(req: Request) {
       dailyBonusRemaining = Math.max(0, 5 - sentCount);
     }
 
-    // 2) โบนัสคนได้รับไฟเชียร์: เพื่อนส่งไฟให้ คนได้รับไฟก็ได้แต้มกำลังใจทันที +2 🪙 ด้วย! (สูงสุดรับจากเพื่อนวันละ 5 ครั้ง = +10 🪙)
+    // 2) โบนัสคนได้รับไฟเชียร์: เพื่อนส่งไฟให้ คนได้รับไฟก็ได้แต้มกำลังใจทันที +2 🪙 (ไม่จำกัดจำนวนครั้งต่อวัน!)
     let receiverBonusEarned = 0;
     if (finalKind === 'cheer' && (!validSenderId || validSenderId !== Number(targetUserId))) {
-      const recvTodayRes = await turso.execute({
-        sql: `
-          SELECT COUNT(*) AS cnt
-          FROM interactions
-          WHERE target_user_id = ?
-            AND kind = 'cheer'
-            AND (sender_id IS NULL OR sender_id != ?)
-            AND date(created_at) = date('now')
-        `,
-        args: [Number(targetUserId), Number(targetUserId)],
+      receiverBonusEarned = 2;
+      await turso.execute({
+        sql: 'UPDATE users SET points = points + ? WHERE id = ?',
+        args: [receiverBonusEarned, Number(targetUserId)],
       });
-      const recvCount = Number(recvTodayRes.rows[0]?.cnt ?? 0);
-      if (recvCount <= 5) {
-        receiverBonusEarned = 2;
-        await turso.execute({
-          sql: 'UPDATE users SET points = points + ? WHERE id = ?',
-          args: [receiverBonusEarned, Number(targetUserId)],
-        });
-      }
     }
 
     // คำนวณแต้มเติมไฟ (+) และมารผจญ (-) รายวัน (รีเซ็ตทุก 07:00 น. เวลาไทย = 00:00 UTC)

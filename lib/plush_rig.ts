@@ -221,6 +221,141 @@ function resolveOutfitPalette(equipArmor: string): OutfitPalette {
         hasVestLayer: false,
         hasTrackStripe: false,
       };
+    case 'armor_hawaii_shirt':
+      return {
+        shirtHex: 0x06b6d4,
+        shirtSecondaryHex: 0xfacc15,
+        collarHex: 0xfef08a,
+        pantsHex: 0xf59e0b,
+        shoeHex: 0x0284c7,
+        longSleeve: false,
+        isShorts: true,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: true,
+        hasVestLayer: false,
+        hasTrackStripe: false,
+      };
+    case 'armor_tracksuit_neon':
+      return {
+        shirtHex: 0x1e293b,
+        shirtSecondaryHex: 0x4ade80,
+        collarHex: 0x4ade80,
+        pantsHex: 0x0f172a,
+        shoeHex: 0x22c55e,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: false,
+        hasVestLayer: false,
+        hasTrackStripe: true,
+      };
+    case 'armor_chef_uniform':
+      return {
+        shirtHex: 0xffffff,
+        shirtSecondaryHex: 0xef4444,
+        collarHex: 0xef4444,
+        pantsHex: 0x1e293b,
+        shoeHex: 0x18181b,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: true,
+        hasVestLayer: false,
+        hasTrackStripe: false,
+      };
+    case 'armor_kimono_sakura':
+      return {
+        shirtHex: 0xf472b6,
+        shirtSecondaryHex: 0x7c3aed,
+        collarHex: 0xffffff,
+        pantsHex: 0xf9a8d4,
+        shoeHex: 0x7c3aed,
+        longSleeve: true,
+        isShorts: true,
+        isPleatedSkirt: true,
+        hasHoodie: false,
+        hasCardiganButtons: false,
+        hasVestLayer: false,
+        hasTrackStripe: false,
+      };
+    case 'armor_ninja_suit':
+      return {
+        shirtHex: 0x0f172a,
+        shirtSecondaryHex: 0xef4444,
+        collarHex: 0xef4444,
+        pantsHex: 0x020617,
+        shoeHex: 0x18181b,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: true,
+        hasCardiganButtons: false,
+        hasVestLayer: false,
+        hasTrackStripe: true,
+      };
+    case 'armor_pirate_coat':
+      return {
+        shirtHex: 0x991b1b,
+        shirtSecondaryHex: 0xfacc15,
+        collarHex: 0xfef3c7,
+        pantsHex: 0x1e293b,
+        shoeHex: 0x451a03,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: true,
+        hasVestLayer: true,
+        hasTrackStripe: false,
+      };
+    case 'armor_space_suit':
+      return {
+        shirtHex: 0xf8fafc,
+        shirtSecondaryHex: 0xf97316,
+        collarHex: 0x38bdf8,
+        pantsHex: 0xe2e8f0,
+        shoeHex: 0xf97316,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: false,
+        hasVestLayer: true,
+        hasTrackStripe: true,
+      };
+    case 'armor_gacha_cyber_jacket':
+      return {
+        shirtHex: 0x0ea5e9,
+        shirtSecondaryHex: 0xf472b6,
+        collarHex: 0x38bdf8,
+        pantsHex: 0x0f172a,
+        shoeHex: 0xec4899,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: true,
+        hasCardiganButtons: false,
+        hasVestLayer: false,
+        hasTrackStripe: true,
+      };
+    case 'armor_gacha_royal_king':
+      return {
+        shirtHex: 0xdc2626,
+        shirtSecondaryHex: 0xfacc15,
+        collarHex: 0xffffff,
+        pantsHex: 0x18181b,
+        shoeHex: 0xfacc15,
+        longSleeve: true,
+        isShorts: false,
+        isPleatedSkirt: false,
+        hasHoodie: false,
+        hasCardiganButtons: true,
+        hasVestLayer: true,
+        hasTrackStripe: false,
+      };
     case 'armor_none':
     default:
       return {

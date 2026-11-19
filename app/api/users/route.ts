@@ -45,10 +45,12 @@ export async function POST(req: Request) {
       equipAura,
       equipPetGear,
       equipMount,
+      equipMarker,
       propColors,
     } = body;
 
-    const finalRole = role === 'spectator' ? 'spectator' : 'competitor';
+    // Everyone participates in the Step Challenge as a competitor; the 5 goal types are optional side quests!
+    const finalRole = 'competitor';
     const finalGoalType =
       typeof goalType === 'string' && VALID_GOAL_TYPES.has(goalType) ? goalType : 'weight_loss';
     const isCumulative = finalGoalType === 'reps_accumulate' || finalGoalType === 'distance_accumulate';
@@ -63,15 +65,12 @@ export async function POST(req: Request) {
     const rawTarget = targetVal !== undefined ? Number(targetVal) : Number(goalWeight || 0);
     const effectiveBodyWeight = rawBodyWeight > 0 ? rawBodyWeight : !isCumulative ? rawStart : 0;
 
-    if (!name || (finalRole === 'competitor' && (!rawTarget || (!isCumulative && !rawStart)))) {
-      return NextResponse.json({ error: 'กรุณากรอกชื่อและเป้าหมายให้ครบถ้วน' }, { status: 400 });
+    if (!name || !String(name).trim()) {
+      return NextResponse.json({ error: 'กรุณากรอกชื่อตัวละคร' }, { status: 400 });
     }
-    if (
-      finalRole === 'competitor' &&
-      (effectiveBodyWeight <= 15 || rawHeightCm < 80 || rawHeightCm > 250)
-    ) {
+    if (effectiveBodyWeight < 16 || effectiveBodyWeight > 300 || rawHeightCm < 80 || rawHeightCm > 250) {
       return NextResponse.json(
-        { error: 'กรุณากรอกน้ำหนัก (กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
+        { error: 'กรุณากรอกน้ำหนัก (16–300 กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
         { status: 400 }
       );
     }
@@ -104,6 +103,7 @@ export async function POST(req: Request) {
     const finalAura = typeof equipAura === 'string' && equipAura ? equipAura : 'aura_none';
     const finalPetGear = typeof equipPetGear === 'string' && equipPetGear ? equipPetGear : 'pet_none';
     const finalMount = typeof equipMount === 'string' && equipMount ? equipMount : 'mount_none';
+    const finalMarker = typeof equipMarker === 'string' && equipMarker ? equipMarker : 'marker_wood';
     const finalPropColors = JSON.stringify(parsePropColors(propColors));
 
     const safeStart = finalRole === 'competitor' ? (isCumulative ? 0 : rawStart) : 0;
@@ -115,8 +115,8 @@ export async function POST(req: Request) {
       sql: `INSERT INTO users (
         name, avatar_emoji, color_hex, accessory, band_color, role, workout_type, pet_type,
         pin_code, start_weight, goal_weight, body_weight, height_cm, gender, points, species, breed, theme_id,
-        equip_hat, equip_face, equip_armor, equip_weapon, equip_wings, equip_aura, equip_pet_gear, equip_mount, prop_colors
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 60, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        equip_hat, equip_face, equip_armor, equip_weapon, equip_wings, equip_aura, equip_pet_gear, equip_mount, equip_marker, prop_colors
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 60, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         name.trim(),
         avatarEmoji || '🐰',
@@ -143,6 +143,7 @@ export async function POST(req: Request) {
         finalAura,
         finalPetGear,
         finalMount,
+        finalMarker,
         finalPropColors,
       ],
     });
@@ -212,8 +213,17 @@ export async function PATCH(req: Request) {
       equipAura,
       equipPetGear,
       equipMount,
+      equipMarker,
       propColors,
     } = body;
+
+    if (body.roamOnly && userId && isSelf) {
+      await turso.execute({
+        sql: `UPDATE users SET is_roaming = ? WHERE id = ?`,
+        args: [body.isRoaming ? 1 : 0, Number(userId)],
+      });
+      return NextResponse.json({ success: true, isRoaming: Boolean(body.isRoaming) });
+    }
 
     if (!userId || (!isSelf && !pinCode)) {
       return NextResponse.json({ error: 'กรุณาระบุตัวละครและรหัส PIN' }, { status: 400 });
@@ -233,13 +243,12 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: 'รหัส PIN ไม่ถูกต้อง!' }, { status: 401 });
     }
 
-    const nextRole =
-      role === 'spectator' ? 'spectator' : role === 'competitor' ? 'competitor' : String(user.role || 'competitor');
+    const nextRole = 'competitor';
     const rawStart = startVal !== undefined ? Number(startVal) : startWeight !== undefined ? Number(startWeight) : undefined;
     const rawTarget = targetVal !== undefined ? Number(targetVal) : goalWeight !== undefined ? Number(goalWeight) : undefined;
 
     const nextStart = rawStart !== undefined && rawStart >= 0 ? rawStart : Number(user.start_weight || 0);
-    const nextGoal = rawTarget !== undefined && rawTarget > 0 ? rawTarget : Number(user.goal_weight || 0);
+    const nextGoal = rawTarget !== undefined && rawTarget >= 0 ? rawTarget : Number(user.goal_weight || 0);
     const nextBodyWeight =
       bodyWeight !== undefined && Number(bodyWeight) > 0
         ? Number(bodyWeight)
@@ -258,10 +267,10 @@ export async function PATCH(req: Request) {
     if (
       nextRole === 'competitor' &&
       goalType !== undefined &&
-      (nextBodyWeight <= 15 || nextHeightCm < 80 || nextHeightCm > 250)
+      (nextBodyWeight < 16 || nextBodyWeight > 300 || nextHeightCm < 80 || nextHeightCm > 250)
     ) {
       return NextResponse.json(
-        { error: 'กรุณากรอกน้ำหนัก (กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
+        { error: 'กรุณากรอกน้ำหนัก (16–300 กก.) และส่วนสูง (80–250 ซม.) เพื่อคำนวณรูปร่าง BMI' },
         { status: 400 }
       );
     }
@@ -300,6 +309,8 @@ export async function PATCH(req: Request) {
       typeof equipPetGear === 'string' && equipPetGear ? equipPetGear : String(user.equip_pet_gear || 'pet_none');
     const nextMount =
       typeof equipMount === 'string' && equipMount ? equipMount : String(user.equip_mount || 'mount_none');
+    const nextMarker =
+      typeof equipMarker === 'string' && equipMarker ? equipMarker : String(user.equip_marker || 'marker_wood');
     const nextPropColors =
       propColors !== undefined ? JSON.stringify(parsePropColors(propColors)) : String(user.prop_colors || '{}');
 
@@ -309,7 +320,7 @@ export async function PATCH(req: Request) {
         role = ?, workout_type = ?, pet_type = ?, status_text = ?,
         start_weight = ?, goal_weight = ?, body_weight = ?, height_cm = ?, gender = ?,
         species = ?, breed = ?, theme_id = ?,
-        equip_hat = ?, equip_face = ?, equip_armor = ?, equip_weapon = ?, equip_wings = ?, equip_aura = ?, equip_pet_gear = ?, equip_mount = ?, prop_colors = ?
+        equip_hat = ?, equip_face = ?, equip_armor = ?, equip_weapon = ?, equip_wings = ?, equip_aura = ?, equip_pet_gear = ?, equip_mount = ?, equip_marker = ?, prop_colors = ?
       WHERE id = ?`,
       args: [
         nextName,
@@ -337,6 +348,7 @@ export async function PATCH(req: Request) {
         nextAura,
         nextPetGear,
         nextMount,
+        nextMarker,
         nextPropColors,
         userId,
       ],
@@ -361,8 +373,18 @@ export async function PATCH(req: Request) {
         const prevGoalType = String(existingEntry.rows[0].goal_type);
         const prevStartVal = Number(existingEntry.rows[0].start_val);
         const prevCurVal = Number(existingEntry.rows[0].current_val);
+        const explicitBodyWeight =
+          bodyWeight !== undefined && Number(bodyWeight) > 0 ? Number(bodyWeight) : 0;
+        const bodyWeightChanged =
+          !isCumulative &&
+          explicitBodyWeight > 0 &&
+          Math.abs(explicitBodyWeight - prevCurVal) >= 0.001;
         const curVal =
-          prevGoalType !== finalGoalType || Math.abs(prevCurVal - prevStartVal) < 0.001
+          prevGoalType !== finalGoalType
+            ? entryStart
+            : bodyWeightChanged
+            ? explicitBodyWeight
+            : Math.abs(prevCurVal - prevStartVal) < 0.001
             ? entryStart
             : prevCurVal;
         await turso.execute({

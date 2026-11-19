@@ -15,9 +15,17 @@ import {
   HERO_LIST,
   ANIME_CATEGORIES,
   ANIME_LIST,
+  MONSTER_CATEGORIES,
+  MONSTER_LIST,
+  JOB_CATEGORIES,
+  JOB_LIST,
   SHOP_ITEMS,
   GACHA_EXCLUSIVE_ITEMS,
   GACHA_SPIN_COST,
+  GACHA_MULTI_COUNT,
+  GACHA_MULTI_COST,
+  GACHA_DUPLICATE_REFUND,
+  type GachaRollResult,
   FREE_DEFAULT_ITEMS,
   type GoalType,
   type GenderType,
@@ -28,11 +36,15 @@ import {
   type SpeciesCategoryId,
   type HeroCategoryId,
   type AnimeCategoryId,
+  type MonsterCategoryId,
+  type JobCategoryId,
   type SpeciesOption,
   computeBmiMeta,
   getGoalTypeMeta,
   isHeroSpecies,
   isAnimeSpecies,
+  isMonsterSpecies,
+  isJobSpecies,
   resolveBreedOption,
 } from '@/lib/rpg_catalog';
 import {
@@ -41,6 +53,8 @@ import {
   animatePetMotion,
   applyCharacterBellyScale,
   syncCharacterMountPose,
+  buildTrackMarkerMesh,
+  animateTrackMarkerMesh,
 } from '@/lib/character_3d';
 import { FIT_ACTIVITIES, EAT_ACTIVITIES } from '@/lib/spectator_activities';
 
@@ -53,7 +67,7 @@ interface WardrobeModalProps {
   userPoints: number;
   unlockedItems: string[];
   onUnlockOrEquipItem: (itemId: string) => Promise<void>;
-  onSpinGacha: () => Promise<ShopItem>;
+  onSpinGacha: (count?: 1 | 8) => Promise<GachaRollResult[]>;
   initialRightTab?: ShopCategory | 'gacha';
   joinRole: 'competitor' | 'spectator';
   setJoinRole: (r: 'competitor' | 'spectator') => void;
@@ -85,6 +99,8 @@ interface WardrobeModalProps {
   setJoinEquipPetGear: (v: string) => void;
   joinEquipMount?: string;
   setJoinEquipMount?: (v: string) => void;
+  joinEquipMarker?: string;
+  setJoinEquipMarker?: (v: string) => void;
   joinPropColors?: PropColorMap;
   setJoinPropColors?: React.Dispatch<React.SetStateAction<PropColorMap>>;
   joinGoalType: GoalType;
@@ -1025,6 +1041,8 @@ export function WardrobeShopModal({
   setJoinEquipPetGear,
   joinEquipMount = 'mount_none',
   setJoinEquipMount = () => {},
+  joinEquipMarker = 'marker_wood',
+  setJoinEquipMarker = () => {},
   joinPropColors = {},
   setJoinPropColors = () => {},
   joinGoalType,
@@ -1053,8 +1071,16 @@ export function WardrobeShopModal({
   const rotYRef = useRef<number>(INITIAL_FACING_YAW);
   const autoSpinRef = useRef<boolean>(true);
   const [autoSpinUi, setAutoSpinUi] = useState<boolean>(true);
-  const [leftTab, setLeftTab] = useState<'species' | 'hero' | 'anime'>(() =>
-    isAnimeSpecies(joinSpecies) ? 'anime' : isHeroSpecies(joinSpecies) ? 'hero' : 'species'
+  const [leftTab, setLeftTab] = useState<'species' | 'hero' | 'anime' | 'monster' | 'job'>(() =>
+    isJobSpecies(joinSpecies)
+      ? 'job'
+      : isMonsterSpecies(joinSpecies)
+      ? 'monster'
+      : isAnimeSpecies(joinSpecies)
+      ? 'anime'
+      : isHeroSpecies(joinSpecies)
+      ? 'hero'
+      : 'species'
   );
   const [selectedCategory, setSelectedCategory] = useState<SpeciesCategoryId>(
     () => resolveBreedOption(joinSpecies).category
@@ -1065,11 +1091,19 @@ export function WardrobeShopModal({
   const [selectedAnimeCat, setSelectedAnimeCat] = useState<AnimeCategoryId>(
     () => resolveBreedOption(joinSpecies).animeCategory || 'shonen'
   );
+  const [selectedMonsterCat, setSelectedMonsterCat] = useState<MonsterCategoryId>(
+    () => resolveBreedOption(joinSpecies).monsterCategory || 'thai_ghost'
+  );
+  const [selectedJobCat, setSelectedJobCat] = useState<JobCategoryId>(
+    () => resolveBreedOption(joinSpecies).jobCategory || 'melee'
+  );
   const [leftSearch, setLeftSearch] = useState<string>('');
   const [colorEditTarget, setColorEditTarget] = useState<'body' | 'band'>('body');
-  const [showFineSliders, setShowFineSliders] = useState<boolean>(true);
+  const [showFineSliders, setShowFineSliders] = useState<boolean>(false);
   const [armorColorPart, setArmorColorPart] = useState<'shirt' | 'pants'>('shirt');
   const [showPropFineSliders, setShowPropFineSliders] = useState<boolean>(false);
+  const [showBmiCard, setShowBmiCard] = useState<boolean>(true);
+  const [showConfirmBmiEdit, setShowConfirmBmiEdit] = useState<boolean>(false);
   const [rightCategory, setRightCategory] = useState<ShopCategory | 'gacha'>(initialRightTab || 'armor');
   const [previewBelly, setPreviewBelly] = useState<number>(1.0);
   const [shopBusyId, setShopBusyId] = useState<string | null>(null);
@@ -1077,6 +1111,12 @@ export function WardrobeShopModal({
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [gachaSpinning, setGachaSpinning] = useState<boolean>(false);
   const [lastWonGachaItem, setLastWonGachaItem] = useState<ShopItem | null>(null);
+  const [gachaStage, setGachaStage] = useState<null | 'charging' | 'fakeout' | 'reveal'>(null);
+  const [gachaOverlayResults, setGachaOverlayResults] = useState<GachaRollResult[]>([]);
+  const [gachaPullCount, setGachaPullCount] = useState<1 | 8>(1);
+  const [gachaRevealKey, setGachaRevealKey] = useState<number>(0);
+  const gachaSkipRef = useRef<boolean>(false);
+  const [onlyOwnedFilter, setOnlyOwnedFilter] = useState<boolean>(false);
   const [previewOverrides, setPreviewOverrides] = useState<Record<ShopCategory, string | null>>({
     hat: null,
     face: null,
@@ -1086,6 +1126,7 @@ export function WardrobeShopModal({
     aura: null,
     pet: null,
     mount: null,
+    marker: null,
   });
 
   const clearAllPreviewOverrides = () => {
@@ -1098,6 +1139,7 @@ export function WardrobeShopModal({
       aura: null,
       pet: null,
       mount: null,
+      marker: null,
     });
   };
 
@@ -1109,13 +1151,13 @@ export function WardrobeShopModal({
   const effectiveAura = previewOverrides.aura ?? joinEquipAura;
   const effectivePet = previewOverrides.pet ?? joinEquipPetGear;
   const effectiveMount = previewOverrides.mount ?? joinEquipMount;
+  const effectiveMarker = previewOverrides.marker ?? joinEquipMarker;
   const propColorsJson = JSON.stringify(joinPropColors || {});
 
   const ownedSet = new Set([...Array.from(FREE_DEFAULT_ITEMS), ...unlockedItems]);
   const gachaOwnedCount = GACHA_EXCLUSIVE_ITEMS.filter((it) => ownedSet.has(it.id)).length;
   const goalMeta = getGoalTypeMeta(joinGoalType);
-  const effectiveWeightInput = joinBodyWeight || (!goalMeta.isCumulative ? joinStart : '');
-  const parsedBodyWeight = parseFloat(effectiveWeightInput || '0');
+  const parsedBodyWeight = parseFloat(joinBodyWeight || '0');
   const parsedHeightCm = parseFloat(joinHeightCm || '0');
   const bmiMeta = computeBmiMeta(parsedBodyWeight, parsedHeightCm, joinGender);
   const effectiveBellyScale = bmiMeta.isValid ? bmiMeta.bellyScale : previewBelly;
@@ -1128,10 +1170,17 @@ export function WardrobeShopModal({
       autoSpinRef.current = true;
       setAutoSpinUi(true);
       setShowConfirmModal(false);
+      setShowConfirmBmiEdit(false);
       setLastWonGachaItem(null);
       clearAllPreviewOverrides();
       const curBreed = resolveBreedOption(joinSpecies);
-      if (isAnimeSpecies(joinSpecies) || curBreed.animeCategory) {
+      if (isJobSpecies(joinSpecies) || curBreed.jobCategory) {
+        setLeftTab('job');
+        if (curBreed.jobCategory) setSelectedJobCat(curBreed.jobCategory);
+      } else if (isMonsterSpecies(joinSpecies) || curBreed.monsterCategory) {
+        setLeftTab('monster');
+        if (curBreed.monsterCategory) setSelectedMonsterCat(curBreed.monsterCategory);
+      } else if (isAnimeSpecies(joinSpecies) || curBreed.animeCategory) {
         setLeftTab('anime');
         if (curBreed.animeCategory) setSelectedAnimeCat(curBreed.animeCategory);
       } else if (curBreed.isHero) {
@@ -1161,8 +1210,8 @@ export function WardrobeShopModal({
 
     const hasMount = effectiveMount && effectiveMount !== 'mount_none';
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 140);
-    camera.position.set(0, hasMount ? 2.68 : 2.4, hasMount ? 9.15 : 8.4);
-    camera.lookAt(0, hasMount ? 1.15 : 0.95, 0);
+    camera.position.set(0, hasMount ? 2.65 : 2.35, hasMount ? 10.4 : 9.6);
+    camera.lookAt(0, hasMount ? 0.65 : 0.45, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
@@ -1424,8 +1473,20 @@ export function WardrobeShopModal({
       if (petParts) {
         animatePetMotion(petParts, charParts, effectivePet, false, t, 0);
       }
+      if (markerPreviewParts) {
+        animateTrackMarkerMesh(markerPreviewParts, t, 0);
+      }
       composer.render();
     };
+    const showMarkerOnStage = rightCategory === 'marker' || Boolean(previewOverrides.marker);
+    const markerPreviewParts = showMarkerOnStage
+      ? buildTrackMarkerMesh(effectiveMarker, joinBandColor || joinColor)
+      : null;
+    if (markerPreviewParts) {
+      markerPreviewParts.group.position.set(1.35, 0.02, 0.25);
+      markerPreviewParts.group.scale.setScalar(0.85);
+      scene.add(markerPreviewParts.group);
+    }
     animate();
 
     return () => {
@@ -1452,6 +1513,8 @@ export function WardrobeShopModal({
     effectiveAura,
     effectivePet,
     effectiveMount,
+    effectiveMarker,
+    rightCategory,
     propColorsJson,
     joinGoalType,
   ]);
@@ -1508,6 +1571,7 @@ export function WardrobeShopModal({
     setJoinEquipAura('aura_none');
     setJoinEquipPetGear('pet_none');
     setJoinEquipMount('mount_none');
+    setJoinEquipMarker('marker_wood');
     setJoinPropColors({});
     setPreviewBelly(1.0);
     clearAllPreviewOverrides();
@@ -1543,6 +1607,7 @@ export function WardrobeShopModal({
       else if (item.category === 'aura') setJoinEquipAura(item.id);
       else if (item.category === 'pet') setJoinEquipPetGear(item.id);
       else if (item.category === 'mount') setJoinEquipMount(item.id);
+      else if (item.category === 'marker') setJoinEquipMarker(item.id);
       return;
     }
 
@@ -1570,6 +1635,7 @@ export function WardrobeShopModal({
       else if (item.category === 'aura') setJoinEquipAura(item.id);
       else if (item.category === 'pet') setJoinEquipPetGear(item.id);
       else if (item.category === 'mount') setJoinEquipMount(item.id);
+      else if (item.category === 'marker') setJoinEquipMarker(item.id);
       setShopMsg(`🎉 ปลดล็อกและสวมใส่ "${item.name}" สำเร็จ!`);
     } catch (err: any) {
       setShopMsg(err?.message || 'ปลดล็อกไม่สำเร็จ');
@@ -1578,31 +1644,168 @@ export function WardrobeShopModal({
     }
   };
 
-  const handleGachaSpinClick = async () => {
+  const playGachaSfx = (kind: 'charge' | 'rare' | 'epic' | 'legendary_upgrade' | 'legendary') => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const tone = (
+        freq: number,
+        start: number,
+        dur: number,
+        type: OscillatorType = 'triangle',
+        gainVal = 0.14
+      ) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now + start);
+        gain.gain.setValueAtTime(0.001, now + start);
+        gain.gain.exponentialRampToValueAtTime(gainVal, now + start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + start);
+        osc.stop(now + start + dur + 0.03);
+      };
+
+      if (kind === 'charge') {
+        [330, 392, 440, 523, 587, 659].forEach((f, i) => tone(f, i * 0.13, 0.14, 'triangle', 0.1));
+      } else if (kind === 'rare') {
+        tone(523.25, 0, 0.2, 'sine', 0.16);
+        tone(659.25, 0.1, 0.25, 'sine', 0.16);
+        tone(783.99, 0.2, 0.4, 'triangle', 0.18);
+      } else if (kind === 'epic') {
+        [440, 554.37, 659.25, 880].forEach((f, i) => tone(f, i * 0.09, 0.32, 'sawtooth', 0.1));
+        tone(1108.73, 0.34, 0.55, 'triangle', 0.16);
+      } else if (kind === 'legendary_upgrade') {
+        tone(220, 0, 0.18, 'sawtooth', 0.15);
+        tone(440, 0.1, 0.22, 'sawtooth', 0.15);
+        tone(880, 0.22, 0.3, 'square', 0.12);
+        tone(1318.5, 0.36, 0.35, 'triangle', 0.16);
+      } else if (kind === 'legendary') {
+        const fanfare = [523.25, 659.25, 783.99, 1046.5, 987.77, 1046.5, 1318.5, 1567.98];
+        fanfare.forEach((f, i) => tone(f, i * 0.085, i === fanfare.length - 1 ? 0.75 : 0.22, 'triangle', 0.16));
+      }
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 1800);
+    } catch {
+      // ignore audio context restrictions
+    }
+  };
+
+  const equipWonItemLocally = (item: ShopItem) => {
+    setPreviewOverrides((prev) => ({ ...prev, [item.category]: null }));
+    if (item.category === 'hat') setJoinEquipHat(item.id);
+    else if (item.category === 'face') setJoinEquipFace(item.id);
+    else if (item.category === 'armor') setJoinEquipArmor(item.id);
+    else if (item.category === 'weapon') setJoinEquipWeapon(item.id);
+    else if (item.category === 'wings') setJoinEquipWings(item.id);
+    else if (item.category === 'aura') setJoinEquipAura(item.id);
+    else if (item.category === 'pet') setJoinEquipPetGear(item.id);
+    else if (item.category === 'mount') setJoinEquipMount(item.id);
+    else if (item.category === 'marker') setJoinEquipMarker(item.id);
+  };
+
+  const isItemCurrentlyEquipped = (item: ShopItem) =>
+    (item.category === 'hat' && joinEquipHat === item.id) ||
+    (item.category === 'face' && joinEquipFace === item.id) ||
+    (item.category === 'armor' && joinEquipArmor === item.id) ||
+    (item.category === 'weapon' && joinEquipWeapon === item.id) ||
+    (item.category === 'wings' && joinEquipWings === item.id) ||
+    (item.category === 'aura' && joinEquipAura === item.id) ||
+    (item.category === 'pet' && joinEquipPetGear === item.id) ||
+    (item.category === 'mount' && joinEquipMount === item.id) ||
+    (item.category === 'marker' && joinEquipMarker === item.id);
+
+  const waitSkippable = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        if (gachaSkipRef.current || Date.now() - start >= ms) {
+          resolve();
+        } else {
+          setTimeout(tick, 45);
+        }
+      };
+      tick();
+    });
+
+  const handleGachaSpinClick = async (count: 1 | 8 = 1) => {
     setShopMsg('');
     if (mode === 'create' || !editingPlayerId) {
       setShopMsg('💡 กด "อัญเชิญลงสนามแข่ง" สร้างตัวละครก่อน แล้วกลับมาหมุนกาชาปองได้เลย!');
       return;
     }
     if (gachaSpinning) return;
+    gachaSkipRef.current = false;
     setGachaSpinning(true);
+    setGachaPullCount(count);
     setLastWonGachaItem(null);
+    setGachaOverlayResults([]);
+    setGachaStage('charging');
+    playGachaSfx('charge');
     try {
-      await new Promise((r) => setTimeout(r, 750));
-      const won = await onSpinGacha();
-      setLastWonGachaItem(won);
-      setPreviewOverrides((prev) => ({ ...prev, [won.category]: null }));
-      if (won.category === 'hat') setJoinEquipHat(won.id);
-      else if (won.category === 'face') setJoinEquipFace(won.id);
-      else if (won.category === 'armor') setJoinEquipArmor(won.id);
-      else if (won.category === 'weapon') setJoinEquipWeapon(won.id);
-      else if (won.category === 'wings') setJoinEquipWings(won.id);
-      else if (won.category === 'aura') setJoinEquipAura(won.id);
-      else if (won.category === 'pet') setJoinEquipPetGear(won.id);
-      else if (won.category === 'mount') setJoinEquipMount(won.id);
-      confetti({ particleCount: won.rarity === 'legendary' ? 110 : 65, spread: 78, origin: { y: 0.55 } });
-      setShopMsg(`🎉 ยินดีด้วย! สุ่มได้ "${won.icon} ${won.name}"!`);
+      const [rollResults] = await Promise.all([
+        onSpinGacha(count),
+        waitSkippable(count === 8 ? 1450 : 1150),
+      ]);
+      if (!rollResults || rollResults.length === 0) {
+        throw new Error('ไม่ได้รับไอเทมจากตู้กาชาปอง');
+      }
+      setGachaOverlayResults(rollResults);
+
+      const hasLegendary = rollResults.some((r) => r.item.rarity === 'legendary');
+      const hasEpic = rollResults.some((r) => r.item.rarity === 'epic');
+
+      if (hasLegendary && !gachaSkipRef.current) {
+        // จังหวะ Fake-Out สไตล์ Ni no Kuni! วงเวทย์ม่วงแตกออกเป็นแสงทองสายรุ้ง!
+        setGachaStage('fakeout');
+        playGachaSfx('legendary_upgrade');
+        await waitSkippable(950);
+      }
+
+      const bestNew =
+        rollResults.find((r) => !r.isDuplicate && r.item.rarity === 'legendary')?.item ||
+        rollResults.find((r) => !r.isDuplicate && r.item.rarity === 'epic')?.item ||
+        rollResults.find((r) => !r.isDuplicate)?.item;
+      const bestWon =
+        bestNew ||
+        rollResults.find((r) => r.item.rarity === 'legendary')?.item ||
+        rollResults.find((r) => r.item.rarity === 'epic')?.item ||
+        rollResults[0].item;
+      setLastWonGachaItem(bestWon);
+      if (bestNew) {
+        equipWonItemLocally(bestNew);
+      }
+
+      const totalRefund = rollResults.reduce((sum, r) => sum + (r.refundPoints || 0), 0);
+      setGachaRevealKey((k) => k + 1);
+      setGachaStage('reveal');
+      if (hasLegendary) {
+        playGachaSfx('legendary');
+        confetti({ particleCount: 140, spread: 110, origin: { y: 0.55 }, colors: ['#facc15', '#f472b6', '#38bdf8', '#4ade80', '#ffffff'] });
+        setTimeout(() => confetti({ particleCount: 90, spread: 90, origin: { x: 0.22, y: 0.58 }, colors: ['#facc15', '#fb923c', '#f472b6'] }), 240);
+        setTimeout(() => confetti({ particleCount: 90, spread: 90, origin: { x: 0.78, y: 0.58 }, colors: ['#38bdf8', '#c084fc', '#fde047'] }), 480);
+      } else if (hasEpic) {
+        playGachaSfx('epic');
+        confetti({ particleCount: 95, spread: 88, origin: { y: 0.55 }, colors: ['#c084fc', '#f472b6', '#facc15', '#ffffff'] });
+      } else {
+        playGachaSfx('rare');
+        confetti({ particleCount: 55, spread: 68, origin: { y: 0.55 }, colors: ['#38bdf8', '#bae6fd', '#ffffff'] });
+      }
+      setShopMsg(
+        rollResults.length > 1
+          ? `🌟 อัญเชิญ ×${rollResults.length} สำเร็จ!${totalRefund > 0 ? ` (คืนแต้มของซ้ำ +${totalRefund} 💰)` : ''}`
+          : rollResults[0].isDuplicate
+          ? `🔁 ได้ "${bestWon.icon} ${bestWon.name}" ซ้ำ! คืนแต้ม +${rollResults[0].refundPoints} 💰`
+          : `🎉 ยินดีด้วย! สุ่มได้ "${bestWon.icon} ${bestWon.name}"!`
+      );
     } catch (err: any) {
+      setGachaStage(null);
+      setGachaOverlayResults([]);
       setShopMsg(err?.message || 'หมุนกาชาปองไม่สำเร็จ');
     } finally {
       setGachaSpinning(false);
@@ -1625,6 +1828,10 @@ export function WardrobeShopModal({
           }
           return true;
         });
+  const ownedCountInCurrentCat = categoryItems.filter((it) => ownedSet.has(it.id)).length;
+  const displayedCategoryItems = onlyOwnedFilter
+    ? categoryItems.filter((it) => ownedSet.has(it.id))
+    : categoryItems;
   const hatObj = SHOP_ITEMS.find((i) => i.id === effectiveHat);
   const faceObj = SHOP_ITEMS.find((i) => i.id === effectiveFace);
   const armorObj = SHOP_ITEMS.find((i) => i.id === effectiveArmor);
@@ -1633,6 +1840,7 @@ export function WardrobeShopModal({
   const auraObj = SHOP_ITEMS.find((i) => i.id === effectiveAura);
   const petObj = SHOP_ITEMS.find((i) => i.id === effectivePet);
   const mountObj = SHOP_ITEMS.find((i) => i.id === effectiveMount);
+  const markerObj = SHOP_ITEMS.find((i) => i.id === effectiveMarker);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -1670,9 +1878,9 @@ export function WardrobeShopModal({
                 <div className="h-full bg-gradient-to-r from-lime-400 to-emerald-400 w-3/4" />
               </div>
               <div className="text-[10px] font-bold text-amber-100/85 mt-0.5 truncate">
-                {joinRole === 'competitor'
-                  ? `${goalMeta.shortTag} • เป้า ${joinGoal || '?'} ${goalMeta.unit}`
-                  : '👀 กองเชียร์เดินเล่น'}
+                {joinGoal
+                  ? `👟 Step Challenge • เสริม: ${goalMeta.shortTag} (${joinGoal} ${goalMeta.unit})`
+                  : '👟 ผู้เข้าแข่งขัน Step Challenge'}
               </div>
             </div>
           </button>
@@ -1691,8 +1899,8 @@ export function WardrobeShopModal({
 
           <div className="flex items-center gap-2 ml-auto">
             <div className="rpg-ribbon-header px-3.5 py-2 rounded-xl flex items-center gap-1.5 text-xs sm:text-sm font-extrabold">
-              <span>🪙</span>
-              <span>{userPoints.toLocaleString()} แต้ม</span>
+              <span>💰</span>
+              <span>{userPoints.toLocaleString()} Gacha Pong</span>
             </div>
             <button
               type="button"
@@ -1707,7 +1915,7 @@ export function WardrobeShopModal({
         {/* MIDDLE ROW: LEFT STONE PANEL + OPEN SKY CENTER STAGE + RIGHT STONE PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end lg:items-center flex-1 my-2 min-h-0">
           {/* LEFT PANEL: Carved Stone & Gold Selector (🐾 120 Animals vs 🏰 56 Disney vs 🎌 56 Anime) */}
-          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] flex flex-col relative">
+          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] lg:h-[68dvh] flex flex-col relative">
             <StoneFrameCorners />
             <RpgWingedHeaderPlaque
               title={
@@ -1715,6 +1923,10 @@ export function WardrobeShopModal({
                   ? 'เลือกสายพันธุ์สัตว์'
                   : leftTab === 'anime'
                   ? 'เลือกตัวละครอนิเมะดัง'
+                  : leftTab === 'monster'
+                  ? 'เลือกผี & สัตว์ประหลาด'
+                  : leftTab === 'job'
+                  ? 'เลือกอาชีพสายเกม RPG'
                   : 'เลือกตัวละครดิสนีย์ & พิกซาร์'
               }
               subtitle={
@@ -1722,19 +1934,23 @@ export function WardrobeShopModal({
                   ? '(เลี้ยง • ป่า • สูญพันธุ์ • เทพนิยาย 🐉)'
                   : leftTab === 'anime'
                   ? '(โชเน็น • นางเอก • วัยเด็ก • ตัวตึง 🎌)'
+                  : leftTab === 'monster'
+                  ? '(ผีไทย • ฮาโลวีน • ไคจู • โยไค 👻)'
+                  : leftTab === 'job'
+                  ? '(นักรบ • สายเวท • ว่องไว • คราฟต์ ⚔️)'
                   : '(เจ้าหญิง • คลาสสิก • พิกซาร์ • วายร้าย 🏰)'
               }
             />
 
-            {/* 3 Side Tabs on desktop (protruding right edge of stone frame), compact 3-col row on mobile */}
-            <div className="grid grid-cols-3 gap-1 lg:absolute lg:left-full lg:top-12 lg:flex lg:flex-col lg:gap-1.5 lg:ml-[5px] z-10">
+            {/* 5 Side Tabs on wide desktop (protruding right edge of stone frame), compact strip on tablet/mobile */}
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 xl:absolute xl:left-full xl:top-10 xl:flex xl:flex-col xl:gap-1.5 xl:ml-[5px] z-10">
               <button
                 type="button"
                 onClick={() => {
                   setLeftTab('species');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'species'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -1748,7 +1964,7 @@ export function WardrobeShopModal({
                   setLeftTab('hero');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'hero'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -1762,7 +1978,7 @@ export function WardrobeShopModal({
                   setLeftTab('anime');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 lg:py-2.5 lg:px-3 rounded-lg lg:rounded-l-none lg:rounded-r-xl text-[11px] lg:text-xs font-extrabold border-2 cursor-pointer transition lg:whitespace-nowrap lg:text-left shadow-md ${
+                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'anime'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -1770,9 +1986,37 @@ export function WardrobeShopModal({
               >
                 🎌 อนิเมะ ({ANIME_LIST.length})
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeftTab('monster');
+                  setLeftSearch('');
+                }}
+                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                  leftTab === 'monster'
+                    ? 'rpg-btn-gold'
+                    : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
+                }`}
+              >
+                👻 ผี/ปีศาจ ({MONSTER_LIST.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeftTab('job');
+                  setLeftSearch('');
+                }}
+                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                  leftTab === 'job'
+                    ? 'rpg-btn-gold'
+                    : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
+                }`}
+              >
+                ⚔️ อาชีพ ({JOB_LIST.length})
+              </button>
             </div>
 
-            {/* Quick Search across 120 Animals, 56 Disney/Pixar, or 56 Anime Characters */}
+            {/* Quick Search across Animals, Disney/Pixar, Anime, Ghosts/Monsters, or RPG Jobs */}
             <div className="relative">
               <input
                 type="text"
@@ -1783,6 +2027,10 @@ export function WardrobeShopModal({
                     ? '🔍 ค้นหาใน 120 สายพันธุ์ (เช่น มังกร, หมูเด้ง, ทีเร็กซ์)...'
                     : leftTab === 'anime'
                     ? '🔍 ค้นหาอนิเมะ (เช่น โงกุน, ลูฟี่, โกโจ, อาเนีย, โดราเอมอน, ชินจัง)...'
+                    : leftTab === 'monster'
+                    ? '🔍 ค้นหาผี & ปีศาจ (เช่น กระสือ, เจียงซือ, มัมมี่, ก็อตซิลล่า, คัปปะ)...'
+                    : leftTab === 'job'
+                    ? '🔍 ค้นหาอาชีพ RPG (เช่น พาลาดิน, จอมเวท, นินจา, ซามูไร, นักบินอวกาศ)...'
                     : '🔍 ค้นหาดิสนีย์ (เช่น เอลซ่า, สโนว์ไวท์, สติทช์, เบย์แมกซ์, วู้ดดี้)...'
                 }
                 className="w-full bg-slate-950/90 text-amber-100 placeholder:text-slate-400 border border-slate-600 focus:border-amber-400 outline-none rounded-xl px-3 py-1.5 text-xs font-semibold pr-7"
@@ -1931,6 +2179,146 @@ export function WardrobeShopModal({
                           </div>
                           <div className="text-[10px] font-bold text-amber-200/90 truncate">
                             {hero.nickname} • {hero.desc}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : leftTab === 'monster' ? (
+              <div className="flex flex-col gap-2 flex-1 min-h-0">
+                <div className="grid grid-cols-4 gap-1 bg-black/35 p-1 rounded-xl border border-purple-700/80">
+                  {MONSTER_CATEGORIES.map((mCat) => {
+                    const isMActive = selectedMonsterCat === mCat.id && !leftSearch.trim();
+                    return (
+                      <button
+                        key={mCat.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMonsterCat(mCat.id);
+                          setLeftSearch('');
+                        }}
+                        title={mCat.desc}
+                        className={`py-1 px-1 rounded-lg border text-[10px] font-extrabold cursor-pointer transition text-center truncate ${
+                          isMActive
+                            ? 'bg-gradient-to-b from-purple-400 to-fuchsia-600 border-amber-100 text-white shadow'
+                            : 'bg-slate-900/85 border-slate-700 text-slate-300 hover:border-purple-400'
+                        }`}
+                      >
+                        {mCat.emoji} {mCat.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="space-y-2 overflow-y-auto pr-1 flex-1 py-0.5">
+                  {MONSTER_LIST.filter((mon) => {
+                    const q = leftSearch.trim().toLowerCase();
+                    if (q) {
+                      return (
+                        mon.name.toLowerCase().includes(q) ||
+                        mon.nickname.toLowerCase().includes(q) ||
+                        mon.desc.toLowerCase().includes(q)
+                      );
+                    }
+                    return mon.monsterCategory === selectedMonsterCat;
+                  }).map((mon) => {
+                    const active = joinSpecies === mon.id;
+                    return (
+                      <button
+                        key={mon.id}
+                        type="button"
+                        onClick={() => handleSelectHero(mon)}
+                        title={mon.desc}
+                        className={`w-full px-3 py-2 rounded-xl text-left transition cursor-pointer flex items-center gap-3 ${
+                          active ? 'rpg-hero-row-active' : 'rpg-hero-row'
+                        }`}
+                      >
+                        <ChibiHeroBustSvg
+                          species={mon}
+                          outfitHex={mon.bandColor}
+                          accentHex="#fde047"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="font-[family-name:var(--font-kanit)] text-sm sm:text-[15px] font-extrabold text-white truncate flex items-center gap-1.5"
+                            style={{ textShadow: '0 2px 3px rgba(0,0,0,0.9)' }}
+                          >
+                            <span className="truncate">{mon.name}</span>
+                            <span className="shrink-0">{mon.emoji}</span>
+                          </div>
+                          <div className="text-[10px] font-bold text-amber-200/90 truncate">
+                            {mon.nickname} • {mon.desc}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : leftTab === 'job' ? (
+              <div className="flex flex-col gap-2 flex-1 min-h-0">
+                <div className="grid grid-cols-4 gap-1 bg-black/35 p-1 rounded-xl border border-sky-700/80">
+                  {JOB_CATEGORIES.map((jCat) => {
+                    const isJActive = selectedJobCat === jCat.id && !leftSearch.trim();
+                    return (
+                      <button
+                        key={jCat.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedJobCat(jCat.id);
+                          setLeftSearch('');
+                        }}
+                        title={jCat.desc}
+                        className={`py-1 px-1 rounded-lg border text-[10px] font-extrabold cursor-pointer transition text-center truncate ${
+                          isJActive
+                            ? 'bg-gradient-to-b from-sky-300 to-cyan-500 border-amber-100 text-slate-950 shadow'
+                            : 'bg-slate-900/85 border-slate-700 text-slate-300 hover:border-sky-400'
+                        }`}
+                      >
+                        {jCat.emoji} {jCat.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="space-y-2 overflow-y-auto pr-1 flex-1 py-0.5">
+                  {JOB_LIST.filter((job) => {
+                    const q = leftSearch.trim().toLowerCase();
+                    if (q) {
+                      return (
+                        job.name.toLowerCase().includes(q) ||
+                        job.nickname.toLowerCase().includes(q) ||
+                        job.desc.toLowerCase().includes(q)
+                      );
+                    }
+                    return job.jobCategory === selectedJobCat;
+                  }).map((job) => {
+                    const active = joinSpecies === job.id;
+                    return (
+                      <button
+                        key={job.id}
+                        type="button"
+                        onClick={() => handleSelectHero(job)}
+                        title={job.desc}
+                        className={`w-full px-3 py-2 rounded-xl text-left transition cursor-pointer flex items-center gap-3 ${
+                          active ? 'rpg-hero-row-active' : 'rpg-hero-row'
+                        }`}
+                      >
+                        <ChibiHeroBustSvg
+                          species={job}
+                          outfitHex={job.bandColor}
+                          accentHex="#fde047"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="font-[family-name:var(--font-kanit)] text-sm sm:text-[15px] font-extrabold text-white truncate flex items-center gap-1.5"
+                            style={{ textShadow: '0 2px 3px rgba(0,0,0,0.9)' }}
+                          >
+                            <span className="truncate">{job.name}</span>
+                            <span className="shrink-0">{job.emoji}</span>
+                          </div>
+                          <div className="text-[10px] font-bold text-amber-200/90 truncate">
+                            {job.nickname} • {job.desc}
                           </div>
                         </div>
                       </button>
@@ -2165,9 +2553,9 @@ export function WardrobeShopModal({
             })()}
           </div>
 
-          {/* CENTER STAGE: Clean open sky + 360° circle button + Morph pills & Belly Slider */}
-          <div className="lg:col-span-4 xl:col-span-6 flex flex-col items-center justify-end min-h-[260px] lg:min-h-[440px] pointer-events-none relative">
-            {/* Floating Circular 360° Spin Button */}
+          {/* CENTER STAGE: Clean open sky + 360° pill + BMI Card aligned flush with Left & Right panel bottom edges */}
+          <div className="lg:col-span-4 xl:col-span-6 lg:h-[68dvh] flex flex-col items-center justify-end min-h-[260px] pointer-events-none relative">
+            {/* Floating Compact 360° Spin Pill centered cleanly above BMI Card (never overlaps Sidebars!) */}
             <button
               type="button"
               onClick={() => {
@@ -2176,234 +2564,302 @@ export function WardrobeShopModal({
                 setAutoSpinUi(next);
               }}
               title="เปิด/ปิดหมุนตัวละครอัตโนมัติ 360°"
-              className="pointer-events-auto self-end mr-2 sm:mr-8 mb-3 flex flex-col items-center gap-1 cursor-pointer group"
+              className={`pointer-events-auto self-center mb-2 px-3 py-1 rounded-full border-2 flex items-center gap-1.5 text-xs font-extrabold shadow-lg cursor-pointer transition hover:scale-105 ${
+                autoSpinUi
+                  ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950'
+                  : 'bg-slate-900/90 border-amber-400/80 text-amber-200'
+              }`}
             >
-              <span
-                className="font-[family-name:var(--font-kanit)] text-base font-extrabold text-white tracking-wide"
-                style={{ WebkitTextStroke: '2.5px #1c1917', paintOrder: 'stroke fill' }}
-              >
-                360°
-              </span>
-              <span
-                className={`w-12 h-12 rounded-full border-3 flex items-center justify-center text-xl shadow-xl transition group-hover:scale-105 ${
-                  autoSpinUi
-                    ? 'bg-gradient-to-b from-amber-300 to-amber-600 border-amber-100 text-stone-900'
-                    : 'bg-gradient-to-b from-slate-600 to-slate-800 border-amber-400 text-amber-200'
-                }`}
-              >
-                🔄
-              </span>
+              <span>🔄</span>
+              <span>หมุน 360°</span>
             </button>
 
-            <div className="w-full max-w-[400px] flex flex-col items-center gap-2 pointer-events-auto">
-              {/* BMI-Driven 3D Body Sculptor Card */}
-              <div className="w-full rpg-stone-frame rounded-2xl px-3.5 py-2.5 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-extrabold text-amber-200">
-                    ⚖️ รูปร่างผู้กล้าตามค่า BMI
-                  </span>
+            <div className="w-full max-w-[390px] flex flex-col items-center gap-1.5 pointer-events-auto">
+              {/* BMI-Driven 3D Body Sculptor Card (Compact & Collapsible) */}
+              <div className="w-full rpg-stone-frame rounded-2xl px-3 py-2 space-y-1.5">
+                <div className="flex items-center justify-between gap-1.5">
                   <span
-                    className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                    className="text-[11px] font-extrabold text-amber-200 flex items-center gap-1 truncate"
+                    title="ปั้นขนาดพุงตาม BMI จริง • ซ่อนตัวเลขน้ำหนัก/ส่วนสูง/BMI จากสาธารณะทั้งหมด"
                   >
-                    {bmiMeta.isValid ? `BMI ${bmiMeta.bmi} • ${bmiMeta.label}` : bmiMeta.label}
+                    <span>⚖️ รูปร่างตาม BMI</span>
+                    <span className="text-[9.5px] text-amber-200/75 font-semibold">🔒</span>
                   </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span
+                      className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                    >
+                      {bmiMeta.isValid ? `BMI ${bmiMeta.bmi} • ${bmiMeta.label}` : bmiMeta.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowBmiCard((v) => !v)}
+                      className="px-1.5 py-0.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-amber-400/60 text-amber-200 text-[10px] font-extrabold cursor-pointer transition"
+                      title={showBmiCard ? 'พับกล่อง BMI เพื่อชมตัวละครเต็มตัว' : 'กางกล่องกรอกน้ำหนัก/ส่วนสูง'}
+                    >
+                      {showBmiCard ? 'ซ่อน ▾' : 'แก้ไข ▴'}
+                    </button>
+                  </div>
                 </div>
 
-                {/* Gender + Weight + Height Row */}
-                <div className="grid grid-cols-12 gap-1.5 items-end">
-                  <div className="col-span-4">
-                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
-                      เพศ
-                    </label>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setJoinGender('female')}
-                        className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
-                          joinGender === 'female'
-                            ? 'bg-pink-500 text-white border-amber-200 shadow'
-                            : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
-                        }`}
-                      >
-                        👩 หญิง
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setJoinGender('male')}
-                        className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
-                          joinGender === 'male'
-                            ? 'bg-sky-500 text-white border-amber-200 shadow'
-                            : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
-                        }`}
-                      >
-                        👨 ชาย
-                      </button>
+                {showBmiCard && (
+                  <>
+                    {/* Gender + Weight + Height Row */}
+                    <div className="grid grid-cols-12 gap-1.5 items-end">
+                      <div className="col-span-4">
+                        <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                          เพศ
+                        </label>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setJoinGender('female')}
+                            className={`py-1 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                              joinGender === 'female'
+                                ? 'bg-pink-500 text-white border-amber-200 shadow'
+                                : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
+                            }`}
+                          >
+                            👩 หญิง
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setJoinGender('male')}
+                            className={`py-1 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                              joinGender === 'male'
+                                ? 'bg-sky-500 text-white border-amber-200 shadow'
+                                : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-amber-400'
+                            }`}
+                          >
+                            👨 ชาย
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="col-span-4">
+                        <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                          น้ำหนัก (กก.)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="16"
+                          max="300"
+                          value={joinBodyWeight}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setJoinBodyWeight(val);
+                            if (!goalMeta.isCumulative && mode === 'create') {
+                              setJoinStart(val);
+                            }
+                          }}
+                          className="w-full bg-slate-950 text-amber-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
+                        />
+                      </div>
+
+                      <div className="col-span-4">
+                        <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
+                          ส่วนสูง (ซม.)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="80"
+                          max="250"
+                          value={joinHeightCm}
+                          onChange={(e) => setJoinHeightCm(e.target.value)}
+                          className="w-full bg-slate-950 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="col-span-4">
-                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
-                      น้ำหนัก (กก.)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="20"
-                      max="250"
-                      value={effectiveWeightInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setJoinBodyWeight(val);
-                        if (!goalMeta.isCumulative && mode === 'create') {
-                          setJoinStart(val);
-                        }
-                      }}
-                      placeholder="65.0"
-                      className="w-full bg-slate-950 text-amber-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
-                    />
-                  </div>
-
-                  <div className="col-span-4">
-                    <label className="block text-[9.5px] font-bold text-amber-100/80 mb-0.5">
-                      ส่วนสูง (ซม.)
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="80"
-                      max="250"
-                      value={joinHeightCm}
-                      onChange={(e) => setJoinHeightCm(e.target.value)}
-                      placeholder="165"
-                      className="w-full bg-slate-950 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1 text-xs font-extrabold text-center"
-                    />
-                  </div>
-                </div>
-
-                {/* 5-Segment Asian BMI Gauge Bar */}
-                <div className="space-y-1 pt-0.5">
-                  <div className="relative w-full h-3 rounded-full overflow-visible border border-black/80 flex shadow-inner">
-                    <div className="w-1/5 h-full bg-sky-400 rounded-l-full" title="ผอม (<18.5)" />
-                    <div className="w-1/5 h-full bg-emerald-400" title="สมส่วน (18.5–22.9)" />
-                    <div className="w-1/5 h-full bg-amber-300" title="เริ่มท้วม (23–24.9)" />
-                    <div className="w-1/5 h-full bg-orange-500" title="อ้วนระดับ 1 (25–29.9)" />
-                    <div className="w-1/5 h-full bg-rose-500 rounded-r-full" title="อ้วนระดับ 2 (30+)" />
-                    {bmiMeta.isValid && (
-                      <div
-                        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-2 border-stone-950 shadow-[0_0_8px_rgba(255,255,255,0.9)] transition-all duration-300"
-                        style={{ left: `${bmiMeta.gaugePct}%` }}
-                      />
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between text-[9px] font-bold text-amber-100/75">
-                    <span className="text-sky-300">ผอม</span>
-                    <span className="text-emerald-300">สมส่วน</span>
-                    <span className="text-amber-300">ท้วม</span>
-                    <span className="text-orange-300">อ้วน 1</span>
-                    <span className="text-rose-300">อ้วน 2</span>
-                  </div>
-                  <div className="text-[9.5px] font-semibold text-amber-200/70 text-center">
-                    🔒 ปั้นขนาดพุงตาม BMI จริง • ซ่อนตัวเลขน้ำหนัก/ส่วนสูง/BMI จากสาธารณะทั้งหมด
-                  </div>
-                </div>
+                    {/* 5-Segment Asian BMI Gauge Bar */}
+                    <div className="space-y-0.5 pt-0.5">
+                      <div className="relative w-full h-2.5 rounded-full overflow-visible border border-black/80 flex shadow-inner">
+                        <div className="w-1/5 h-full bg-sky-400 rounded-l-full" title="ผอม (<18.5)" />
+                        <div className="w-1/5 h-full bg-emerald-400" title="สมส่วน (18.5–22.9)" />
+                        <div className="w-1/5 h-full bg-amber-300" title="เริ่มท้วม (23–24.9)" />
+                        <div className="w-1/5 h-full bg-orange-500" title="อ้วนระดับ 1 (25–29.9)" />
+                        <div className="w-1/5 h-full bg-rose-500 rounded-r-full" title="อ้วนระดับ 2 (30+)" />
+                        {bmiMeta.isValid && (
+                          <div
+                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-stone-950 shadow-[0_0_8px_rgba(255,255,255,0.9)] transition-all duration-300"
+                            style={{ left: `${bmiMeta.gaugePct}%` }}
+                          />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[8.5px] font-bold text-amber-100/75">
+                        <span className="text-sky-300">ผอม</span>
+                        <span className="text-emerald-300">สมส่วน</span>
+                        <span className="text-amber-300">ท้วม</span>
+                        <span className="text-orange-300">อ้วน 1</span>
+                        <span className="text-rose-300">อ้วน 2</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
-          {/* RIGHT PANEL: Carved Stone & Gold Props + Summon Button */}
-          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2.5 pointer-events-auto max-h-[68dvh] flex flex-col relative">
+          {/* RIGHT PANEL: Carved Stone & Gold Props + Vertical Category Sidebar */}
+          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] lg:h-[68dvh] flex flex-col relative">
             <StoneFrameCorners />
-            <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วยแต้ม 🪙)" />
+            <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha Pong 💰)" />
 
-            <div className="grid grid-cols-4 gap-1.5">
+            {/* Vertical Bookmark Sidebar on Wide Desktop (xl:, protruding left edge of right panel), horizontal scroll strip on tablet/mobile so it never overlaps Center Stage */}
+            <div className="flex gap-1 overflow-x-auto pb-1 xl:pb-0 xl:overflow-visible xl:absolute xl:right-full xl:top-6 xl:flex-col xl:gap-1 xl:mr-[5px] z-10 shrink-0">
               {(
                 [
-                  { cat: 'hat' as ShopCategory, label: 'หมวก/ผม', obj: hatObj },
-                  { cat: 'face' as ShopCategory, label: 'แว่น/หน้า', obj: faceObj },
-                  { cat: 'armor' as ShopCategory, label: 'เสื้อ/กางเกง', obj: armorObj },
-                  { cat: 'weapon' as ShopCategory, label: 'ของถือเล่น', obj: weaponObj },
-                  { cat: 'wings' as ShopCategory, label: 'เป้/ปีกหลัง', obj: wingsObj },
-                  { cat: 'aura' as ShopCategory, label: 'ออร่า', obj: auraObj },
-                  { cat: 'pet' as ShopCategory, label: 'สัตว์เลี้ยง', obj: petObj },
-                  { cat: 'mount' as ShopCategory, label: 'สัตว์ขี่', obj: mountObj },
+                  { cat: 'hat' as ShopCategory, label: 'หมวก/ผม', fallbackIcon: '🎩', obj: hatObj },
+                  { cat: 'face' as ShopCategory, label: 'แว่น/หน้า', fallbackIcon: '🕶️', obj: faceObj },
+                  { cat: 'armor' as ShopCategory, label: 'เสื้อ/ชุด', fallbackIcon: '👕', obj: armorObj },
+                  { cat: 'weapon' as ShopCategory, label: 'ของถือเล่น', fallbackIcon: '⚔️', obj: weaponObj },
+                  { cat: 'wings' as ShopCategory, label: 'เป้/ปีก', fallbackIcon: '🎒', obj: wingsObj },
+                  { cat: 'aura' as ShopCategory, label: 'ออร่า', fallbackIcon: '✨', obj: auraObj },
+                  { cat: 'pet' as ShopCategory, label: 'สัตว์เลี้ยง', fallbackIcon: '🐾', obj: petObj },
+                  { cat: 'mount' as ShopCategory, label: 'สัตว์ขี่', fallbackIcon: '🐎', obj: mountObj },
+                  { cat: 'marker' as ShopCategory, label: 'ป้ายจองลู่', fallbackIcon: '📍', obj: markerObj },
                 ] as const
               ).map((slot) => {
                 const isSelected = rightCategory === slot.cat;
-                const isEmojiSlot =
-                  slot.cat === 'hat' ||
-                  slot.cat === 'face' ||
-                  slot.cat === 'armor' ||
-                  slot.cat === 'weapon' ||
-                  slot.cat === 'wings' ||
-                  slot.cat === 'aura' ||
-                  slot.cat === 'mount';
                 const slotDyeHex =
                   slot.cat === 'armor'
                     ? joinPropColors.shirt || joinPropColors.pants
                     : joinPropColors[slot.cat as PropColorKey];
+                const equippedIcon =
+                  slot.obj && slot.obj.icon && slot.obj.icon !== '➖'
+                    ? slot.obj.icon
+                    : slot.fallbackIcon;
+                const isEquipped =
+                  Boolean(slot.obj) &&
+                  !slot.obj?.id.endsWith('_none') &&
+                  slot.obj?.id !== 'none';
+                const collectibleItems = SHOP_ITEMS.filter(
+                  (it) =>
+                    it.category === slot.cat &&
+                    it.id !== 'none' &&
+                    !it.id.endsWith('_none') &&
+                    it.id !== 'armor_bare'
+                );
+                const ownedInCat = collectibleItems.filter((it) => ownedSet.has(it.id)).length;
                 return (
                   <button
                     key={slot.cat}
                     type="button"
                     onClick={() => setRightCategory(slot.cat)}
-                    className={`relative p-1 rounded-xl flex flex-col items-center justify-center cursor-pointer transition ${
-                      isSelected ? 'rpg-slot-active scale-105' : 'rpg-slot hover:border-amber-300'
+                    className={`relative py-1.5 px-2 xl:py-1.5 xl:px-2.5 rounded-lg xl:rounded-r-none xl:rounded-l-xl text-[11px] font-extrabold border-2 cursor-pointer transition whitespace-nowrap flex items-center gap-1.5 shadow-md shrink-0 ${
+                      isSelected
+                        ? 'rpg-btn-gold'
+                        : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
                     }`}
                   >
+                    <span className="text-sm leading-none">{equippedIcon}</span>
+                    <span>{slot.label}</span>
+                    <span className="text-[10px] opacity-80">({ownedInCat})</span>
+                    {isEquipped && !isSelected && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    )}
                     {slotDyeHex && (
                       <span
                         title={`ย้อมสี ${slotDyeHex}`}
                         style={{ backgroundColor: slotDyeHex }}
-                        className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full border border-white shadow"
+                        className="w-2 h-2 rounded-full border border-white shrink-0"
                       />
                     )}
-                    {isEmojiSlot ? (
-                      <span className="w-8 h-8 rounded-lg flex items-center justify-center text-xl bg-slate-900/70">
-                        {slot.obj?.icon || '➖'}
-                      </span>
-                    ) : (
-                      <img
-                        src={`/icons/${slot.obj?.id || 'none'}.svg`}
-                        alt={slot.label}
-                        className="w-8 h-8 rounded-lg"
-                      />
-                    )}
-                    <span className="text-[9.5px] font-extrabold text-amber-200 mt-0.5 truncate max-w-full">
-                      {slot.label}
-                    </span>
                   </button>
                 );
               })}
-            </div>
 
-            {/* แถบปุ่มคู่: ตู้สุ่มกาชาปองลิมิเต็ด + ปุ่มรีเซ็ตค่าเริ่มต้น */}
-            <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
                 onClick={() => setRightCategory('gacha')}
-                className={`py-1.5 px-2 rounded-xl flex items-center justify-center gap-1 text-[11px] font-extrabold cursor-pointer transition border-2 ${
+                className={`py-1.5 px-2 xl:py-2 xl:px-2.5 rounded-lg xl:rounded-r-none xl:rounded-l-xl text-[11px] font-extrabold border-2 cursor-pointer transition whitespace-nowrap flex items-center gap-1.5 shadow-md shrink-0 ${
                   rightCategory === 'gacha'
                     ? 'bg-gradient-to-r from-pink-500 via-amber-400 to-cyan-400 text-black border-white shadow-[0_0_12px_rgba(244,114,182,0.7)]'
                     : 'bg-gradient-to-r from-purple-900 via-fuchsia-900 to-pink-900 text-yellow-200 border-pink-400/80 hover:border-yellow-300'
                 }`}
               >
                 <span>🎰</span>
-                <span>ตู้กาชาปอง ({gachaOwnedCount}/{GACHA_EXCLUSIVE_ITEMS.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResetToDefault}
-                className="py-1.5 px-2 rounded-xl bg-slate-900/90 hover:bg-rose-950/80 border border-amber-400/50 hover:border-rose-400 text-amber-200 hover:text-rose-200 text-[11px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition"
-                title="ถอดชุด หมวก แว่น ของถือ กระเป๋า ออร่า สัตว์เลี้ยง และสัตว์ขี่ออกทั้งหมด"
-              >
-                <span>🔄</span>
-                <span>ค่าเริ่มต้น (ถอดหมด)</span>
+                <span>กาชา ({gachaOwnedCount})</span>
               </button>
             </div>
 
-            {/* 🎨 สตูดิโอย้อมสีพรอพ & เสื้อกางเกง (Prop & Outfit Dye Bar) */}
-            {rightCategory !== 'gacha' && (() => {
+            {/* แถบเครื่องมือย่อ: หมวดปัจจุบัน + ติ๊กกรองเฉพาะที่มีแล้ว + ปุ่มถอดหมด */}
+            <div className="flex items-center justify-between gap-1 shrink-0">
+              <span className="text-[10.5px] font-extrabold text-amber-200 px-2 py-1 rounded-lg bg-slate-950/70 border border-amber-500/40 truncate">
+                {rightCategory === 'gacha'
+                  ? `🎰 กาชา (${gachaOwnedCount})`
+                  : rightCategory === 'hat'
+                  ? '🎩 หมวก/ผม'
+                  : rightCategory === 'face'
+                  ? '🕶️ แว่น/หน้า'
+                  : rightCategory === 'armor'
+                  ? '👕 เสื้อ/ชุด'
+                  : rightCategory === 'weapon'
+                  ? '⚔️ ของถือ'
+                  : rightCategory === 'wings'
+                  ? '🎒 เป้/ปีก'
+                  : rightCategory === 'aura'
+                  ? '✨ ออร่า'
+                  : rightCategory === 'pet'
+                  ? '🐾 สัตว์เลี้ยง'
+                  : rightCategory === 'mount'
+                  ? '🐎 สัตว์ขี่ (30)'
+                  : '📍 ป้ายจองลู่'}
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setOnlyOwnedFilter((v) => !v)}
+                  className={`py-1 px-2 rounded-lg border text-[10.5px] font-extrabold flex items-center gap-1 cursor-pointer transition shrink-0 ${
+                    onlyOwnedFilter
+                      ? 'bg-emerald-500 text-black border-white shadow-[0_0_8px_rgba(16,185,129,0.55)]'
+                      : 'bg-slate-900/90 text-emerald-200 border-emerald-500/50 hover:border-emerald-300'
+                  }`}
+                  title="ติ๊กเพื่อแสดงเฉพาะไอเทมที่ซื้อหรือปลดล็อกมาแล้วในหมวดนี้"
+                >
+                  <span>{onlyOwnedFilter ? '☑️' : '☐'}</span>
+                  <span>มีแล้ว ({ownedCountInCurrentCat})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetToDefault}
+                  className="py-1 px-2 rounded-lg bg-slate-900/90 hover:bg-rose-950/80 border border-amber-400/50 hover:border-rose-400 text-amber-200 hover:text-rose-200 text-[10.5px] font-extrabold flex items-center gap-1 cursor-pointer transition shrink-0"
+                  title="ถอดชุด หมวก แว่น ของถือ กระเป๋า ออร่า สัตว์เลี้ยง และสัตว์ขี่ออกทั้งหมด"
+                >
+                  <span>🔄</span>
+                  <span>ถอดหมด</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 🎨 สตูดิโอย้อมสีพรอพ & เสื้อกางเกง (Prop & Outfit Dye Bar — ซ่อนเมื่อไม่สวมใส่ และยุบเหลือ 1 แถว) */}
+            {rightCategory !== 'gacha' && rightCategory !== 'marker' && (() => {
+              const effectiveCategoryItemId =
+                rightCategory === 'hat'
+                  ? effectiveHat
+                  : rightCategory === 'face'
+                  ? effectiveFace
+                  : rightCategory === 'armor'
+                  ? effectiveArmor
+                  : rightCategory === 'weapon'
+                  ? effectiveWeapon
+                  : rightCategory === 'wings'
+                  ? effectiveWings
+                  : rightCategory === 'aura'
+                  ? effectiveAura
+                  : rightCategory === 'pet'
+                  ? effectivePet
+                  : effectiveMount;
+              if (
+                rightCategory !== 'armor' &&
+                (!effectiveCategoryItemId ||
+                  effectiveCategoryItemId === 'none' ||
+                  effectiveCategoryItemId.endsWith('_none'))
+              ) {
+                return null;
+              }
               const activePropKey: PropColorKey =
                 rightCategory === 'armor' ? armorColorPart : (rightCategory as PropColorKey);
               const activeSlotObj =
@@ -2436,7 +2892,7 @@ export function WardrobeShopModal({
               const displayHex = currentCustomHex || fallbackItemHex;
               const propHsl = hexToHsl(displayHex);
 
-              const slotDyeLabelMap: Record<ShopCategory, string> = {
+              const slotDyeLabelMap: Record<Exclude<ShopCategory, 'marker'>, string> = {
                 hat: 'หมวก/เครื่องหัว',
                 face: 'แว่น/หน้ากาก',
                 armor: 'เสื้อ & กางเกง',
@@ -2529,15 +2985,43 @@ export function WardrobeShopModal({
                         type="button"
                         onClick={() => setShowPropFineSliders((v) => !v)}
                         className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-600 cursor-pointer"
-                        title="พับ/กางแถบไล่โทนสีพรอพละเอียด"
+                        title="พับ/กางจานสีและแถบไล่โทนสีพรอพ"
                       >
-                        {showPropFineSliders ? '▾' : '▸'}
+                        {showPropFineSliders ? 'จานสี ▾' : 'จานสี ▸'}
                       </button>
                     </div>
                   </div>
 
                   {showPropFineSliders && (
-                    <div className="space-y-1 pt-0.5">
+                    <div className="space-y-1.5 pt-0.5">
+                      {/* ปุ่มกดย้อมสีด่วน 10 เฉดยอดฮิต */}
+                      <div className="flex items-center justify-between">
+                        {[
+                          '#F8FAFC',
+                          '#FACC15',
+                          '#FB923C',
+                          '#EF4444',
+                          '#F472B6',
+                          '#C084FC',
+                          '#38BDF8',
+                          '#34D399',
+                          '#92400E',
+                          '#18181B',
+                        ].map((hex) => (
+                          <button
+                            key={hex}
+                            type="button"
+                            onClick={() => applyPropColor(hex)}
+                            style={{ backgroundColor: hex }}
+                            title={`ย้อมสี ${hex}`}
+                            className={`w-4 h-4 rounded-full border cursor-pointer transition ${
+                              currentCustomHex === hex
+                                ? 'border-amber-300 scale-125 ring-1 ring-amber-300'
+                                : 'border-black/80 hover:scale-110'
+                            }`}
+                          />
+                        ))}
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[9px] font-bold text-slate-300 w-9 shrink-0">โทนสี</span>
                         <input
@@ -2579,35 +3063,6 @@ export function WardrobeShopModal({
                       </div>
                     </div>
                   )}
-
-                  {/* ปุ่มกดย้อมสีด่วน 10 เฉดยอดฮิต */}
-                  <div className="flex items-center justify-between pt-0.5">
-                    {[
-                      '#F8FAFC',
-                      '#FACC15',
-                      '#FB923C',
-                      '#EF4444',
-                      '#F472B6',
-                      '#C084FC',
-                      '#38BDF8',
-                      '#34D399',
-                      '#92400E',
-                      '#18181B',
-                    ].map((hex) => (
-                      <button
-                        key={hex}
-                        type="button"
-                        onClick={() => applyPropColor(hex)}
-                        style={{ backgroundColor: hex }}
-                        title={`ย้อมสี ${hex}`}
-                        className={`w-4 h-4 rounded-full border cursor-pointer transition ${
-                          currentCustomHex === hex
-                            ? 'border-amber-300 scale-125 ring-1 ring-amber-300'
-                            : 'border-black/80 hover:scale-110'
-                        }`}
-                      />
-                    ))}
-                  </div>
                 </div>
               );
             })()}
@@ -2643,24 +3098,15 @@ export function WardrobeShopModal({
                   <div className="flex items-center justify-between text-[11px] font-extrabold">
                     <span className="text-pink-300">✨ ลิมิเต็ดเฉพาะตู้กาชา</span>
                     <span className="px-2 py-0.5 rounded-full bg-black/50 border border-amber-400/60 text-amber-300">
-                      สะสม {gachaOwnedCount}/{GACHA_EXCLUSIVE_ITEMS.length}
+                      มีแล้ว {gachaOwnedCount} ชิ้น
                     </span>
                   </div>
 
-                  <div className="py-1 flex flex-col items-center justify-center">
-                    <div
-                      className={`w-16 h-16 rounded-full border-4 border-yellow-300 bg-gradient-to-b from-rose-500 via-white to-sky-400 flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(250,204,21,0.65)] ${
-                        gachaSpinning ? 'animate-bounce' : ''
-                      }`}
-                    >
-                      {gachaSpinning ? '🔮' : lastWonGachaItem ? lastWonGachaItem.icon : '💊'}
+                  {lastWonGachaItem && !gachaSpinning && (
+                    <div className="px-3 py-1.5 rounded-xl bg-amber-400/20 border border-yellow-300 text-xs font-extrabold text-yellow-200">
+                      🎉 ล่าสุดได้รับ: {lastWonGachaItem.icon} {lastWonGachaItem.name}!
                     </div>
-                    {lastWonGachaItem && !gachaSpinning && (
-                      <div className="mt-2 px-3 py-1.5 rounded-xl bg-amber-400/20 border border-yellow-300 text-xs font-extrabold text-yellow-200">
-                        🎉 ได้รับ: {lastWonGachaItem.icon} {lastWonGachaItem.name}!
-                      </div>
-                    )}
-                  </div>
+                  )}
 
                   <div className="flex items-center justify-center gap-2 text-[10px] font-bold">
                     <span className="px-1.5 py-0.5 rounded bg-amber-500/25 text-yellow-300 border border-yellow-400/50">
@@ -2674,32 +3120,45 @@ export function WardrobeShopModal({
                     </span>
                   </div>
                   <div className="text-[10px] text-emerald-300 font-bold">
-                    ✓ การันตีไม่ซ้ำจนกว่าจะสะสมครบทุกชิ้น! (มีแต้ม {userPoints} 🪙)
+                    🔁 ออกซ้ำคืนแต้มทันที! (Rare +{GACHA_DUPLICATE_REFUND.rare} / Epic +{GACHA_DUPLICATE_REFUND.epic} / Legend +{GACHA_DUPLICATE_REFUND.legendary} 💰)
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={gachaSpinning || gachaOwnedCount >= GACHA_EXCLUSIVE_ITEMS.length}
-                    onClick={handleGachaSpinClick}
-                    className={`w-full py-2.5 rounded-xl font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm border-2 cursor-pointer transition ${
-                      gachaOwnedCount >= GACHA_EXCLUSIVE_ITEMS.length
-                        ? 'bg-emerald-600 text-white border-emerald-300'
-                        : 'bg-gradient-to-r from-pink-500 via-amber-400 to-cyan-400 text-black border-white shadow-[0_3px_0_#000] hover:brightness-110'
-                    }`}
-                  >
-                    {gachaSpinning
-                      ? '🎰 กำลังหมุนลูกกาชาปอง...'
-                      : gachaOwnedCount >= GACHA_EXCLUSIVE_ITEMS.length
-                      ? `🏆 สะสมครบทั้ง ${GACHA_EXCLUSIVE_ITEMS.length} ชิ้นแล้ว!`
-                      : `🎰 หมุนกาชาปอง 1 ลูก (${GACHA_SPIN_COST} 🪙)`}
-                  </button>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      disabled={gachaSpinning}
+                      onClick={() => handleGachaSpinClick(1)}
+                      className="py-2 px-2 rounded-xl font-[family-name:var(--font-kanit)] font-extrabold text-xs border-2 border-sky-200 bg-gradient-to-b from-sky-400 to-indigo-600 text-white shadow-[0_3px_0_#000] hover:brightness-110 cursor-pointer transition disabled:opacity-50"
+                    >
+                      <div>🎰 อัญเชิญ ×1</div>
+                      <div className="text-[10px] text-amber-200">{GACHA_SPIN_COST.toLocaleString()} 💰</div>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={gachaSpinning}
+                      onClick={() => handleGachaSpinClick(8)}
+                      className="relative py-2 px-2 rounded-xl font-[family-name:var(--font-kanit)] font-extrabold text-xs border-2 border-yellow-100 bg-gradient-to-r from-amber-400 via-pink-400 to-cyan-300 text-slate-950 shadow-[0_3px_0_#000] hover:brightness-110 cursor-pointer transition disabled:opacity-50"
+                    >
+                      <span className="absolute -top-2 right-1 px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[9px] font-extrabold border border-white shadow">
+                        ลด 160!
+                      </span>
+                      <div>🌟 อัญเชิญ ×{GACHA_MULTI_COUNT}</div>
+                      <div className="text-[10px] text-slate-900 font-black">
+                        {GACHA_MULTI_COST.toLocaleString()} 💰
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
                 {/* รายการของรางวัลลิมิเต็ดในตู้กาชาปองทั้งหมด (กดลองใส่พรีวิวได้ทุกชิ้น!) */}
                 <div className="text-[11px] font-extrabold text-amber-200 px-1">
-                  🎁 รายการไอเทมในตู้ ({GACHA_EXCLUSIVE_ITEMS.length} ชิ้น — กด 👀 ลองใส่พรีวิวได้!):
+                  🎁 รายการไอเทมในตู้ ({onlyOwnedFilter ? `มีแล้ว ${displayedCategoryItems.length} ชิ้น` : 'กด 👀 ลองใส่พรีวิวได้!'}):
                 </div>
-                {GACHA_EXCLUSIVE_ITEMS.map((item) => {
+                {displayedCategoryItems.length === 0 ? (
+                  <div className="rounded-xl bg-slate-950/75 border border-amber-500/40 p-4 text-center text-xs font-bold text-amber-100/75">
+                    ยังไม่มีไอเทมจากตู้กาชาปอง ลองหมุนด้านบนหรือเอาติ๊ก &quot;มีแล้ว&quot; ออกเพื่อดูของทั้งหมดครับ!
+                  </div>
+                ) : displayedCategoryItems.map((item) => {
                   const isOwned = ownedSet.has(item.id);
                   const isPreviewing = previewOverrides[item.category] === item.id;
                   const isEquipped =
@@ -2780,7 +3239,7 @@ export function WardrobeShopModal({
               </div>
             ) : (
             <div className="grid grid-cols-2 gap-1.5 overflow-y-auto pr-1 flex-1 content-start">
-              {categoryItems.map((item) => {
+              {displayedCategoryItems.map((item) => {
                 const isOwned = ownedSet.has(item.id);
                 const isPreviewing = previewOverrides[item.category] === item.id;
                 const isEquipped =
@@ -2792,16 +3251,8 @@ export function WardrobeShopModal({
                     (item.category === 'wings' && joinEquipWings === item.id) ||
                     (item.category === 'aura' && joinEquipAura === item.id) ||
                     (item.category === 'pet' && joinEquipPetGear === item.id) ||
-                    (item.category === 'mount' && joinEquipMount === item.id));
-                const isEmojiItem =
-                  item.category === 'hat' ||
-                  item.category === 'face' ||
-                  item.category === 'armor' ||
-                  item.category === 'weapon' ||
-                  item.category === 'wings' ||
-                  item.category === 'aura' ||
-                  item.category === 'mount';
-
+                    (item.category === 'mount' && joinEquipMount === item.id) ||
+                    (item.category === 'marker' && joinEquipMarker === item.id));
                 return (
                   <div
                     key={item.id}
@@ -2820,17 +3271,9 @@ export function WardrobeShopModal({
                       className="flex items-center gap-2 min-w-0 cursor-pointer"
                       title={isOwned ? 'คลิกเพื่อสวมใส่' : 'คลิกเพื่อลองสวมพรีวิว 3D'}
                     >
-                      {isEmojiItem ? (
-                        <div className="w-9 h-9 rounded-xl shrink-0 bg-slate-950/80 border border-amber-500/40 flex items-center justify-center text-lg shadow">
-                          {item.icon}
-                        </div>
-                      ) : (
-                        <img
-                          src={`/icons/${item.id}.svg`}
-                          alt={item.name}
-                          className="w-9 h-9 rounded-xl shrink-0 shadow"
-                        />
-                      )}
+                      <div className="w-9 h-9 rounded-xl shrink-0 bg-slate-950/80 border border-amber-500/40 flex items-center justify-center text-lg shadow">
+                        {item.icon}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[11px] font-extrabold text-amber-100 leading-tight line-clamp-2">
                           {item.isGachaOnly ? `🎰 ${item.name}` : item.name}
@@ -2879,7 +3322,7 @@ export function WardrobeShopModal({
                             ? '...'
                             : item.isGachaOnly
                             ? '🎰 ตู้สุ่ม'
-                            : `🔓 ${item.cost}🪙`}
+                            : `🔓 ${item.cost}💰`}
                         </button>
                       </div>
                     )}
@@ -2915,10 +3358,10 @@ export function WardrobeShopModal({
                 </div>
                 <div>
                   <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold text-amber-300">
-                    ตั้งชื่อ &amp; สายภารกิจลงสนาม
+                    ตั้งชื่อ &amp; ลงทะเบียนแข่ง Step Challenge
                   </h3>
                   <p className="text-[11px] text-amber-100/80">
-                    ทุก +1% ของเป้าหมาย รับ +15 🪙 แต้มแลกเสื้อผ้า &amp; พรอพ!
+                    ทุกคนลงสนามแข่งสะสมก้าวเดินประจำเดือน • เลือกทำภารกิจเสริมเพื่อรับแต้มโบนัสเพิ่มได้!
                   </p>
                 </div>
               </div>
@@ -2932,32 +3375,14 @@ export function WardrobeShopModal({
             </div>
 
             <form onSubmit={onSubmit} className="space-y-3">
-              {(mode === 'create' || editingPlayerId === currentUserId) && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setJoinRole('competitor')}
-                    className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${
-                      joinRole === 'competitor'
-                        ? 'rpg-btn-gold'
-                        : 'bg-slate-900 text-slate-300 border-slate-600'
-                    }`}
-                  >
-                    ⚔️ ผู้กล้าลงแข่ง
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJoinRole('spectator')}
-                    className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${
-                      joinRole === 'spectator'
-                        ? 'rpg-btn-blue'
-                        : 'bg-slate-900 text-slate-300 border-slate-600'
-                    }`}
-                  >
-                    👀 กองเชียร์เดินเล่น
-                  </button>
-                </div>
-              )}
+              <div className="rounded-xl bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-amber-500/20 border-2 border-amber-400/80 px-3 py-2 flex items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-amber-200">
+                  👟 ภารกิจหลัก: Step Challenge (สะสมก้าวเดินรายซีซั่น)
+                </span>
+                <span className="text-[10px] font-extrabold bg-amber-400 text-black px-2 py-0.5 rounded-full shrink-0">
+                  เข้าร่วมทุกคน
+                </span>
+              </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -2989,146 +3414,181 @@ export function WardrobeShopModal({
                 </div>
               </div>
 
-              {joinRole === 'competitor' ? (
+              {true ? (
                 <div className="space-y-2.5">
-                  {/* Synced Personal BMI Section (Required for Competitors, Hidden Publicly) */}
-                  <div className="rounded-xl bg-slate-950/80 border border-amber-500/50 p-2.5 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-extrabold text-amber-200">
-                        ⚖️ ข้อมูลส่วนตัวคำนวณหุ่น BMI (ซ่อนสาธารณะ 🔒)
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                  {/* Synced Personal BMI Section (Compact 1-line summary if already filled, auto-expand if missing) */}
+                  {(() => {
+                    const isEditingOther = mode === 'edit' && editingPlayerId !== currentUserId;
+                    const showInputs = showConfirmBmiEdit || (!isEditingOther && !bmiMeta.isValid);
+                    return (
+                      <div className="rounded-xl bg-slate-950/80 border border-amber-500/50 px-2.5 py-2 space-y-2">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span
+                            className="text-[11px] font-extrabold text-amber-200 truncate"
+                            title="ซ่อนตัวเลขน้ำหนัก/ส่วนสูง/BMI จากสาธารณะทั้งหมด"
+                          >
+                            {showInputs
+                              ? '⚖️ ข้อมูลส่วนตัวคำนวณหุ่น BMI 🔒'
+                              : isEditingOther
+                              ? '⚖️ หุ่น BMI: คงค่าเดิม 🔒'
+                              : `⚖️ ${joinGender === 'male' ? '👨 ชาย' : '👩 หญิง'} • ${joinBodyWeight} กก. / ${joinHeightCm} ซม. 🔒`}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {bmiMeta.isValid && (
+                              <span
+                                className={`px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${bmiMeta.badgeClass}`}
+                              >
+                                BMI {bmiMeta.bmi}
+                              </span>
+                            )}
+                            {(!showInputs || bmiMeta.isValid || isEditingOther) && (
+                              <button
+                                type="button"
+                                onClick={() => setShowConfirmBmiEdit((v) => !v)}
+                                className="px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-amber-400/60 text-amber-200 text-[10px] font-extrabold cursor-pointer transition"
+                              >
+                                {showInputs ? 'ซ่อน' : 'แก้ไข'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {showInputs && (
+                          <div className="grid grid-cols-12 gap-1.5">
+                            <div className="col-span-4">
+                              <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                                เพศ
+                              </label>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setJoinGender('female')}
+                                  className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
+                                    joinGender === 'female'
+                                      ? 'bg-pink-500 text-white border-amber-200'
+                                      : 'bg-slate-900 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  👩 หญิง
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setJoinGender('male')}
+                                  className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
+                                    joinGender === 'male'
+                                      ? 'bg-sky-500 text-white border-amber-200'
+                                      : 'bg-slate-900 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  👨 ชาย
+                                </button>
+                              </div>
+                            </div>
+                            <div className="col-span-4">
+                              <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                                น้ำหนักจริง (กก.)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="16"
+                                max="300"
+                                required={!isEditingOther}
+                                value={joinBodyWeight}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setJoinBodyWeight(val);
+                                  if (!goalMeta.isCumulative && mode === 'create') {
+                                    setJoinStart(val);
+                                  }
+                                }}
+                                placeholder={isEditingOther ? 'คงค่าเดิม' : ''}
+                                className="w-full bg-slate-900 text-white placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
+                              />
+                            </div>
+                            <div className="col-span-4">
+                              <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
+                                ส่วนสูง (ซม.)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="80"
+                                max="250"
+                                required={!isEditingOther}
+                                value={joinHeightCm}
+                                onChange={(e) => setJoinHeightCm(e.target.value)}
+                                placeholder={isEditingOther ? 'คงค่าเดิม' : ''}
+                                className="w-full bg-slate-900 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="rounded-xl bg-slate-950/65 border border-amber-500/40 p-2.5 space-y-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-200 mb-1">
+                        🎯 ภารกิจเสริมรับโบนัสเพิ่ม (Side Quest • ไม่บังคับ)
+                      </label>
+                      <select
+                        value={joinGoalType}
+                        onChange={(e) => setJoinGoalType(e.target.value as GoalType)}
+                        className="w-full bg-slate-950 text-amber-200 border-2 border-amber-500 rounded-xl px-2.5 py-2 text-xs font-extrabold cursor-pointer"
                       >
-                        {bmiMeta.isValid ? `BMI ${bmiMeta.bmi} • ${bmiMeta.label}` : 'กรอกให้ครบ'}
-                      </span>
+                        {GOAL_TYPES.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.icon} {g.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-amber-100/75 mt-1">{goalMeta.description}</p>
                     </div>
-                    <div className="grid grid-cols-12 gap-1.5">
-                      <div className="col-span-4">
-                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
-                          เพศ
-                        </label>
-                        <div className="grid grid-cols-2 gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setJoinGender('female')}
-                            className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
-                              joinGender === 'female'
-                                ? 'bg-pink-500 text-white border-amber-200'
-                                : 'bg-slate-900 text-slate-300 border-slate-700'
-                            }`}
-                          >
-                            👩 หญิง
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setJoinGender('male')}
-                            className={`py-1.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
-                              joinGender === 'male'
-                                ? 'bg-sky-500 text-white border-amber-200'
-                                : 'bg-slate-900 text-slate-300 border-slate-700'
-                            }`}
-                          >
-                            👨 ชาย
-                          </button>
+
+                    {joinGoalType !== 'none' ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {!goalMeta.isCumulative && (
+                          <div>
+                            <label className="block text-[10px] font-bold text-amber-200 mb-0.5">
+                              ค่าเริ่มต้นภารกิจเสริม ({goalMeta.unit})
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={joinStart}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setJoinStart(val);
+                                if (mode === 'create' && val) {
+                                  setJoinBodyWeight(val);
+                                }
+                              }}
+                              placeholder="เว้นว่างได้"
+                              className="w-full bg-slate-950 text-white placeholder:text-slate-500 border-2 border-amber-500/70 rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                            />
+                          </div>
+                        )}
+                        <div className={goalMeta.isCumulative ? 'col-span-2' : ''}>
+                          <label className="block text-[10px] font-bold text-amber-200 mb-0.5">
+                            เป้าหมายภารกิจเสริม ({goalMeta.unit})
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={joinGoal}
+                            onChange={(e) => setJoinGoal(e.target.value)}
+                            placeholder={goalMeta.isCumulative ? 'เช่น 1000 (เว้นว่างได้)' : 'เช่น 58.0 (เว้นว่างได้)'}
+                            className="w-full bg-slate-950 text-emerald-300 placeholder:text-slate-500 border-2 border-amber-500/70 rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                          />
                         </div>
                       </div>
-                      <div className="col-span-4">
-                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
-                          น้ำหนักจริง (กก.)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="20"
-                          max="250"
-                          required
-                          value={effectiveWeightInput}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setJoinBodyWeight(val);
-                            if (!goalMeta.isCumulative && mode === 'create') {
-                              setJoinStart(val);
-                            }
-                          }}
-                          placeholder="65.0"
-                          className="w-full bg-slate-900 text-white placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
-                        />
-                      </div>
-                      <div className="col-span-4">
-                        <label className="block text-[10px] font-bold text-amber-100/80 mb-0.5">
-                          ส่วนสูง (ซม.)
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="80"
-                          max="250"
-                          required
-                          value={joinHeightCm}
-                          onChange={(e) => setJoinHeightCm(e.target.value)}
-                          placeholder="165"
-                          className="w-full bg-slate-900 text-sky-200 placeholder:text-slate-500 border border-amber-500/70 rounded-lg px-2 py-1.5 text-xs font-bold text-center"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-200 mb-1">
-                      🎯 เลือกสายภารกิจ (5 สาย)
-                    </label>
-                    <select
-                      value={joinGoalType}
-                      onChange={(e) => setJoinGoalType(e.target.value as GoalType)}
-                      className="w-full bg-slate-950 text-amber-200 border-2 border-amber-500 rounded-xl px-2.5 py-2 text-xs font-extrabold cursor-pointer"
-                    >
-                      {GOAL_TYPES.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.icon} {g.label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-amber-100/75 mt-1">{goalMeta.description}</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {!goalMeta.isCumulative && (
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-200 mb-0.5">
-                          ค่าเริ่มต้นภารกิจ ({goalMeta.unit})
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          required
-                          value={joinStart || effectiveWeightInput}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setJoinStart(val);
-                            if (mode === 'create') {
-                              setJoinBodyWeight(val);
-                            }
-                          }}
-                          placeholder="65.0"
-                          className="w-full bg-slate-950 text-white placeholder:text-slate-400 border-2 border-amber-500/70 rounded-xl px-2.5 py-1.5 text-xs font-bold"
-                        />
+                    ) : (
+                      <div className="rounded-xl bg-slate-950/70 border border-slate-600 px-3 py-2 text-[11px] font-bold text-slate-200">
+                        👟 ไม่เลือกภารกิจเสริม — ลงแข่ง Step Challenge หลักอย่างเดียว (กลับมาเลือกเพิ่มทีหลังได้ตลอดเวลา!)
                       </div>
                     )}
-                    <div className={goalMeta.isCumulative ? 'col-span-2' : ''}>
-                      <label className="block text-[10px] font-bold text-amber-200 mb-0.5">
-                        เป้าหมาย ({goalMeta.unit})
-                      </label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        required
-                        value={joinGoal}
-                        onChange={(e) => setJoinGoal(e.target.value)}
-                        placeholder={goalMeta.isCumulative ? '1000' : '58.0'}
-                        className="w-full bg-slate-950 text-emerald-300 placeholder:text-slate-400 border-2 border-amber-500/70 rounded-xl px-2.5 py-1.5 text-xs font-bold"
-                      />
-                    </div>
                   </div>
 
                   {bmiMeta.isValid && (joinGoalType === 'weight_loss' || joinGoalType === 'weight_gain') && (
@@ -3185,6 +3645,424 @@ export function WardrobeShopModal({
           </div>
         </div>
       )}
+
+      {/* ✨ NI NO KUNI–INSPIRED CINEMATIC GACHA SUMMON & 8x MULTI-REVEAL OVERLAY */}
+      {gachaStage && (() => {
+        const hasLeg = gachaOverlayResults.some((r) => r.item.rarity === 'legendary');
+        const hasEpic = gachaOverlayResults.some((r) => r.item.rarity === 'epic');
+        const totalRefund = gachaOverlayResults.reduce((sum, r) => sum + (r.refundPoints || 0), 0);
+        const topRarity = hasLeg ? 'legendary' : hasEpic ? 'epic' : 'rare';
+        const isLeg = topRarity === 'legendary';
+        const isEpic = topRarity === 'epic';
+
+        const raysBg =
+          gachaStage === 'reveal' && isLeg
+            ? 'repeating-conic-gradient(from 0deg, rgba(250,204,21,0.38) 0deg 10deg, rgba(244,114,182,0.22) 10deg 20deg, rgba(56,189,248,0.22) 20deg 30deg)'
+            : gachaStage === 'reveal' && isEpic
+            ? 'repeating-conic-gradient(from 0deg, rgba(192,132,252,0.34) 0deg 14deg, rgba(244,114,182,0.14) 14deg 28deg)'
+            : 'repeating-conic-gradient(from 0deg, rgba(56,189,248,0.28) 0deg 16deg, rgba(255,255,255,0.06) 16deg 32deg)';
+
+        const orbCount = gachaPullCount === 8 ? 8 : 1;
+
+        return (
+          <div
+            className={`fixed inset-0 z-[80] flex flex-col items-center justify-center p-3 sm:p-5 overflow-y-auto overflow-x-hidden transition-colors duration-500 ${
+              gachaStage === 'fakeout'
+                ? 'bg-[radial-gradient(ellipse_at_center,_#581c87_0%,_#1e1b4b_48%,_#020617_100%)]'
+                : gachaStage === 'reveal' && isLeg
+                ? 'bg-[radial-gradient(ellipse_at_center,_#451a03_0%,_#3b0764_48%,_#020617_100%)]'
+                : gachaStage === 'reveal' && isEpic
+                ? 'bg-[radial-gradient(ellipse_at_center,_#3b0764_0%,_#1e1b4b_52%,_#020617_100%)]'
+                : 'bg-[radial-gradient(ellipse_at_center,_#0c4a6e_0%,_#0f172a_52%,_#020617_100%)]'
+            } backdrop-blur-md`}
+          >
+            {/* Starry Ni no Kuni Sky Backdrop */}
+            <div className="pointer-events-none fixed inset-0 overflow-hidden">
+              {[
+                { top: '8%', left: '12%', size: 4, delay: '0s' },
+                { top: '16%', left: '78%', size: 5, delay: '0.4s' },
+                { top: '28%', left: '22%', size: 3, delay: '0.8s' },
+                { top: '22%', left: '62%', size: 4, delay: '1.1s' },
+                { top: '72%', left: '15%', size: 5, delay: '0.2s' },
+                { top: '80%', left: '84%', size: 4, delay: '0.7s' },
+                { top: '65%', left: '72%', size: 3, delay: '1.3s' },
+                { top: '42%', left: '8%', size: 4, delay: '0.5s' },
+                { top: '38%', left: '90%', size: 5, delay: '0.9s' },
+                { top: '88%', left: '38%', size: 3, delay: '0.3s' },
+              ].map((st, idx) => (
+                <span
+                  key={idx}
+                  className="absolute rounded-full bg-amber-200 animate-pulse shadow-[0_0_12px_rgba(253,224,71,0.95)]"
+                  style={{
+                    top: st.top,
+                    left: st.left,
+                    width: st.size,
+                    height: st.size,
+                    animationDelay: st.delay,
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Rotating Sunburst Rays */}
+            {(gachaStage === 'reveal' || gachaStage === 'fakeout') && (
+              <div
+                className="pointer-events-none fixed left-1/2 top-1/2 w-[1100px] h-[1100px] rounded-full gacha-rays-spin opacity-80"
+                style={{ background: raysBg }}
+              />
+            )}
+
+            {/* Supernova Flash on Reveal */}
+            {gachaStage === 'reveal' && (
+              <div
+                key={`flash-${gachaRevealKey}`}
+                className={`pointer-events-none fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[620px] h-[620px] rounded-full nnk-flash-burst ${
+                  isLeg
+                    ? 'bg-gradient-to-r from-yellow-200 via-white to-pink-300'
+                    : isEpic
+                    ? 'bg-gradient-to-r from-fuchsia-300 via-white to-purple-300'
+                    : 'bg-gradient-to-r from-sky-200 via-white to-cyan-200'
+                }`}
+              />
+            )}
+
+            {/* Top HUD: Points + Skip Button */}
+            <div className="fixed top-4 inset-x-4 z-30 flex items-center justify-between max-w-5xl mx-auto pointer-events-none">
+              <div className="pointer-events-auto px-3 py-1.5 rounded-full bg-slate-950/80 border border-amber-400/70 text-amber-200 text-xs sm:text-sm font-extrabold shadow-lg flex items-center gap-1.5">
+                <span>💰</span>
+                <span>แต้มคงเหลือ: {userPoints.toLocaleString()}</span>
+                <span className="text-amber-300/70 text-[11px]">
+                  (มีแล้ว {gachaOwnedCount} ชิ้น)
+                </span>
+              </div>
+              {gachaStage !== 'reveal' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    gachaSkipRef.current = true;
+                  }}
+                  className="pointer-events-auto px-3.5 py-1.5 rounded-full bg-slate-900/85 hover:bg-slate-800 border border-amber-300/80 text-amber-200 text-xs font-extrabold cursor-pointer shadow-lg transition"
+                >
+                  ข้าม ⏭
+                </button>
+              )}
+            </div>
+
+            {/* STAGE 1: NI NO KUNI MAGIC CIRCLE SUMMONING */}
+            {gachaStage === 'charging' && (
+              <div className="relative z-10 flex flex-col items-center gap-6 text-center">
+                <div className="relative w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center">
+                  {/* Vertical Light Pillar */}
+                  <div className="absolute bottom-1/2 w-24 h-72 bg-gradient-to-t from-sky-400/60 via-amber-200/30 to-transparent blur-xl nnk-beam-rise" />
+
+                  {/* Outer Golden Magic Rune Circle (SVG) */}
+                  <svg
+                    viewBox="0 0 260 260"
+                    className="absolute inset-0 w-full h-full nnk-rune-spin drop-shadow-[0_0_18px_rgba(250,204,21,0.85)]"
+                  >
+                    <circle cx="130" cy="130" r="120" fill="none" stroke="#fde047" strokeWidth="2.5" strokeDasharray="10 6" opacity="0.9" />
+                    <circle cx="130" cy="130" r="106" fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.85" />
+                    <polygon
+                      points="130,18 227,186 33,186"
+                      fill="none"
+                      stroke="#facc15"
+                      strokeWidth="1.6"
+                      opacity="0.7"
+                    />
+                    <polygon
+                      points="130,242 33,74 227,74"
+                      fill="none"
+                      stroke="#facc15"
+                      strokeWidth="1.6"
+                      opacity="0.7"
+                    />
+                  </svg>
+
+                  {/* Inner Counter-Rotating Rune Ring */}
+                  <svg
+                    viewBox="0 0 200 200"
+                    className="absolute w-48 h-48 sm:w-52 sm:h-52 nnk-rune-spin-rev drop-shadow-[0_0_14px_rgba(56,189,248,0.9)]"
+                  >
+                    <circle cx="100" cy="100" r="88" fill="none" stroke="#e0f2fe" strokeWidth="2" strokeDasharray="4 8" />
+                    <circle cx="100" cy="100" r="68" fill="none" stroke="#fbbf24" strokeWidth="1.8" />
+                  </svg>
+
+                  {/* Orbiting Summon Orbs (8 orbs for multi-pull) */}
+                  {orbCount === 8 ? (
+                    <div className="absolute inset-0 nnk-rune-spin-fast">
+                      {Array.from({ length: 8 }).map((_, idx) => {
+                        const angle = (idx / 8) * Math.PI * 2;
+                        const radius = 104;
+                        const x = 50 + (Math.cos(angle) * radius) / 2.8;
+                        const y = 50 + (Math.sin(angle) * radius) / 2.8;
+                        const orbColor =
+                          idx % 3 === 0
+                            ? 'from-yellow-200 via-amber-400 to-orange-500 shadow-[0_0_20px_rgba(250,204,21,0.95)]'
+                            : idx % 3 === 1
+                            ? 'from-fuchsia-200 via-purple-400 to-indigo-600 shadow-[0_0_20px_rgba(192,132,252,0.95)]'
+                            : 'from-cyan-100 via-sky-400 to-blue-600 shadow-[0_0_20px_rgba(56,189,248,0.95)]';
+                        return (
+                          <div
+                            key={idx}
+                            className={`absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-gradient-to-br ${orbColor} nnk-orb-pulse flex items-center justify-center text-xs`}
+                            style={{ left: `${x}%`, top: `${y}%`, animationDelay: `${idx * 0.12}s` }}
+                          >
+                            ✦
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {/* Center Summoning Prism Core */}
+                  <div className="relative w-28 h-28 rounded-full border-4 border-amber-200 bg-gradient-to-b from-cyan-200 via-sky-400 to-indigo-700 flex items-center justify-center shadow-[0_0_60px_rgba(56,189,248,0.95)] gacha-shake">
+                    <div className="absolute -inset-4 rounded-full bg-amber-300/30 blur-xl animate-pulse" />
+                    <span className="text-4xl drop-shadow z-10">{orbCount === 8 ? '🌟' : '✨'}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="font-[family-name:var(--font-kanit)] text-2xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-white to-sky-200 drop-shadow animate-pulse">
+                    {orbCount === 8 ? 'กำลังร่ายวงเวทย์อัญเชิญ ×8...' : 'กำลังร่ายวงเวทย์อัญเชิญ...'}
+                  </div>
+                  <div className="text-xs text-sky-200/80 font-bold">
+                    ✨ รวมพลังดวงดาวสู่ประตูมิติ ✨
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STAGE 2: LEGENDARY FAKE-OUT GOLDEN BREAKTHROUGH */}
+            {gachaStage === 'fakeout' && (
+              <div className="relative z-10 flex flex-col items-center gap-5 text-center">
+                <div className="px-5 py-1.5 rounded-full bg-gradient-to-r from-yellow-300 via-pink-400 to-cyan-300 text-black font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base border-2 border-white shadow-[0_0_28px_rgba(250,204,21,1)] animate-bounce">
+                  ⚡ ประตูมิติแตกออก! อัปเกรดเป็น LEGENDARY!! ⚡
+                </div>
+                <div className="relative w-64 h-64 flex items-center justify-center">
+                  <div className="absolute -inset-8 rounded-full bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 blur-3xl opacity-85 animate-pulse" />
+                  <svg viewBox="0 0 260 260" className="absolute inset-0 w-full h-full nnk-rune-spin-fast">
+                    <circle cx="130" cy="130" r="118" fill="none" stroke="#fef08a" strokeWidth="3.5" strokeDasharray="14 6" />
+                    <polygon points="130,14 230,190 30,190" fill="none" stroke="#f472b6" strokeWidth="2.5" />
+                    <polygon points="130,246 30,70 230,70" fill="none" stroke="#38bdf8" strokeWidth="2.5" />
+                  </svg>
+                  <div className="w-36 h-36 rounded-full border-4 border-white bg-gradient-to-tr from-amber-300 via-pink-500 to-cyan-300 flex items-center justify-center shadow-[0_0_80px_rgba(250,204,21,1)] gacha-mega-shake relative">
+                    <span className="text-6xl drop-shadow">🌈</span>
+                  </div>
+                </div>
+                <div className="font-[family-name:var(--font-kanit)] text-2xl sm:text-3xl font-extrabold text-yellow-200 drop-shadow">
+                  ✨ แสงทองสายรุ้งกำลังระเบิดออก!! ✨
+                </div>
+              </div>
+            )}
+
+            {/* STAGE 3: REVEAL (1 HERO CARD OR 2×4 NI NO KUNI MULTI-PULL GRID) */}
+            {gachaStage === 'reveal' && gachaOverlayResults.length > 0 && (
+              <div
+                key={`reveal-${gachaRevealKey}`}
+                className="relative z-20 w-full max-w-4xl flex flex-col items-center gap-4 pt-10 pb-4"
+              >
+                {/* Header Banner */}
+                <div className="text-center space-y-1.5">
+                  <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-slate-950/75 border border-amber-300/80 text-amber-200 text-xs sm:text-sm font-extrabold shadow-lg">
+                    <span>{hasLeg ? '🌈' : hasEpic ? '💜' : '✨'}</span>
+                    <span>
+                      {gachaOverlayResults.length > 1
+                        ? `ผลการอัญเชิญรัว ×${gachaOverlayResults.length} ชิ้น!`
+                        : isLeg
+                        ? 'LEGENDARY • แจ็กพอตระดับตำนาน!!'
+                        : isEpic
+                        ? 'EPIC • แรร์สุดอลังการ!'
+                        : 'RARE • ลิมิเต็ดกาชาปอง!'}
+                    </span>
+                  </div>
+                  {totalRefund > 0 && (
+                    <div>
+                      <span className="inline-flex items-center gap-1 px-3 py-0.5 rounded-full bg-amber-400/20 border border-amber-300/80 text-amber-200 text-[11px] font-extrabold">
+                        🔁 คืนแต้มจากของซ้ำรวม +{totalRefund.toLocaleString()} 💰
+                      </span>
+                    </div>
+                  )}
+                  {gachaOverlayResults.length > 1 && (
+                    <p className="text-[11px] text-amber-100/80 font-semibold">
+                      คลิกที่การ์ดใบใดก็ได้เพื่อสวมใส่ให้ตัวละครทันที!
+                    </p>
+                  )}
+                </div>
+
+                {/* Single Pull Hero Card */}
+                {gachaOverlayResults.length === 1 ? (
+                  (() => {
+                    const roll = gachaOverlayResults[0];
+                    const item = roll.item;
+                    const itemLeg = item.rarity === 'legendary';
+                    const itemEpic = item.rarity === 'epic';
+                    const equippedNow = isItemCurrentlyEquipped(item);
+                    return (
+                      <div
+                        className={`relative overflow-hidden max-w-sm w-full rounded-3xl p-6 text-center space-y-4 border-4 nnk-card-reveal ${
+                          itemLeg
+                            ? 'bg-gradient-to-b from-amber-950/95 via-rose-950/95 to-slate-950 border-yellow-300 shadow-[0_0_70px_rgba(250,204,21,0.9)] nnk-shimmer'
+                            : itemEpic
+                            ? 'bg-gradient-to-b from-purple-950/95 via-fuchsia-950/95 to-slate-950 border-fuchsia-300 shadow-[0_0_55px_rgba(192,132,252,0.85)] nnk-shimmer'
+                            : 'bg-gradient-to-b from-sky-950/95 via-slate-900/95 to-slate-950 border-sky-300 shadow-[0_0_45px_rgba(56,189,248,0.8)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          {roll.isDuplicate ? (
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-black shadow">
+                              🔁 ซ้ำ +{roll.refundPoints} 💰
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-400 text-black text-[10px] font-black shadow">
+                              NEW!
+                            </span>
+                          )}
+                          <span className="text-xs font-extrabold text-amber-300">
+                            {itemLeg ? '★★★★★' : itemEpic ? '★★★★' : '★★★'}
+                          </span>
+                        </div>
+                        <div className="flex justify-center py-1">
+                          <div
+                            className={`w-28 h-28 rounded-3xl border-4 flex items-center justify-center text-6xl shadow-2xl ${
+                              itemLeg
+                                ? 'bg-gradient-to-br from-yellow-300 via-amber-400 to-pink-500 border-white animate-bounce'
+                                : itemEpic
+                                ? 'bg-gradient-to-br from-purple-500 to-pink-500 border-fuchsia-200'
+                                : 'bg-gradient-to-br from-sky-400 to-indigo-600 border-sky-200'
+                            }`}
+                          >
+                            {item.icon}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="font-[family-name:var(--font-kanit)] text-2xl font-extrabold text-amber-200 drop-shadow">
+                            {item.name}
+                          </h4>
+                          <p className="text-xs text-amber-100/85 font-medium mt-1">{item.desc}</p>
+                        </div>
+                        <div className="text-[11px] font-extrabold text-emerald-300">
+                          {roll.isDuplicate
+                            ? `🔁 มีชิ้นนี้อยู่แล้ว — คืนแต้มให้ +${roll.refundPoints} 💰 ทันที!`
+                            : equippedNow
+                            ? '✓ สวมใส่ให้ตัวละครแล้ว!'
+                            : 'เก็บเข้าตู้เสื้อผ้าแล้ว'}
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  /* Multi-Pull 2×4 Ni no Kuni Card Grid */
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 w-full">
+                    {gachaOverlayResults.map((roll, idx) => {
+                      const item = roll.item;
+                      const itemLeg = item.rarity === 'legendary';
+                      const itemEpic = item.rarity === 'epic';
+                      const equippedNow = isItemCurrentlyEquipped(item);
+                      return (
+                        <button
+                          key={`${item.id}-${idx}`}
+                          type="button"
+                          onClick={() => equipWonItemLocally(item)}
+                          style={{ animationDelay: `${idx * 95}ms` }}
+                          className={`group relative overflow-hidden rounded-2xl p-3 text-center flex flex-col items-center justify-between gap-2 border-2 cursor-pointer transition hover:scale-[1.04] nnk-card-reveal ${
+                            itemLeg
+                              ? 'bg-gradient-to-b from-amber-900/95 via-rose-950/95 to-slate-950 border-yellow-300 shadow-[0_0_28px_rgba(250,204,21,0.75)] nnk-shimmer'
+                              : itemEpic
+                              ? 'bg-gradient-to-b from-purple-900/95 via-fuchsia-950/95 to-slate-950 border-fuchsia-300 shadow-[0_0_22px_rgba(192,132,252,0.65)] nnk-shimmer'
+                              : 'bg-gradient-to-b from-sky-950/95 via-slate-900/95 to-slate-950 border-sky-400/80 shadow-[0_0_16px_rgba(56,189,248,0.45)]'
+                          }`}
+                        >
+                          {/* Top Badges */}
+                          <div className="w-full flex items-center justify-between gap-1">
+                            {roll.isDuplicate ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-400 text-black text-[9px] font-black leading-none">
+                                ซ้ำ +{roll.refundPoints}💰
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-black text-[9px] font-black leading-none">
+                                NEW
+                              </span>
+                            )}
+                            <span
+                              className={`text-[10px] font-black leading-none ${
+                                itemLeg ? 'text-yellow-300' : itemEpic ? 'text-fuchsia-300' : 'text-sky-300'
+                              }`}
+                            >
+                              {itemLeg ? '★★★★★' : itemEpic ? '★★★★' : '★★★'}
+                            </span>
+                          </div>
+
+                          {/* Item Orb / Icon */}
+                          <div
+                            className={`w-16 h-16 rounded-2xl border-2 flex items-center justify-center text-3xl sm:text-4xl shadow-xl transition group-hover:scale-110 ${
+                              itemLeg
+                                ? 'bg-gradient-to-br from-yellow-300 via-amber-400 to-pink-500 border-white'
+                                : itemEpic
+                                ? 'bg-gradient-to-br from-purple-500 to-pink-500 border-fuchsia-200'
+                                : 'bg-gradient-to-br from-sky-400 to-indigo-600 border-sky-200'
+                            }`}
+                          >
+                            {item.icon}
+                          </div>
+
+                          {/* Item Name & Equip Status */}
+                          <div className="w-full space-y-1">
+                            <div className="font-[family-name:var(--font-kanit)] text-xs sm:text-[13px] font-extrabold text-amber-100 leading-tight line-clamp-2 min-h-[2rem] flex items-center justify-center">
+                              {item.name}
+                            </div>
+                            <div
+                              className={`w-full py-0.5 rounded-lg text-[9.5px] font-extrabold ${
+                                equippedNow
+                                  ? 'bg-emerald-500 text-black'
+                                  : itemLeg
+                                  ? 'bg-amber-400/25 text-yellow-200 border border-yellow-300/60'
+                                  : itemEpic
+                                  ? 'bg-purple-500/25 text-fuchsia-200 border border-fuchsia-300/50'
+                                  : 'bg-sky-500/20 text-sky-200 border border-sky-300/40'
+                              }`}
+                            >
+                              {equippedNow ? '✓ ใส่อยู่' : 'แตะเพื่อใส่'}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Bottom Action Bar: Close + Summon ×1 Again + Summon ×8 Again */}
+                <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setGachaStage(null)}
+                    className="px-5 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-amber-100 border-2 border-slate-500 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer shadow-lg transition"
+                  >
+                    ✓ รับของ &amp; ปิด
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={gachaSpinning || userPoints < GACHA_SPIN_COST}
+                    onClick={() => handleGachaSpinClick(1)}
+                    className="px-5 py-2.5 rounded-2xl bg-gradient-to-b from-sky-400 to-indigo-600 text-white border-2 border-sky-200 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer shadow-[0_4px_0_#000] hover:brightness-110 transition disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    🎰 สุ่มต่อ ×1 ({GACHA_SPIN_COST.toLocaleString()} 💰)
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={gachaSpinning || userPoints < GACHA_MULTI_COST}
+                    onClick={() => handleGachaSpinClick(8)}
+                    className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-300 via-pink-400 to-cyan-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer shadow-[0_4px_0_#000] hover:brightness-110 transition disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    🌟 สุ่มต่อ ×{GACHA_MULTI_COUNT} ({GACHA_MULTI_COST.toLocaleString()} 💰)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3204,10 +4082,16 @@ export interface LoginGatePlayerSummary {
   equipWeapon?: string;
   equipWings?: string;
   equipAura?: string;
+  equipPetGear?: string;
+  petType?: string;
+  equipMount?: string;
+  propColors?: PropColorMap;
+  goalType?: GoalType;
   progressPct?: number;
   diffLabel?: string;
   bellyScale?: number;
   bmiBellyScale?: number;
+  muscleScale?: number;
 }
 
 interface LoginGateModalProps {
@@ -3253,9 +4137,10 @@ export function LoginGateModal({
     const height = container.clientHeight || 380;
 
     const scene = new THREE.Scene();
+    const hasMount = Boolean(champion?.equipMount && champion.equipMount !== 'mount_none');
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 60);
-    camera.position.set(0, 2.35, 6.4);
-    camera.lookAt(0, 1.35, 0);
+    camera.position.set(0, hasMount ? 2.85 : 2.35, hasMount ? 7.8 : 6.4);
+    camera.lookAt(0, hasMount ? 1.65 : 1.35, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
@@ -3294,45 +4179,77 @@ export function LoginGateModal({
     pedGroup.add(base, goldRing, glowDisc);
     scene.add(pedGroup);
 
-    const charParts = buildCharacterMesh({
-      colorHex: champion?.colorHex || '#F8FAFC',
-      accessory: 'headband',
-      bandColor: champion?.bandColor || '#FACC15',
-      bellyScale: champion?.bellyScale ?? champion?.bmiBellyScale ?? 1,
-      species: champion?.breed || champion?.species || 'bunny',
-      equipHat: champion?.equipHat && champion.equipHat !== 'none' ? champion.equipHat : 'hat_tiara',
-      equipFace: champion?.equipFace || 'face_none',
-      equipArmor:
-        champion?.equipArmor && champion.equipArmor !== 'armor_none'
-          ? champion.equipArmor
-          : 'armor_snow_dress',
-      equipWeapon:
-        champion?.equipWeapon && champion.equipWeapon !== 'weapon_none'
-          ? champion.equipWeapon
-          : 'weapon_light_sword',
-      equipWings:
-        champion?.equipWings && champion.equipWings !== 'wings_none'
-          ? champion.equipWings
-          : 'wings_gold_archangel',
-      equipAura:
-        champion?.equipAura && champion.equipAura !== 'aura_none'
-          ? champion.equipAura
-          : 'aura_stars',
-      animMode: 'cheer',
-    });
+    const charParts = champion
+      ? buildCharacterMesh({
+          colorHex: champion.colorHex || '#F8FAFC',
+          accessory: 'none',
+          bandColor: champion.bandColor || '#FACC15',
+          bellyScale: champion.bellyScale ?? champion.bmiBellyScale ?? 1,
+          muscleScale: champion.muscleScale ?? 1,
+          showDumbbells: champion.goalType === 'muscle_gain',
+          species: champion.breed || champion.species || 'bunny',
+          equipHat: champion.equipHat || 'none',
+          equipFace: champion.equipFace || 'face_none',
+          equipArmor: champion.equipArmor || 'armor_none',
+          equipWeapon: champion.equipWeapon || 'weapon_none',
+          equipWings: champion.equipWings || 'wings_none',
+          equipAura: champion.equipAura || 'aura_none',
+          equipMount: champion.equipMount || 'mount_none',
+          propColors: champion.propColors,
+          animMode: 'cheer',
+        })
+      : buildCharacterMesh({
+          colorHex: '#F8FAFC',
+          accessory: 'headband',
+          bandColor: '#FACC15',
+          bellyScale: 1,
+          species: 'bunny',
+          equipHat: 'hat_tiara',
+          equipFace: 'face_none',
+          equipArmor: 'armor_snow_dress',
+          equipWeapon: 'weapon_light_sword',
+          equipWings: 'wings_gold_archangel',
+          equipAura: 'aura_stars',
+          animMode: 'cheer',
+        });
     charParts.rootGroup.rotation.y = -Math.PI / 2 + 0.35;
+
+    const champPetType = champion
+      ? champion.equipPetGear && champion.equipPetGear !== 'pet_none'
+        ? champion.equipPetGear
+        : champion.petType || 'none'
+      : 'none';
+    const petParts = buildPetMesh(champPetType, champion?.propColors?.pet);
+    if (petParts) {
+      charParts.rootGroup.add(petParts.petGroup);
+      if (petParts.leashMesh) charParts.rootGroup.add(petParts.leashMesh);
+    }
+
     scene.add(charParts.rootGroup);
 
     let frameId = 0;
     const clock = new THREE.Clock();
     let t = 0;
+    const propColorsSig = JSON.stringify(champion?.propColors || {});
+    void propColorsSig;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
       const delta = Math.min(0.05, clock.getDelta());
       t += delta;
       charParts.rootGroup.rotation.y = -Math.PI / 2 + 0.35 + Math.sin(t * 0.9) * 0.25;
       charParts.mixer?.update(delta);
-      charParts.bounceGroup.position.y = charParts.mixer ? 0 : Math.abs(Math.sin(t * 2.8)) * 0.08;
+      petParts?.mixer?.update(delta);
+      if (charParts.auraSpinGroup) {
+        charParts.auraSpinGroup.rotation.y = t * 1.45;
+      }
+      if (petParts) {
+        animatePetMotion(petParts, charParts, champPetType, false, t, 0);
+      }
+      if (hasMount) {
+        syncCharacterMountPose(charParts, t, 0, true, false);
+      } else {
+        charParts.bounceGroup.position.y = charParts.mixer ? 0 : Math.abs(Math.sin(t * 2.8)) * 0.08;
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -3340,6 +4257,7 @@ export function LoginGateModal({
     return () => {
       cancelAnimationFrame(frameId);
       charParts.rootGroup.userData.disposed = true;
+      if (petParts) petParts.petGroup.userData.disposed = true;
       renderer.dispose();
     };
   }, [
@@ -3348,12 +4266,21 @@ export function LoginGateModal({
     champion?.breed,
     champion?.species,
     champion?.colorHex,
+    champion?.bandColor,
+    champion?.bellyScale,
+    champion?.bmiBellyScale,
+    champion?.muscleScale,
+    champion?.goalType,
     champion?.equipHat,
     champion?.equipFace,
     champion?.equipArmor,
     champion?.equipWeapon,
     champion?.equipWings,
     champion?.equipAura,
+    champion?.equipPetGear,
+    champion?.petType,
+    champion?.equipMount,
+    JSON.stringify(champion?.propColors || {}),
   ]);
 
   if (!isOpen) return null;
@@ -3461,9 +4388,7 @@ export function LoginGateModal({
                             {pl.name}
                           </div>
                           <div className="text-[10px] font-bold text-amber-300/90 truncate">
-                            {pl.role === 'spectator'
-                              ? '👀 กองเชียร์เดินเล่น'
-                              : `🏃 ความคืบหน้า ${pl.progressPct ?? 0}%`}
+                            {`👟 ความคืบหน้า ${pl.progressPct ?? 0}%`}
                           </div>
                         </div>
                       </button>

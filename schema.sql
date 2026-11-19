@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
   last_checkin_date TEXT DEFAULT '',
   coin_pickups_date TEXT DEFAULT '',
   coin_pickups_count INTEGER NOT NULL DEFAULT 0,
+  dividend_earned_date TEXT DEFAULT '',
+  dividend_earned_today INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS seasons (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   end_date TEXT DEFAULT '',
+  step_target INTEGER NOT NULL DEFAULT 300000,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -45,8 +48,23 @@ CREATE TABLE IF NOT EXISTS season_entries (
   current_val REAL NOT NULL DEFAULT 0,
   target_val REAL NOT NULL DEFAULT 0,
   max_progress_awarded INTEGER NOT NULL DEFAULT 0,
+  side_coins_awarded INTEGER NOT NULL DEFAULT 0,
+  step_count INTEGER NOT NULL DEFAULT 0,
+  max_steps_pct_awarded INTEGER NOT NULL DEFAULT 0,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(season_id, user_id),
+  FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS step_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  season_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  steps_added INTEGER NOT NULL DEFAULT 0,
+  total_steps INTEGER NOT NULL DEFAULT 0,
+  note TEXT DEFAULT '',
+  logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

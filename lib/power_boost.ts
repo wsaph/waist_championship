@@ -1,13 +1,14 @@
 export type PowerFormType =
-  | 'majin_buu'
   | 'kabigon'
+  | 'food_coma'
   | 'stuffed'
   | 'neutral'
   | 'warm_up'
   | 'fire_boost'
-  | 'super_saiyan';
+  | 'super_saiyan'
+  | 'majin_buu';
 
-export const POWER_GAUGE_MAX = 6;
+export const POWER_GAUGE_MAX = 10;
 
 export interface PowerBoostMeta {
   cheerCount: number;
@@ -36,7 +37,9 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
   const clampedGauge = Math.max(-POWER_GAUGE_MAX, Math.min(POWER_GAUGE_MAX, netPower));
   const gaugeRatio = clampedGauge / POWER_GAUGE_MAX;
 
-  if (netPower >= 6) {
+  const absStep = Math.min(POWER_GAUGE_MAX, Math.abs(netPower));
+
+  if (netPower >= 10) {
     return {
       cheerCount: c,
       temptCount: t,
@@ -48,17 +51,17 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
       title: '⚡ ร่าง SUPER SAIYAN!!',
       shortLabel: `⚡ไซย่า +${netPower}`,
       badgeBgClass: 'bg-amber-400 text-black border-white',
-      nextHint: 'พลังไฟทะลุขีดจำกัดเป็น Super Saiyan แล้ว! (มารผจญต้องส่งของกิน 😈 เพื่อลดไฟ)',
-      widthScale: 1.08,
-      heightScale: 1.1,
-      extraBellyAdd: -0.08,
-      extraMuscleAdd: 0.25,
-      animSpeedMult: 1.85,
+      nextHint: 'พลังไฟทะลุขีดจำกัดเป็น Super Saiyan เต็มขั้นแล้ว! (มารผจญต้องส่งของกิน 😈 เพื่อลดไฟ)',
+      widthScale: 1.12,
+      heightScale: 1.14,
+      extraBellyAdd: -0.12,
+      extraMuscleAdd: 0.3,
+      animSpeedMult: 1.9,
     };
   }
 
-  if (netPower >= 3) {
-    const need = 6 - netPower;
+  if (netPower >= 5) {
+    const need = 10 - netPower;
     return {
       cheerCount: c,
       temptCount: t,
@@ -67,20 +70,20 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
       gaugeRatio,
       form: 'fire_boost',
       icon: '🔥',
-      title: '🔥 โหมดไฟบูสต์ลุกโชน!',
-      shortLabel: `🔥ไฟบูสต์ +${netPower}`,
+      title: `🔥 โหมดไฟบูสต์ Lv.${netPower}!`,
+      shortLabel: `🔥บูสต์ +${netPower}`,
       badgeBgClass: 'bg-orange-500 text-white border-amber-200',
       nextHint: `เติมไฟอีก +${need} ครั้ง จะระเบิดพลังเป็นร่าง Super Saiyan ⚡!`,
-      widthScale: 1.03,
-      heightScale: 1.04,
-      extraBellyAdd: -0.04,
-      extraMuscleAdd: 0.12,
-      animSpeedMult: 1.45,
+      widthScale: Number((1.0 + absStep * 0.011).toFixed(3)),
+      heightScale: Number((1.0 + absStep * 0.013).toFixed(3)),
+      extraBellyAdd: Number((-absStep * 0.011).toFixed(3)),
+      extraMuscleAdd: Number((absStep * 0.028).toFixed(3)),
+      animSpeedMult: Number((1.0 + absStep * 0.085).toFixed(2)),
     };
   }
 
   if (netPower >= 1) {
-    const need = 3 - netPower;
+    const need = 5 - netPower;
     return {
       cheerCount: c,
       temptCount: t,
@@ -89,41 +92,19 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
       gaugeRatio,
       form: 'warm_up',
       icon: '🔥',
-      title: '🔥 เครื่องเริ่มร้อน!',
+      title: `🔥 เครื่องร้อน Lv.${netPower}!`,
       shortLabel: `🔥+${netPower}`,
       badgeBgClass: 'bg-amber-500/90 text-black border-amber-200',
       nextHint: `เติมไฟอีก +${need} ครั้ง เพื่อติดเอฟเฟกต์ไฟบูสต์ 🔥!`,
-      widthScale: 1.0,
-      heightScale: 1.0,
-      extraBellyAdd: 0,
-      extraMuscleAdd: 0.04,
-      animSpeedMult: 1.16,
+      widthScale: Number((1.0 + absStep * 0.01).toFixed(3)),
+      heightScale: Number((1.0 + absStep * 0.012).toFixed(3)),
+      extraBellyAdd: Number((-absStep * 0.009).toFixed(3)),
+      extraMuscleAdd: Number((absStep * 0.022).toFixed(3)),
+      animSpeedMult: Number((1.0 + absStep * 0.075).toFixed(2)),
     };
   }
 
-  if (netPower <= -6) {
-    return {
-      cheerCount: c,
-      temptCount: t,
-      netPower,
-      clampedGauge,
-      gaugeRatio,
-      form: 'majin_buu',
-      icon: '🩷',
-      title: '🩷 ร่างจอมมารบูตัวเบิ้ม!!',
-      shortLabel: `🩷จอมมารบู ${netPower}`,
-      badgeBgClass: 'bg-pink-500 text-white border-fuchsia-200',
-      nextHint: 'โดนขุนจนกลายร่างเป็นจอมมารบูแล้ว! (เพื่อนต้องช่วยกดเติมไฟ 🔥 เพื่อเบิร์นพุง)',
-      widthScale: 1.68,
-      heightScale: 1.52,
-      extraBellyAdd: 0.45,
-      extraMuscleAdd: 0,
-      animSpeedMult: 0.62,
-    };
-  }
-
-  if (netPower <= -3) {
-    const need = Math.abs(-6 - netPower);
+  if (netPower <= -10) {
     return {
       cheerCount: c,
       temptCount: t,
@@ -132,20 +113,42 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
       gaugeRatio,
       form: 'kabigon',
       icon: '💤',
-      title: '💤 ร่างคาบิก้อนจอมเขมือบ!',
+      title: '💤 ร่างคาบิก้อนยักษ์หลับปุ๋ย!!',
       shortLabel: `💤คาบิก้อน ${netPower}`,
       badgeBgClass: 'bg-cyan-700 text-amber-100 border-amber-300',
-      nextHint: `โดนส่งของกินอีก -${need} ครั้ง จะอ้วนทะลุพิกัดเป็นจอมมารบู 🩷!`,
-      widthScale: 1.46,
-      heightScale: 1.35,
-      extraBellyAdd: 0.35,
+      nextHint: 'โดนขุนจนกลายร่างเป็นคาบิก้อนยักษ์หลับปุ๋ยแล้ว! (เพื่อนต้องช่วยกดเติมไฟ 🔥 เพื่อปลุกเบิร์นพุง)',
+      widthScale: 1.68,
+      heightScale: 1.48,
+      extraBellyAdd: 0.48,
       extraMuscleAdd: 0,
-      animSpeedMult: 0.54,
+      animSpeedMult: 0.52,
+    };
+  }
+
+  if (netPower <= -5) {
+    const need = Math.abs(-10 - netPower);
+    return {
+      cheerCount: c,
+      temptCount: t,
+      netPower,
+      clampedGauge,
+      gaugeRatio,
+      form: 'food_coma',
+      icon: '😴',
+      title: `😴 จุกแน่น Lv.${absStep}!`,
+      shortLabel: `😴จุกแน่น ${netPower}`,
+      badgeBgClass: 'bg-sky-700 text-amber-100 border-sky-300',
+      nextHint: `โดนส่งของกินอีก -${need} ครั้ง จะขยายยักษ์เป็นร่างคาบิก้อน 💤!`,
+      widthScale: Number((1.0 + absStep * 0.064).toFixed(3)),
+      heightScale: Number((1.0 + absStep * 0.044).toFixed(3)),
+      extraBellyAdd: Number((absStep * 0.046).toFixed(3)),
+      extraMuscleAdd: 0,
+      animSpeedMult: Number(Math.max(0.56, 1.0 - absStep * 0.045).toFixed(2)),
     };
   }
 
   if (netPower <= -1) {
-    const need = Math.abs(-3 - netPower);
+    const need = Math.abs(-5 - netPower);
     return {
       cheerCount: c,
       temptCount: t,
@@ -154,15 +157,15 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
       gaugeRatio,
       form: 'stuffed',
       icon: '🍔',
-      title: '🍔 เริ่มอิ่มจุกพุงป่อง!',
+      title: `🍔 เริ่มอิ่มพุงป่อง Lv.${absStep}!`,
       shortLabel: `🍔${netPower}`,
       badgeBgClass: 'bg-rose-500 text-white border-rose-200',
-      nextHint: `ส่งของกินอีก -${need} ครั้ง จะตัวขยายเป็นคาบิก้อน 💤!`,
-      widthScale: 1.14,
-      heightScale: 1.07,
-      extraBellyAdd: 0.16,
+      nextHint: `ส่งของกินอีก -${need} ครั้ง จะเข้าโหมดจุกแน่น 😴 (ครบ -10 แปลงร่างคาบิก้อน 💤)!`,
+      widthScale: Number((1.0 + absStep * 0.055).toFixed(3)),
+      heightScale: Number((1.0 + absStep * 0.036).toFixed(3)),
+      extraBellyAdd: Number((absStep * 0.042).toFixed(3)),
       extraMuscleAdd: 0,
-      animSpeedMult: 0.84,
+      animSpeedMult: Number(Math.max(0.75, 1.0 - absStep * 0.042).toFixed(2)),
     };
   }
 
@@ -177,7 +180,7 @@ export function resolvePowerBoostMeta(cheerCount = 0, temptCount = 0): PowerBoos
     title: '⚖️ สมดุลปกติ',
     shortLabel: '⚖️ 0',
     badgeBgClass: 'bg-slate-700 text-amber-100 border-slate-500',
-    nextHint: 'เติมไฟ +3 ติดไฟบูสต์ (+6 Super Saiyan) • ส่งของกิน -3 ร่างคาบิก้อน (-6 จอมมารบู)',
+    nextHint: 'เติมไฟ +5 ติดไฟบูสต์ (+10 Super Saiyan ⚡) • ส่งของกิน -5 จุกแน่น (-10 คาบิก้อน 💤)',
     widthScale: 1.0,
     heightScale: 1.0,
     extraBellyAdd: 0,
