@@ -62,6 +62,11 @@ import {
   QUALITY_MODE_OPTIONS,
   type QualityMode,
 } from '@/lib/device_perf';
+import {
+  FISHING_RARITY_META,
+  type FishingCatch,
+  type FishingRarity,
+} from '@/lib/fishing_catalog';
 
 const WardrobeShopModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.WardrobeShopModal),
@@ -306,6 +311,17 @@ export default function Arena3DPage() {
   const [walkingSpectatorId, setWalkingSpectatorId] = useState<number | null>(null);
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isNearGuard, setIsNearGuard] = useState(false);
+  const [isNearOcean, setIsNearOcean] = useState(false);
+  const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
+  const [fishingResult, setFishingResult] = useState<{
+    caught: FishingCatch;
+    coinsEarned: number;
+    dailyRewardCount: number;
+    dailyRewardLimit: number;
+    quotaReached?: boolean;
+    guestMode?: boolean;
+  } | null>(null);
+  const [legendaryFlash, setLegendaryFlash] = useState(false);
   const [isPairMenuOpen, setIsPairMenuOpen] = useState(false);
   const [radialMenu, setRadialMenu] = useState<{ x: number; y: number; options: SpectatorActivity[] } | null>(null);
   const [guardPrankMenu, setGuardPrankMenu] = useState<{ x: number; y: number; options: GuardPrank[] } | null>(null);
@@ -321,6 +337,21 @@ export default function Arena3DPage() {
   const walkingSpectatorIdRef = useRef<number | null>(null);
   const nearbySpectatorIdRef = useRef<number | null>(null);
   const isNearGuardRef = useRef<boolean>(false);
+  const isNearOceanRef = useRef<boolean>(false);
+  const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
+  const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
+  const fishingFxRef = useRef<{
+    rarity: FishingRarity;
+    startedAt: number;
+    durationMs: number;
+    bobberX: number;
+    bobberZ: number;
+  } | null>(null);
+  const fishingBobberPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  const fishingTimersRef = useRef<{
+    biteTimer?: ReturnType<typeof setTimeout>;
+    missTimer?: ReturnType<typeof setTimeout>;
+  }>({});
   const guardPrankFxRef = useRef<{
     prank: GuardPrank;
     actorName: string;
@@ -705,6 +736,148 @@ export default function Arena3DPage() {
     fetchArenaData({ force: true });
   }, [fetchArenaData]);
 
+  const cancelFishing = useCallback(() => {
+    if (fishingTimersRef.current.biteTimer) {
+      clearTimeout(fishingTimersRef.current.biteTimer);
+      fishingTimersRef.current.biteTimer = undefined;
+    }
+    if (fishingTimersRef.current.missTimer) {
+      clearTimeout(fishingTimersRef.current.missTimer);
+      fishingTimersRef.current.missTimer = undefined;
+    }
+    fishingPhaseRef.current = 'idle';
+    setFishingPhase('idle');
+  }, []);
+
+  const startFishing = useCallback(() => {
+    cancelFishing();
+    setFishingResult(null);
+    walkTargetRef.current = null;
+    fishingPhaseRef.current = 'waiting';
+    setFishingPhase('waiting');
+
+    const waitMs = 2000 + Math.floor(Math.random() * 2200);
+    fishingTimersRef.current.biteTimer = setTimeout(() => {
+      fishingPhaseRef.current = 'bite';
+      setFishingPhase('bite');
+      fishingTimersRef.current.missTimer = setTimeout(() => {
+        fishingPhaseRef.current = 'idle';
+        setFishingPhase('idle');
+        showToast('💨', 'ปลาหลุดเบ็ดไปซะแล้ว!', 'กดดึงไม่ทันจังหวะ ลองเหวี่ยงเบ็ดใหม่อีกรอบนะ 🎣');
+      }, 1900);
+    }, waitMs);
+  }, [cancelFishing, showToast]);
+
+  const reelInFish = useCallback(async () => {
+    if (fishingPhaseRef.current !== 'bite') return;
+    if (fishingTimersRef.current.missTimer) {
+      clearTimeout(fishingTimersRef.current.missTimer);
+      fishingTimersRef.current.missTimer = undefined;
+    }
+    fishingPhaseRef.current = 'reeling';
+    setFishingPhase('reeling');
+
+    try {
+      const res = await fetch('/api/fishing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUserId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.caught) {
+        showToast('🚫', 'ดึงเบ็ดไม่สำเร็จ', data?.error || 'ลองเหวี่ยงเบ็ดใหม่อีกครั้งนะ');
+        fishingPhaseRef.current = 'idle';
+        setFishingPhase('idle');
+        return;
+      }
+
+      const caught: FishingCatch = data.caught;
+      const meta = FISHING_RARITY_META[caught.rarity];
+
+      if (typeof data.points === 'number' && currentUserId && currentUserId > 0) {
+        setPlayers((prev) =>
+          prev.map((pl) => (pl.id === currentUserId ? { ...pl, points: data.points } : pl))
+        );
+      }
+
+      // Trigger 3D water splash / rarity light pillar FX at bobber position
+      const bPos = fishingBobberPosRef.current;
+      fishingFxRef.current = {
+        rarity: caught.rarity,
+        startedAt: performance.now(),
+        durationMs:
+          caught.rarity === 'legendary'
+            ? 3400
+            : caught.rarity === 'rare'
+            ? 2500
+            : caught.rarity === 'uncommon'
+            ? 1700
+            : 1200,
+        bobberX: bPos.x,
+        bobberZ: bPos.z,
+      };
+
+      // Tier-specific celebration effects
+      if (caught.rarity === 'uncommon') {
+        confetti({
+          particleCount: 40,
+          spread: 58,
+          origin: { y: 0.68 },
+          colors: meta.confettiColors,
+        });
+      } else if (caught.rarity === 'rare') {
+        confetti({
+          particleCount: 85,
+          spread: 78,
+          origin: { y: 0.6 },
+          colors: meta.confettiColors,
+        });
+      } else if (caught.rarity === 'legendary') {
+        setLegendaryFlash(true);
+        setTimeout(() => setLegendaryFlash(false), 650);
+        confetti({
+          particleCount: 120,
+          spread: 95,
+          origin: { y: 0.55 },
+          colors: meta.confettiColors,
+        });
+        setTimeout(() => {
+          confetti({
+            particleCount: 95,
+            spread: 110,
+            origin: { y: 0.48 },
+            colors: meta.confettiColors,
+          });
+        }, 380);
+
+        const me = playersRef.current.find((pl) => pl.id === currentUserId);
+        if (me) {
+          broadcastRealtimeEvent('arena_refresh', {
+            reason: 'legendary_fish',
+            actorId: me.id,
+            actorName: me.name,
+            actorEmoji: me.emoji,
+            detail: `ตกได้ ${caught.icon} ${caught.name} ระดับ LEGENDARY ริมทะเล! 🎣✨`,
+          });
+        }
+      }
+
+      setFishingResult({
+        caught,
+        coinsEarned: Number(data.coinsEarned ?? 0),
+        dailyRewardCount: Number(data.dailyRewardCount ?? 0),
+        dailyRewardLimit: Number(data.dailyRewardLimit ?? 5),
+        quotaReached: Boolean(data.quotaReached),
+        guestMode: Boolean(data.guestMode),
+      });
+    } catch {
+      showToast('🚫', 'เชื่อมต่อไม่ได้', 'ดึงเบ็ดไม่สำเร็จ ลองใหม่อีกครั้งนะ');
+    } finally {
+      fishingPhaseRef.current = 'idle';
+      setFishingPhase('idle');
+    }
+  }, [currentUserId, showToast, broadcastRealtimeEvent]);
+
   useEffect(() => {
     walkingSpectatorIdRef.current = walkingSpectatorId;
     if (walkingSpectatorId === null) {
@@ -712,8 +885,12 @@ export default function Arena3DPage() {
       nearbySpectatorIdRef.current = null;
       setIsPairMenuOpen(false);
       walkTargetRef.current = null;
+      isNearOceanRef.current = false;
+      setIsNearOcean(false);
+      setFishingResult(null);
+      cancelFishing();
     }
-  }, [walkingSpectatorId]);
+  }, [walkingSpectatorId, cancelFishing]);
 
   useEffect(() => {
     const handleIncomingRealtimeEvent = (event: string, payload: any) => {
@@ -853,6 +1030,18 @@ export default function Arena3DPage() {
             showToast(
               payload.actorEmoji || '🚩',
               'อัปเดตสนามสด!',
+              `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail}`
+            );
+          } else if (payload.reason === 'legendary_fish' && payload.detail) {
+            confetti({
+              particleCount: 95,
+              spread: 85,
+              origin: { y: 0.55 },
+              colors: ['#facc15', '#fb923c', '#fef08a', '#ffffff'],
+            });
+            showToast(
+              payload.actorEmoji || '👑',
+              'LEGENDARY ริมทะเล!!',
               `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail}`
             );
           } else if (payload.reason === 'gift_sent' && payload.detail) {
@@ -1993,6 +2182,99 @@ export default function Arena3DPage() {
     const guardBadgeEl = guardTagEl.querySelector('[data-guard-badge]') as HTMLElement | null;
     let currentGuardBadgeKey = 'idle';
     let lastGuardWarnAt = 0;
+
+    // 3D Fishing Rig (คันเบ็ด + สายเบ็ด + ทุ่นลอยน้ำ + วงคลื่น + เสาแสงตามระดับความแรร์!)
+    const fishingRigGroup = new THREE.Group();
+    fishingRigGroup.visible = false;
+
+    const rodPivot = new THREE.Group();
+    const rodShaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.055, 2.9, 8),
+      new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.65 })
+    );
+    rodShaft.rotation.z = -Math.PI / 3.2;
+    rodShaft.position.set(1.15, 0.85, 0);
+    rodPivot.add(rodShaft);
+    const rodGrip = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.065, 0.065, 0.45, 8),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+    );
+    rodGrip.rotation.z = -Math.PI / 3.2;
+    rodGrip.position.set(0.12, 0.14, 0);
+    rodPivot.add(rodGrip);
+    fishingRigGroup.add(rodPivot);
+
+    const fishingLineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, -1, 0),
+    ]);
+    const fishingLineMat = new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.85 });
+    const fishingLineMesh = new THREE.Line(fishingLineGeo, fishingLineMat);
+    fishingRigGroup.add(fishingLineMesh);
+
+    const bobberGroup = new THREE.Group();
+    const bobberTop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 12, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
+    );
+    const bobberBottom = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 12, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+    );
+    bobberGroup.add(bobberTop, bobberBottom);
+    fishingRigGroup.add(bobberGroup);
+
+    const splashRingMat = new THREE.MeshBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0.75,
+      side: THREE.DoubleSide,
+    });
+    const splashRingMesh = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.42, 24), splashRingMat);
+    splashRingMesh.rotation.x = -Math.PI / 2;
+    splashRingMesh.visible = false;
+    fishingRigGroup.add(splashRingMesh);
+
+    // 3D Catch Celebration FX (วงคลื่น + เสาแสง Rare/Legendary แยกจากคันเบ็ดเพื่อให้โชว์ต่อหลังดึงเบ็ดได้)
+    const fishingFxGroup = new THREE.Group();
+    fishingFxGroup.visible = false;
+    const catchBeamMat = new THREE.MeshBasicMaterial({
+      color: 0xfacc15,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const catchBeamMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 1.05, 16, 20, 1, true), catchBeamMat);
+    catchBeamMesh.position.y = 8;
+    fishingFxGroup.add(catchBeamMesh);
+
+    const catchRingMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const catchRingMesh = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.82, 28), catchRingMat);
+    catchRingMesh.rotation.x = -Math.PI / 2;
+    catchRingMesh.position.y = 0.08;
+    fishingFxGroup.add(catchRingMesh);
+
+    const catchRing2Mat = new THREE.MeshBasicMaterial({
+      color: 0xfde047,
+      transparent: true,
+      opacity: 0.75,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const catchRing2Mesh = new THREE.Mesh(new THREE.RingGeometry(0.65, 1.05, 28), catchRing2Mat);
+    catchRing2Mesh.rotation.x = -Math.PI / 2;
+    catchRing2Mesh.position.y = 0.14;
+    fishingFxGroup.add(catchRing2Mesh);
+
+    scene.add(fishingRigGroup);
+    scene.add(fishingFxGroup);
     let lastFoodVolleyAt = 0;
     const remoteEjectSentAt: Record<number, number> = {};
 
@@ -2874,6 +3156,88 @@ export default function Arena3DPage() {
             setIsNearGuard(nearGuardNow);
             if (!nearGuardNow) setGuardPrankMenu(null);
           }
+
+          // ตรวจระยะใกล้ขอบทะเล (ริมเกาะ) เพื่อเปิดกิจกรรมตกปลา 🎣
+          const edgeMinX = islandCenterX - islandW / 2 + 1.8;
+          const edgeMaxX = islandCenterX + islandW / 2 - 1.8;
+          const edgeMaxZ = islandD / 2 - 1.8;
+          const dLeft = c.rootGroup.position.x - edgeMinX;
+          const dRight = edgeMaxX - c.rootGroup.position.x;
+          const dTop = c.rootGroup.position.z - -edgeMaxZ;
+          const dBottom = edgeMaxZ - c.rootGroup.position.z;
+          const minOceanDist = Math.min(dLeft, dRight, dTop, dBottom);
+          const nearOceanNow = minOceanDist < 2.8;
+
+          if (nearOceanNow) {
+            if (minOceanDist === dLeft) oceanDirRef.current = { dx: -1, dz: 0 };
+            else if (minOceanDist === dRight) oceanDirRef.current = { dx: 1, dz: 0 };
+            else if (minOceanDist === dTop) oceanDirRef.current = { dx: 0, dz: -1 };
+            else oceanDirRef.current = { dx: 0, dz: 1 };
+          }
+          if (nearOceanNow !== isNearOceanRef.current) {
+            isNearOceanRef.current = nearOceanNow;
+            setIsNearOcean(nearOceanNow);
+            if (!nearOceanNow && fishingPhaseRef.current !== 'idle') {
+              cancelFishing();
+            }
+          }
+
+          if (isWalking && fishingPhaseRef.current !== 'idle') {
+            cancelFishing();
+          }
+
+          // อัปเดตคันเบ็ด 3D + ทุ่นลอยน้ำเมื่อกำลังตกปลา
+          const fPhase = fishingPhaseRef.current;
+          if (fPhase !== 'idle' && nearOceanNow) {
+            const od = oceanDirRef.current;
+            const targetFacing = Math.atan2(-od.dz, od.dx);
+            c.rootGroup.rotation.y = targetFacing;
+
+            fishingRigGroup.visible = true;
+            const px = c.rootGroup.position.x;
+            const py = c.rootGroup.position.y;
+            const pz = c.rootGroup.position.z;
+
+            rodPivot.position.set(px + od.dx * 0.45, py + 1.05, pz + od.dz * 0.45);
+            const rodTilt =
+              fPhase === 'bite'
+                ? Math.sin(elapsed * 28) * 0.14
+                : fPhase === 'reeling'
+                ? 0.48
+                : Math.sin(elapsed * 2.2) * 0.03;
+            rodPivot.rotation.set(0, targetFacing, rodTilt);
+
+            const tipX = px + od.dx * 2.75;
+            const tipY = py + 2.45 + rodTilt * 1.1;
+            const tipZ = pz + od.dz * 2.75;
+
+            const bobX = px + od.dx * 5.6;
+            const bobZ = pz + od.dz * 5.6;
+            const bobY =
+              fPhase === 'bite'
+                ? -0.58 + Math.sin(elapsed * 32) * 0.16
+                : -0.34 + Math.sin(elapsed * 3.5) * 0.08;
+
+            bobberGroup.position.set(bobX, bobY, bobZ);
+            fishingBobberPosRef.current = { x: bobX, z: bobZ };
+
+            const lineAttr = fishingLineGeo.attributes.position as THREE.BufferAttribute;
+            lineAttr.setXYZ(0, tipX, tipY, tipZ);
+            lineAttr.setXYZ(1, bobX, bobY + 0.14, bobZ);
+            lineAttr.needsUpdate = true;
+
+            if (fPhase === 'bite') {
+              splashRingMesh.visible = true;
+              const pulse = (elapsed * 3.2) % 1;
+              splashRingMesh.position.set(bobX, -0.36, bobZ);
+              splashRingMesh.scale.setScalar(1 + pulse * 3.2);
+              splashRingMat.opacity = (1 - pulse) * 0.85;
+            } else {
+              splashRingMesh.visible = false;
+            }
+          } else {
+            fishingRigGroup.visible = false;
+          }
         } else {
           const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
           if (remoteState) {
@@ -3143,6 +3507,69 @@ export default function Arena3DPage() {
         .sort((a, b) => a.mesh.id - b.mesh.id);
 
       const gPos = guardParts.rootGroup.position;
+      if (walkingSpectatorIdRef.current === null) {
+        fishingRigGroup.visible = false;
+      }
+
+      // เอฟเฟกต์ 3D ฉลองตกปลาตามระดับความแรร์ (Common / Uncommon / Rare / Legendary)
+      const activeFishFx = fishingFxRef.current;
+      if (activeFishFx) {
+        const fxAge = now - activeFishFx.startedAt;
+        const p = Math.min(1, fxAge / activeFishFx.durationMs);
+        if (p >= 1) {
+          fishingFxRef.current = null;
+          fishingFxGroup.visible = false;
+        } else {
+          fishingFxGroup.visible = true;
+          fishingFxGroup.position.set(activeFishFx.bobberX, -0.35, activeFishFx.bobberZ);
+          const rarity = activeFishFx.rarity;
+          const beamHex = FISHING_RARITY_META[rarity].beamHex;
+
+          // วงคลื่นน้ำกระจาย (มีทุกระดับ แต่ใหญ่และสีต่างกัน)
+          catchRingMesh.visible = true;
+          catchRingMat.color.setHex(rarity === 'common' ? 0xe0f2fe : beamHex);
+          const ringScale =
+            rarity === 'legendary'
+              ? 1 + p * 7.5
+              : rarity === 'rare'
+              ? 1 + p * 5.2
+              : rarity === 'uncommon'
+              ? 1 + p * 3.6
+              : 1 + p * 2.2;
+          catchRingMesh.scale.setScalar(ringScale);
+          catchRingMat.opacity = (1 - p) * 0.9;
+
+          // เสาแสงพุ่งขึ้นฟ้าสำหรับ Rare & Legendary
+          if (rarity === 'rare' || rarity === 'legendary') {
+            catchBeamMesh.visible = true;
+            catchBeamMat.color.setHex(beamHex);
+            const widthBoost = rarity === 'legendary' ? 1.55 : 0.95;
+            const fade = p < 0.15 ? p / 0.15 : 1 - (p - 0.15) / 0.85;
+            catchBeamMesh.scale.set(
+              widthBoost * (0.85 + Math.sin(elapsed * 14) * 0.12),
+              rarity === 'legendary' ? 1.35 : 0.9,
+              widthBoost * (0.85 + Math.sin(elapsed * 14) * 0.12)
+            );
+            catchBeamMat.opacity = Math.max(0, fade * (rarity === 'legendary' ? 0.65 : 0.45));
+            catchBeamMesh.rotation.y = elapsed * 2.4;
+          } else {
+            catchBeamMesh.visible = false;
+          }
+
+          // วงแหวนทองชั้นที่ 2 เฉพาะ Legendary
+          if (rarity === 'legendary') {
+            catchRing2Mesh.visible = true;
+            const p2 = (p * 2.2) % 1;
+            catchRing2Mesh.scale.setScalar(1 + p2 * 6.5);
+            catchRing2Mat.opacity = (1 - p2) * 0.85;
+          } else {
+            catchRing2Mesh.visible = false;
+          }
+        }
+      } else {
+        fishingFxGroup.visible = false;
+      }
+
       const activePrank = guardPrankFxRef.current;
 
       if (activePrank && now - activePrank.startedAt < activePrank.durationMs) {
@@ -6088,6 +6515,110 @@ export default function Arena3DPage() {
             </button>
           )}
 
+          {/* การ์ดผลลัพธ์ตกปลาริมทะเล */}
+          {fishingResult && (() => {
+            const rMeta = FISHING_RARITY_META[fishingResult.caught.rarity];
+            return (
+              <div
+                className={`rpg-panel rounded-2xl px-3.5 py-2.5 shadow-2xl border-2 ${rMeta.cardBorderClass} max-w-[92vw] w-[320px] sm:w-[360px]`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-11 h-11 rounded-xl bg-slate-900/90 border-2 border-amber-300/70 flex items-center justify-center text-2xl shrink-0">
+                      {fishingResult.caught.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-full border text-[9px] font-extrabold mb-0.5 ${rMeta.badgeClass}`}
+                      >
+                        {rMeta.label}
+                      </span>
+                      <div className="font-[family-name:var(--font-kanit)] font-extrabold text-sm text-amber-200 truncate">
+                        {fishingResult.caught.name}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFishingResult(null)}
+                    className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-amber-100 text-xs font-extrabold flex items-center justify-center cursor-pointer shrink-0"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="text-[11px] font-semibold text-amber-100/85 mt-1.5 leading-snug">
+                  {fishingResult.caught.desc}
+                </p>
+                <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-amber-500/25">
+                  <div className="text-[11px] font-extrabold">
+                    {fishingResult.coinsEarned > 0 ? (
+                      <span className="text-amber-300">
+                        +{fishingResult.coinsEarned} 💰 ({fishingResult.dailyRewardCount}/{fishingResult.dailyRewardLimit} วันนี้)
+                      </span>
+                    ) : fishingResult.quotaReached ? (
+                      <span className="text-slate-300">
+                        ครบโควต้าเหรียญวันนี้แล้ว ({fishingResult.dailyRewardLimit}/{fishingResult.dailyRewardLimit}) • ตกเล่นฟรีต่อได้!
+                      </span>
+                    ) : (
+                      <span className="text-cyan-300">โหมดผู้ชม • ล็อกอินเพื่อสะสมเหรียญ!</span>
+                    )}
+                  </div>
+                  {isNearOcean && fishingPhase === 'idle' && (
+                    <button
+                      type="button"
+                      onClick={startFishing}
+                      className="bg-cyan-400 hover:bg-cyan-300 text-slate-950 border-2 border-black rounded-lg px-2.5 py-1 text-[11px] font-extrabold cursor-pointer shrink-0"
+                    >
+                      🎣 ตกอีกรอบ
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ปุ่มมินิเกมตกปลาริมทะเล */}
+          {isNearOcean && fishingPhase === 'idle' && !fishingResult && (
+            <button
+              type="button"
+              onClick={startFishing}
+              className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
+            >
+              🎣 เหวี่ยงเบ็ดตกปลาริมทะเล!
+            </button>
+          )}
+
+          {fishingPhase === 'waiting' && (
+            <div className="flex items-center gap-2 bg-slate-950/90 border-2 border-cyan-400 rounded-full px-4 py-1.5 shadow-xl">
+              <span className="text-xs sm:text-sm font-extrabold text-cyan-200 animate-pulse">
+                🎣 กำลังรอปลากินเบ็ด... (จับตาดูทุ่นในน้ำ!)
+              </span>
+              <button
+                type="button"
+                onClick={cancelFishing}
+                className="text-[11px] font-extrabold bg-slate-800 hover:bg-rose-600 text-white px-2 py-0.5 rounded-full cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+            </div>
+          )}
+
+          {fishingPhase === 'bite' && (
+            <button
+              type="button"
+              onClick={reelInFish}
+              className="neo-btn bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-500 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base px-6 py-2.5 rounded-full cursor-pointer shadow-[0_4px_0_#000] animate-bounce"
+            >
+              ⚡ ปลากินเบ็ดแล้ว! กดดึงเลย! 🎣
+            </button>
+          )}
+
+          {fishingPhase === 'reeling' && (
+            <div className="bg-slate-950/90 border-2 border-amber-400 rounded-full px-4 py-1.5 text-xs font-extrabold text-amber-200 shadow-xl">
+              🎣 กำลังดึงเบ็ดขึ้นมา...
+            </div>
+          )}
+
           <div className="neo-card bg-[#18181B] text-white rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-center gap-2">
             <span className="text-xs font-extrabold text-[#BEF264]">
               🚩 เดินเล่น: {players.find((pl) => pl.id === walkingSpectatorId)?.emoji}{' '}
@@ -6235,6 +6766,10 @@ export default function Arena3DPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {legendaryFlash && (
+        <div className="fixed inset-0 z-50 pointer-events-none bg-gradient-to-b from-amber-300/45 via-yellow-200/25 to-transparent animate-pulse" />
       )}
 
     </div>
