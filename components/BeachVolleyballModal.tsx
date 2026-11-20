@@ -160,10 +160,18 @@ export function BeachVolleyballModal({
   const [mode, setMode] = useState<VbMode>(initialMode);
   const [muted, setMuted] = useState<boolean>(false);
   const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
+    if (typeof window === 'undefined') return true;
     const tier = detectDeviceTier();
-    return tier !== 'desktop' || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+    return (
+      tier !== 'desktop' ||
+      navigator.maxTouchPoints > 0 ||
+      'ontouchstart' in window ||
+      window.innerWidth <= 1280
+    );
   });
+  const [slideKnobX, setSlideKnobX] = useState<number>(0);
+  const slidePointerIdRef = useRef<number | null>(null);
+  const slideOriginXRef = useRef<number>(0);
 
   const myClientIdRef = useRef<string>(`vb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   const [mySlot, setMySlot] = useState<VbSlotId>(initialIsHost ? 'L1' : 'R1');
@@ -186,6 +194,8 @@ export function BeachVolleyballModal({
     R2: { ...EMPTY_INPUT },
   });
   const matchStateRef = useRef<VbMatchState | null>(null);
+  const netTargetStateRef = useRef<VbMatchState | null>(null);
+  const lastSentInputSigRef = useRef<string>('');
   const rewardClaimedRef = useRef<boolean>(false);
   const mutedRef = useRef<boolean>(false);
   mutedRef.current = muted;
@@ -295,19 +305,6 @@ export function BeachVolleyballModal({
       humanSlotsRef.current = {};
     }
 
-    const triggerStartAsHost = (nextMode: VbMode, slotsObj: Partial<Record<VbSlotId, HumanSlotMember>>) => {
-      broadcastArenaLobby('started', nextMode, slotsObj);
-      sendRoomMessage('start_match', { mode: nextMode, humanSlots: slotsObj });
-      setMode(nextMode);
-      modeRef.current = nextMode;
-      setWinnerTeam(null);
-      setRewardStatus('');
-      setScoreLeft(0);
-      setScoreRight(0);
-      rewardClaimedRef.current = false;
-      setScreen('playing');
-    };
-
     const handleRoomEvent = (event: string, payload: Record<string, unknown>) => {
       if (!payload) return;
 
@@ -317,7 +314,6 @@ export function BeachVolleyballModal({
         if (!cid || cid === myClientIdRef.current) return;
         const curMode = modeRef.current;
         const slotOrder: VbSlotId[] = curMode === '2v2' ? ['L1', 'R1', 'L2', 'R2'] : ['L1', 'R1'];
-        const maxNeeded = curMode === '2v2' ? 4 : 2;
         const current = { ...humanSlotsRef.current };
 
         let assigned = (Object.keys(current) as VbSlotId[]).find(
@@ -336,14 +332,7 @@ export function BeachVolleyballModal({
           setHumanSlots(current);
           humanSlotsRef.current = current;
           sendRoomMessage('room_sync', { mode: curMode, humanSlots: current });
-
-          const joinedCount = Object.keys(current).length;
-          if (joinedCount >= maxNeeded) {
-            // ครบจำนวนคนแล้ว -> เริ่มแข่งทันที! (1v1 ครบ 2 คน / 2v2 ครบ 4 คน)
-            setTimeout(() => triggerStartAsHost(curMode, current), 350);
-          } else {
-            broadcastArenaLobby('waiting', curMode, current);
-          }
+          broadcastArenaLobby('waiting', curMode, current);
         }
       } else if (event === 'leave_req' && isHostRef.current) {
         const cid = String(payload.clientId || '');
@@ -401,11 +390,12 @@ export function BeachVolleyballModal({
       } else if (event === 'vb_state' && !isHostRef.current) {
         const snap = payload.state as VbMatchState | undefined;
         if (snap) {
-          matchStateRef.current = snap;
-          setScoreLeft(snap.scoreLeft);
-          setScoreRight(snap.scoreRight);
+          netTargetStateRef.current = snap;
+          // Update React score/winner state only when values actually change (no 20Hz re-renders!)
+          setScoreLeft((prev) => (prev !== snap.scoreLeft ? snap.scoreLeft : prev));
+          setScoreRight((prev) => (prev !== snap.scoreRight ? snap.scoreRight : prev));
           if (snap.phase === 'finished' && snap.winner) {
-            setWinnerTeam(snap.winner);
+            setWinnerTeam((prev) => (prev !== snap.winner ? snap.winner : prev));
           }
         }
       }
@@ -525,6 +515,8 @@ export function BeachVolleyballModal({
     const botFlags: Record<VbSlotId, boolean> = { L1: false, L2: false, R1: false, R2: false };
     const match = createInitialMatchState(mode, botFlags, 'left');
     matchStateRef.current = match;
+    netTargetStateRef.current = null;
+    lastSentInputSigRef.current = '';
     const { court } = match;
 
     const width = container.clientWidth || window.innerWidth;
@@ -806,18 +798,85 @@ export function BeachVolleyballModal({
           setScoreRight(st.scoreRight);
         }
 
-        if (nowMs - lastNetSend > 45) {
+        if (nowMs - lastNetSend > 33) {
           lastNetSend = nowMs;
           sendRoomMessage('vb_state', { state: st });
         }
       } else {
-        if (nowMs - lastNetSend > 35) {
+        // Guest: send local input IMMEDIATELY on any change + lightweight 65ms keepalive
+        const curInp = localInputRef.current;
+        const inpSig = `${curInp.left ? 1 : 0}${curInp.right ? 1 : 0}${curInp.jump ? 1 : 0}${curInp.action ? 1 : 0}`;
+        if (inpSig !== lastSentInputSigRef.current || nowMs - lastNetSend > 65) {
+          lastSentInputSigRef.current = inpSig;
           lastNetSend = nowMs;
           sendRoomMessage('vb_input', {
             slot: activeMySlot,
-            input: localInputRef.current,
+            input: { ...curInp },
           });
         }
+
+        // Guest 60FPS Smooth Local Prediction + Authoritative Reconciliation (eliminates network stutter!)
+        const guestInputs: Record<VbSlotId, VbInputState> = {
+          L1: { ...EMPTY_INPUT },
+          L2: { ...EMPTY_INPUT },
+          R1: { ...EMPTY_INPUT },
+          R2: { ...EMPTY_INPUT },
+        };
+        guestInputs[activeMySlot] = curInp;
+        stepVolleyballMatch(st, guestInputs, delta);
+
+        const netSnap = netTargetStateRef.current;
+        if (netSnap) {
+          // Sync discrete match phase & scores from Host
+          st.phase = netSnap.phase;
+          st.phaseTimer = netSnap.phaseTimer;
+          st.scoreLeft = netSnap.scoreLeft;
+          st.scoreRight = netSnap.scoreRight;
+          st.winner = netSnap.winner;
+          st.ball.isSpiked = netSnap.ball.isSpiked;
+
+          // Smoothly reconcile ball position & velocity (snap only on serve reset / huge jump)
+          const bDist = Math.hypot(netSnap.ball.x - st.ball.x, netSnap.ball.y - st.ball.y);
+          if (bDist > 3.2 || netSnap.phase === 'serve_wait') {
+            st.ball.x = netSnap.ball.x;
+            st.ball.y = netSnap.ball.y;
+            st.ball.vx = netSnap.ball.vx;
+            st.ball.vy = netSnap.ball.vy;
+          } else {
+            const bBlend = 0.32;
+            st.ball.x += (netSnap.ball.x - st.ball.x) * bBlend;
+            st.ball.y += (netSnap.ball.y - st.ball.y) * bBlend;
+            st.ball.vx += (netSnap.ball.vx - st.ball.vx) * 0.45;
+            st.ball.vy += (netSnap.ball.vy - st.ball.vy) * 0.45;
+          }
+
+          // Smoothly reconcile players (keep local player responsive, smooth remote players)
+          for (const netP of netSnap.players) {
+            const localP = st.players.find((lp) => lp.slotId === netP.slotId);
+            if (!localP) continue;
+            const isLocal = netP.slotId === activeMySlot;
+            const pDist = Math.hypot(netP.x - localP.x, netP.y - localP.y);
+            if (pDist > 2.8 || netSnap.phase === 'serve_wait') {
+              localP.x = netP.x;
+              localP.y = netP.y;
+              localP.vx = netP.vx;
+              localP.vy = netP.vy;
+            } else {
+              const pBlend = isLocal ? 0.22 : 0.35;
+              localP.x += (netP.x - localP.x) * pBlend;
+              localP.y += (netP.y - localP.y) * pBlend;
+              if (!isLocal) {
+                localP.vx = netP.vx;
+                localP.vy = netP.vy;
+                localP.facing = netP.facing;
+                localP.diveTimer = netP.diveTimer;
+                localP.diveDir = netP.diveDir;
+                localP.spikeFlash = netP.spikeFlash;
+              }
+            }
+          }
+        }
+
         if (st.phase === 'finished' && st.winner && !winHandled) {
           winHandled = true;
           playVbSound('win', mutedRef.current);
@@ -896,6 +955,34 @@ export function BeachVolleyballModal({
     localInputRef.current[key] = val;
   };
 
+  const handleSlideDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    slidePointerIdRef.current = e.pointerId;
+    slideOriginXRef.current = e.clientX;
+    setSlideKnobX(0);
+    setShowTouchControls(true);
+  };
+
+  const handleSlideMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (slidePointerIdRef.current !== e.pointerId) return;
+    e.preventDefault();
+    const dx = e.clientX - slideOriginXRef.current;
+    const clamped = Math.max(-44, Math.min(44, dx));
+    setSlideKnobX(clamped);
+    const deadzone = 12;
+    localInputRef.current.left = dx < -deadzone;
+    localInputRef.current.right = dx > deadzone;
+  };
+
+  const handleSlideEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (slidePointerIdRef.current !== e.pointerId) return;
+    slidePointerIdRef.current = null;
+    setSlideKnobX(0);
+    localInputRef.current.left = false;
+    localInputRef.current.right = false;
+  };
+
   return (
     <div className={`fixed inset-0 z-50 bg-slate-950/90 flex flex-col overflow-hidden ${shakeActive ? 'shake-active' : ''}`}>
       {screen === 'waiting' ? (
@@ -915,23 +1002,73 @@ export function BeachVolleyballModal({
               </div>
               <div>
                 <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-2xl font-extrabold text-amber-300 leading-tight">
-                  ตี้วอลเลย์บอลชายหาด ({mode === '2v2' ? '2 vs 2' : '1 vs 1'})
+                  ตี้วอลเลย์บอลชายหาด 3D
                 </h2>
                 <p className="text-[11px] sm:text-xs text-amber-100/80 font-semibold">
-                  แข่งกับคนจริงเท่านั้น • ครบ {maxPlayers} คนเริ่มแข่งทันที! ({VB_WIN_SCORE} แต้มชนะ +5 💰)
+                  แข่งกับคนจริงเท่านั้น • เลือก 1v1 หรือ 2v2 ได้ตลอดก่อนกดเริ่ม ({VB_WIN_SCORE} แต้มชนะ +5 💰)
                 </p>
               </div>
             </div>
 
+            {/* Host Mode Switcher (1v1 / 2v2) */}
+            <div className="bg-slate-900/85 border border-amber-500/40 rounded-xl p-1.5 flex gap-1.5">
+              {(
+                [
+                  { id: '1v1', label: '⚔️ 1 vs 1 (2 คน)' },
+                  { id: '2v2', label: '👥 2 vs 2 (4 คน)' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={!initialIsHost}
+                  onClick={() => {
+                    if (!initialIsHost || mode === opt.id) return;
+                    let nextSlots = { ...humanSlotsRef.current };
+                    if (opt.id === '1v1') {
+                      const l1 = nextSlots.L1;
+                      const r1 = nextSlots.R1 || nextSlots.L2 || nextSlots.R2;
+                      nextSlots = {};
+                      if (l1) nextSlots.L1 = l1;
+                      if (r1) nextSlots.R1 = r1;
+                    }
+                    setMode(opt.id);
+                    modeRef.current = opt.id;
+                    setHumanSlots(nextSlots);
+                    humanSlotsRef.current = nextSlots;
+                    sendRoomMessage('room_sync', { mode: opt.id, humanSlots: nextSlots });
+                    broadcastArenaLobby('waiting', opt.id, nextSlots);
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-extrabold cursor-pointer transition disabled:cursor-default ${mode === opt.id
+                      ? 'rpg-btn-gold'
+                      : 'text-amber-100/75 hover:bg-slate-800 disabled:hover:bg-transparent'
+                    }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
             {/* Live Waiting Status */}
-            <div className="bg-sky-950/75 border-2 border-sky-400/70 rounded-xl p-3 text-center space-y-1">
-              <div className="font-[family-name:var(--font-kanit)] text-base sm:text-lg font-extrabold text-amber-300 animate-pulse">
-                ⏳ กำลังรอเพื่อนกดเข้าร่วม... ({joinedCount}/{maxPlayers} คน)
+            <div
+              className={`border-2 rounded-xl p-3 text-center space-y-1 ${joinedCount >= maxPlayers
+                  ? 'bg-emerald-950/75 border-emerald-400/80'
+                  : 'bg-sky-950/75 border-sky-400/70'
+                }`}
+            >
+              <div className="font-[family-name:var(--font-kanit)] text-base sm:text-lg font-extrabold text-amber-300">
+                {joinedCount >= maxPlayers
+                  ? `✅ คนครบแล้ว! (${joinedCount}/${maxPlayers} คน)`
+                  : `⏳ กำลังรอเพื่อนกดเข้าร่วม... (${joinedCount}/${maxPlayers} คน)`}
               </div>
               <div className="text-[11px] text-sky-200 font-semibold">
-                {invitedTargetName
-                  ? `ส่งคำชวนไปยัง ${invitedTargetName} และเพื่อนในสนามแล้ว! เพื่อนแค่กดปุ่มแจ้งเตือนหน้าจอเพื่อเข้าตี้ได้เลย`
-                  : 'เพื่อนที่ออนไลน์ในสนามจะเห็นปุ่มแจ้งเตือนชวนตีบอลบนหน้าจอทันที!'}
+                {joinedCount >= maxPlayers
+                  ? initialIsHost
+                    ? 'กดปุ่มเริ่มแข่งด้านล่างได้เลย หรือสลับเป็น 2 vs 2 เพื่อรอเพื่อนเพิ่ม!'
+                    : 'รอหัวห้องกดปุ่มเริ่มแข่ง...'
+                  : invitedTargetName
+                    ? `ส่งคำชวนไปยัง ${invitedTargetName} และเพื่อนในสนามแล้ว! เพื่อนแค่กดปุ่มแจ้งเตือนหน้าจอเพื่อเข้าตี้ได้เลย`
+                    : 'เพื่อนที่ออนไลน์ในสนามจะเห็นปุ่มแจ้งเตือนชวนตีบอลบนหน้าจอทันที!'}
               </div>
             </div>
 
@@ -945,8 +1082,8 @@ export function BeachVolleyballModal({
                     <div
                       key={sid}
                       className={`rounded-xl p-2.5 border text-center ${m
-                          ? 'bg-amber-500/20 border-amber-300 text-amber-100'
-                          : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
+                        ? 'bg-amber-500/20 border-amber-300 text-amber-100'
+                        : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
                         }`}
                     >
                       {m ? (
@@ -969,8 +1106,8 @@ export function BeachVolleyballModal({
                     <div
                       key={sid}
                       className={`rounded-xl p-2.5 border text-center ${m
-                          ? 'bg-rose-500/20 border-rose-300 text-rose-100'
-                          : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
+                        ? 'bg-rose-500/20 border-rose-300 text-rose-100'
+                        : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
                         }`}
                     >
                       {m ? (
@@ -986,27 +1123,34 @@ export function BeachVolleyballModal({
               </div>
             </div>
 
-            {/* Host quick switch 2v2 -> 1v1 if 2 players are already ready */}
-            {initialIsHost && mode === '2v2' && joinedCount >= 2 && (
+            {/* Host Start Button (manual start so Host can switch 1v1 <-> 2v2 before starting!) */}
+            {initialIsHost ? (
               <button
                 type="button"
+                disabled={joinedCount < maxPlayers}
                 onClick={() => {
-                  const l1 = humanSlots.L1;
-                  const r1 = humanSlots.R1 || humanSlots.L2 || humanSlots.R2;
-                  if (!l1 || !r1) return;
-                  const trimmed: Partial<Record<VbSlotId, HumanSlotMember>> = { L1: l1, R1: r1 };
-                  setHumanSlots(trimmed);
-                  humanSlotsRef.current = trimmed;
-                  setMode('1v1');
-                  modeRef.current = '1v1';
-                  broadcastArenaLobby('started', '1v1', trimmed);
-                  sendRoomMessage('start_match', { mode: '1v1', humanSlots: trimmed });
+                  const curSlots = humanSlotsRef.current;
+                  broadcastArenaLobby('started', mode, curSlots);
+                  sendRoomMessage('start_match', { mode, humanSlots: curSlots });
+                  setWinnerTeam(null);
+                  setRewardStatus('');
+                  setScoreLeft(0);
+                  setScoreRight(0);
+                  rewardClaimedRef.current = false;
                   setScreen('playing');
                 }}
-                className="w-full rpg-btn-gold py-2.5 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer"
+                className="w-full rpg-btn-gold font-[family-name:var(--font-kanit)] py-3 rounded-xl text-sm sm:text-base font-extrabold cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
               >
-                ⚡ ตอนนี้มี {joinedCount} คนแล้ว — สลับเป็น 1v1 เริ่มเล่นเลย!
+                {joinedCount >= maxPlayers
+                  ? `🏐 เริ่มแข่ง ${mode === '2v2' ? '2 vs 2' : '1 vs 1'} เลย! (START)`
+                  : `⏳ รอเพื่อนให้ครบ ${maxPlayers} คน (${joinedCount}/${maxPlayers})`}
               </button>
+            ) : (
+              <div className="w-full py-2.5 rounded-xl bg-amber-500/15 border border-amber-400/50 text-center text-xs font-extrabold text-amber-200">
+                {joinedCount >= maxPlayers
+                  ? '✅ พร้อมแล้ว! รอหัวห้องกดเริ่มแข่ง...'
+                  : `⏳ รอเพื่อนเพิ่มให้ครบ ${maxPlayers} คน...`}
+              </div>
             )}
 
             <button
@@ -1056,9 +1200,8 @@ export function BeachVolleyballModal({
               <button
                 type="button"
                 onClick={() => setShowTouchControls((v) => !v)}
-                className={`rpg-panel px-2.5 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${
-                  showTouchControls ? 'text-amber-300 ring-1 ring-amber-300' : 'text-amber-100/75'
-                }`}
+                className={`rpg-panel px-2.5 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${showTouchControls ? 'text-amber-300 ring-1 ring-amber-300' : 'text-amber-100/75'
+                  }`}
                 title="เปิด/ปิดปุ่มบังคับบนหน้าจอ (มือถือ / iPad)"
               >
                 🎮
@@ -1095,38 +1238,33 @@ export function BeachVolleyballModal({
             </div>
           )}
 
-          {/* Multi-Touch Controls (Auto-shown on Mobile, iPad Portrait & iPad Landscape) */}
+          {/* Multi-Touch Controls: Left Finger-Slide Pad + Right Jump & Spike Buttons (Auto-shown on Mobile & iPad) */}
           {!winnerTeam && showTouchControls && (
-            <div className="flex fixed bottom-4 inset-x-4 pb-safe z-20 items-end justify-between pointer-events-none">
-              <div className="flex gap-3 pointer-events-auto">
-                <button
-                  type="button"
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    setTouchKey('left', true);
-                  }}
-                  onPointerUp={() => setTouchKey('left', false)}
-                  onPointerCancel={() => setTouchKey('left', false)}
-                  onPointerLeave={() => setTouchKey('left', false)}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl sm:text-3xl font-black shadow-lg touch-none"
-                >
+            <div className="flex fixed bottom-4 inset-x-4 pb-safe z-30 items-end justify-between pointer-events-none">
+              {/* Left Thumb: Slide Finger Left / Right to Move */}
+              <div
+                onPointerDown={handleSlideDown}
+                onPointerMove={handleSlideMove}
+                onPointerUp={handleSlideEnd}
+                onPointerCancel={handleSlideEnd}
+                className="pointer-events-auto relative w-40 sm:w-48 h-20 sm:h-24 rounded-full bg-slate-900/65 border-2 border-amber-300/80 shadow-xl flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+              >
+                <span className="absolute left-3.5 text-amber-300/85 text-lg font-black pointer-events-none">
                   ◀
-                </button>
-                <button
-                  type="button"
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    setTouchKey('right', true);
-                  }}
-                  onPointerUp={() => setTouchKey('right', false)}
-                  onPointerCancel={() => setTouchKey('right', false)}
-                  onPointerLeave={() => setTouchKey('right', false)}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl sm:text-3xl font-black shadow-lg touch-none"
-                >
+                </span>
+                <span className="absolute right-3.5 text-amber-300/85 text-lg font-black pointer-events-none">
                   ▶
-                </button>
+                </span>
+                <div
+                  style={{ transform: `translateX(${slideKnobX}px)` }}
+                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 border-2 border-white shadow-lg flex flex-col items-center justify-center text-stone-950 font-black pointer-events-none transition-transform duration-75"
+                >
+                  <span className="text-base leading-none">👆</span>
+                  <span className="text-[9px] leading-none mt-0.5">เลื่อน</span>
+                </div>
               </div>
 
+              {/* Right Thumb: Spike/Dive + Jump */}
               <div className="flex gap-3 pointer-events-auto">
                 <button
                   type="button"
@@ -1137,10 +1275,10 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('action', false)}
                   onPointerCancel={() => setTouchKey('action', false)}
                   onPointerLeave={() => setTouchKey('action', false)}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-b from-orange-500/90 to-rose-600/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
+                  className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-gradient-to-b from-orange-500/95 to-rose-600/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
-                  <span className="text-xl sm:text-2xl leading-none">💥</span>
-                  <span className="text-[10px] sm:text-xs mt-0.5">ตบ/พุ่ง</span>
+                  <span className="text-2xl leading-none">💥</span>
+                  <span className="text-[10.5px] sm:text-xs mt-0.5">ตบ/พุ่ง</span>
                 </button>
                 <button
                   type="button"
@@ -1151,10 +1289,10 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('jump', false)}
                   onPointerCancel={() => setTouchKey('jump', false)}
                   onPointerLeave={() => setTouchKey('jump', false)}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-b from-sky-500/90 to-blue-700/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
+                  className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-gradient-to-b from-sky-500/95 to-blue-700/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
-                  <span className="text-xl sm:text-2xl leading-none">⬆</span>
-                  <span className="text-[10px] sm:text-xs mt-0.5">กระโดด</span>
+                  <span className="text-2xl leading-none">⬆</span>
+                  <span className="text-[10.5px] sm:text-xs mt-0.5">กระโดด</span>
                 </button>
               </div>
             </div>

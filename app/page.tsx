@@ -81,6 +81,10 @@ const BeachVolleyballModal = dynamic(
   () => import('@/components/BeachVolleyballModal').then((m) => m.BeachVolleyballModal),
   { ssr: false }
 );
+const ShabuCoopModal = dynamic(
+  () => import('@/components/ShabuCoopModal').then((m) => m.ShabuCoopModal),
+  { ssr: false }
+);
 
 interface Player {
   id: number;
@@ -207,7 +211,7 @@ const PET_OPTIONS = [
 ];
 
 const GROUP_PAIR_ACTIVITIES = [
-  { animType: 'badminton', label: '🏸 ตีแบดด้วยกัน' },
+  { animType: 'volleyball', label: '🏐 ตีวอลเลย์บอลด้วยกัน' },
   { animType: 'picnic_shabu', label: '🍲 ตั้งวงชาบูด้วยกัน' },
   { animType: 'play_cards', label: '🃏 ตั้งวงเล่นไพ่ด้วยกัน' },
   { animType: 'boxing', label: '🥊 ซ้อมมวยคู่กัน' },
@@ -458,6 +462,22 @@ export default function Arena3DPage() {
     updatedAt: number;
   } | null>(null);
   const isVolleyballOpen = Boolean(vbSession);
+  const [shabuSession, setShabuSession] = useState<{
+    roomCode: string;
+    isHost: boolean;
+    targetName?: string;
+  } | null>(null);
+  const [liveShabuLobby, setLiveShabuLobby] = useState<{
+    roomCode: string;
+    hostUserId: number;
+    hostName: string;
+    hostEmoji: string;
+    targetName?: string;
+    count: number;
+    max: number;
+    updatedAt: number;
+  } | null>(null);
+  const isShabuOpen = Boolean(shabuSession);
   const realtimeSubscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -522,9 +542,9 @@ export default function Arena3DPage() {
 
   useEffect(() => {
     pauseArenaRenderRef.current = Boolean(
-      isJoinOpen || isVolleyballOpen || (authChecked && currentUserId === null)
+      isJoinOpen || isVolleyballOpen || isShabuOpen || (authChecked && currentUserId === null)
     );
-  }, [isJoinOpen, isVolleyballOpen, authChecked, currentUserId]);
+  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, authChecked, currentUserId]);
 
   useEffect(() => {
     playersRef.current = players;
@@ -1136,6 +1156,23 @@ export default function Arena3DPage() {
             prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
           );
         }
+      } else if (event === 'shabu_lobby') {
+        if (payload.status === 'waiting' && payload.roomCode) {
+          setLiveShabuLobby({
+            roomCode: String(payload.roomCode),
+            hostUserId: Number(payload.hostUserId || 0),
+            hostName: String(payload.hostName || 'เพื่อน'),
+            hostEmoji: String(payload.hostEmoji || '🍲'),
+            targetName: payload.targetName ? String(payload.targetName) : undefined,
+            count: Number(payload.count || 1),
+            max: Number(payload.max || 4),
+            updatedAt: Date.now(),
+          });
+        } else {
+          setLiveShabuLobby((prev) =>
+            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
+          );
+        }
       } else if (event === 'interaction') {
         // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
         const inter = payload;
@@ -1266,6 +1303,9 @@ export default function Arena3DPage() {
         )
         .on('broadcast', { event: 'vb_lobby' }, ({ payload }) =>
           handleIncomingRealtimeEvent('vb_lobby', payload)
+        )
+        .on('broadcast', { event: 'shabu_lobby' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('shabu_lobby', payload)
         )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
@@ -6449,6 +6489,44 @@ export default function Arena3DPage() {
                       key={act.animType}
                       type="button"
                       onClick={() => {
+                        if (act.animType === 'volleyball') {
+                          setIsPairMenuOpen(false);
+                          if (liveVbLobby && liveVbLobby.count < liveVbLobby.max) {
+                            setVbSession({
+                              roomCode: liveVbLobby.roomCode,
+                              mode: liveVbLobby.mode,
+                              isHost: false,
+                              targetName: liveVbLobby.hostName,
+                            });
+                          } else {
+                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                            setVbSession({
+                              roomCode: newCode,
+                              mode: '1v1',
+                              isHost: true,
+                              targetName: nearbySpectator.name,
+                            });
+                          }
+                          return;
+                        }
+                        if (act.animType === 'picnic_shabu') {
+                          setIsPairMenuOpen(false);
+                          if (liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max) {
+                            setShabuSession({
+                              roomCode: liveShabuLobby.roomCode,
+                              isHost: false,
+                              targetName: liveShabuLobby.hostName,
+                            });
+                          } else {
+                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                            setShabuSession({
+                              roomCode: newCode,
+                              isHost: true,
+                              targetName: nearbySpectator.name,
+                            });
+                          }
+                          return;
+                        }
                         const walker = players.find((pl) => pl.id === walkingSpectatorId);
                         setPairedActivities((prev) => {
                           const next = {
@@ -6480,48 +6558,21 @@ export default function Arena3DPage() {
                           `${walker?.name || ''} ชวน ${nearbySpectator.name} มา${act.label}`
                         );
                       }}
-                      className="border-2 border-black bg-[#FEF08A] hover:bg-[#FFE600] text-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition"
+                      className={`border-2 border-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition ${
+                        act.animType === 'volleyball'
+                          ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
+                          : act.animType === 'picnic_shabu'
+                          ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
+                          : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
+                      }`}
                     >
-                      {act.label}
+                      {act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
+                        ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
+                        : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
+                        ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
+                        : act.label}
                     </button>
                   ))}
-                  </div>
-                  {/* ชวนเล่นมินิเกมวอลเลย์บอลชายหาด 3D (คนจริงเท่านั้น 1v1 / 2v2) */}
-                  <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-black/15">
-                    {(['1v1', '2v2'] as const).map((vbMode) => {
-                      const canJoinExisting =
-                        liveVbLobby && liveVbLobby.mode === vbMode && liveVbLobby.count < liveVbLobby.max;
-                      return (
-                        <button
-                          key={vbMode}
-                          type="button"
-                          onClick={() => {
-                            setIsPairMenuOpen(false);
-                            if (canJoinExisting && liveVbLobby) {
-                              setVbSession({
-                                roomCode: liveVbLobby.roomCode,
-                                mode: liveVbLobby.mode,
-                                isHost: false,
-                                targetName: liveVbLobby.hostName,
-                              });
-                            } else {
-                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                              setVbSession({
-                                roomCode: newCode,
-                                mode: vbMode,
-                                isHost: true,
-                                targetName: nearbySpectator.name,
-                              });
-                            }
-                          }}
-                          className="border-2 border-black bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 hover:brightness-105 text-black rounded-xl px-2.5 py-2 text-xs font-extrabold cursor-pointer transition shadow"
-                        >
-                          {canJoinExisting
-                            ? `🏐 เข้าตี้ ${vbMode} (${liveVbLobby.count}/${liveVbLobby.max})`
-                            : `🏐 ชวนตีบอล ${vbMode}`}
-                        </button>
-                      );
-                    })}
                   </div>
                 </div>
               )}
@@ -6855,6 +6906,65 @@ export default function Arena3DPage() {
               '🏐',
               `ชนะวอลเลย์บอลชายหาด! (+${earned} 💰)`,
               `รับโบนัสผู้ชนะแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
+            );
+            void fetchArenaData({ force: true });
+          }}
+        />
+      )}
+
+      {/* Live Floating Invite Banner when a friend opens a Shabu Co-op Buffet Lobby */}
+      {liveShabuLobby && !shabuSession && !vbSession && !isJoinOpen && (
+        <div
+          className={`fixed ${liveVbLobby ? 'top-28 md:top-32' : 'top-16 md:top-20'} left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]`}
+        >
+          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-orange-300">
+            <span className="text-base animate-bounce">🍲</span>
+            <span className="text-xs font-extrabold text-amber-100 truncate">
+              {liveShabuLobby.hostEmoji} {liveShabuLobby.hostName} เปิดตี้ชาบูบุฟเฟ่ต์ ({liveShabuLobby.count}/{liveShabuLobby.max})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setShabuSession({
+                  roomCode: liveShabuLobby.roomCode,
+                  isHost: false,
+                  targetName: liveShabuLobby.hostName,
+                });
+              }}
+              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
+            >
+              เข้าร่วมตี้เลย!
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveShabuLobby(null)}
+              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
+              title="ซ่อนแจ้งเตือน"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {shabuSession && (
+        <ShabuCoopModal
+          isOpen={Boolean(shabuSession)}
+          onClose={() => setShabuSession(null)}
+          players={players}
+          currentUserId={currentUserId}
+          qualityMode={qualityMode}
+          initialRoomCode={shabuSession.roomCode}
+          initialIsHost={shabuSession.isHost}
+          invitedTargetName={shabuSession.targetName}
+          onLobbyBroadcast={(info) => {
+            broadcastRealtimeEvent('shabu_lobby', { ...info });
+          }}
+          onRewardEarned={(earned, newPoints) => {
+            showToast(
+              '🍲',
+              `ตั้งวงชาบูสำเร็จ! (+${earned} 💰)`,
+              `รับโบนัสจากแต้มตี้ชาบูแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
             );
             void fetchArenaData({ force: true });
           }}

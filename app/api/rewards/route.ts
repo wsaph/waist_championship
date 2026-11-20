@@ -10,6 +10,8 @@ import {
 const DAILY_CHECKIN_BONUS = 10;
 const VOLLEYBALL_WIN_BONUS = 5;
 const VOLLEYBALL_DAILY_WIN_CAP = 3;
+const SHABU_DAILY_GP_CAP = 20;
+const SHABU_MAX_GP_PER_GAME = 15;
 
 function getBangkokDateKey() {
   const bkk = new Date(Date.now() + 7 * 3600 * 1000);
@@ -28,7 +30,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId, type, slotId, spawnToken } = await req.json();
+    const { userId, type, slotId, spawnToken, score } = await req.json();
     const uid = Number(userId);
     if (!uid || uid <= 0) {
       return NextResponse.json(
@@ -165,6 +167,43 @@ export async function POST(req: Request) {
         winsToday: nextWins,
         dailyCap: VOLLEYBALL_DAILY_WIN_CAP,
         capReached: false,
+      });
+    }
+
+    if (type === 'shabu_coop_finish') {
+      const bkkToday = getBangkokDateKey();
+      const prevDate = String(user.shabu_gp_date || '');
+      const prevEarned = prevDate === bkkToday ? Number(user.shabu_gp_earned_today ?? 0) : 0;
+      const rawScore = Math.max(0, Math.min(50000, Math.round(Number(score || 0))));
+      const potentialGp = Math.min(SHABU_MAX_GP_PER_GAME, Math.floor(rawScore / 100));
+      const remainingCap = Math.max(0, SHABU_DAILY_GP_CAP - prevEarned);
+      const earned = Math.min(potentialGp, remainingCap);
+
+      if (earned <= 0) {
+        return NextResponse.json({
+          success: true,
+          earned: 0,
+          points: currentPoints,
+          earnedToday: prevEarned,
+          dailyCap: SHABU_DAILY_GP_CAP,
+          capReached: remainingCap <= 0,
+        });
+      }
+
+      const nextEarnedToday = prevEarned + earned;
+      const nextPoints = currentPoints + earned;
+      await turso.execute({
+        sql: 'UPDATE users SET points = ?, shabu_gp_date = ?, shabu_gp_earned_today = ? WHERE id = ?',
+        args: [nextPoints, bkkToday, nextEarnedToday, uid],
+      });
+
+      return NextResponse.json({
+        success: true,
+        earned,
+        points: nextPoints,
+        earnedToday: nextEarnedToday,
+        dailyCap: SHABU_DAILY_GP_CAP,
+        capReached: nextEarnedToday >= SHABU_DAILY_GP_CAP,
       });
     }
 
