@@ -10,6 +10,7 @@ import {
 } from '@/lib/character_3d';
 import type { PropColorMap } from '@/lib/rpg_catalog';
 import {
+  detectDeviceTier,
   getQualityConfig,
   disposeObject3D,
   type QualityMode,
@@ -158,6 +159,11 @@ export function BeachVolleyballModal({
   const [screen, setScreen] = useState<'waiting' | 'playing'>('waiting');
   const [mode, setMode] = useState<VbMode>(initialMode);
   const [muted, setMuted] = useState<boolean>(false);
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const tier = detectDeviceTier();
+    return tier !== 'desktop' || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  });
 
   const myClientIdRef = useRef<string>(`vb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   const [mySlot, setMySlot] = useState<VbSlotId>(initialIsHost ? 'L1' : 'R1');
@@ -1046,14 +1052,26 @@ export function BeachVolleyballModal({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setMuted((v) => !v)}
-              className="pointer-events-auto rpg-panel px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-extrabold text-amber-100 cursor-pointer"
-              title="เปิด/ปิดเสียงเอฟเฟกต์"
-            >
-              {muted ? '🔇' : '🔊'}
-            </button>
+            <div className="pointer-events-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShowTouchControls((v) => !v)}
+                className={`rpg-panel px-2.5 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${
+                  showTouchControls ? 'text-amber-300 ring-1 ring-amber-300' : 'text-amber-100/75'
+                }`}
+                title="เปิด/ปิดปุ่มบังคับบนหน้าจอ (มือถือ / iPad)"
+              >
+                🎮
+              </button>
+              <button
+                type="button"
+                onClick={() => setMuted((v) => !v)}
+                className="rpg-panel px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-extrabold text-amber-100 cursor-pointer"
+                title="เปิด/ปิดเสียงเอฟเฟกต์"
+              >
+                {muted ? '🔇' : '🔊'}
+              </button>
+            </div>
           </div>
 
           {pointBanner && !winnerTeam && (
@@ -1064,21 +1082,23 @@ export function BeachVolleyballModal({
             </div>
           )}
 
-          {/* Desktop Controls Hint (lg+) */}
-          <div className="hidden lg:flex fixed bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-            <div className="rpg-panel rounded-full px-4 py-1.5 text-xs font-bold text-amber-100 flex items-center gap-3">
-              <span>⬅️➡️ หรือ A/D เดิน</span>
-              <span>•</span>
-              <span>⬆️ หรือ Space กระโดด</span>
-              <span>•</span>
-              <span>💥 Shift / Enter ตบลูกไฟ (กลางอากาศ) &amp; พุ่งรับ (บนพื้น)</span>
+          {/* Desktop Controls Hint (shown when touch controls are off) */}
+          {!showTouchControls && (
+            <div className="hidden lg:flex fixed bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="rpg-panel rounded-full px-4 py-1.5 text-xs font-bold text-amber-100 flex items-center gap-3">
+                <span>⬅️➡️ หรือ A/D เดิน</span>
+                <span>•</span>
+                <span>⬆️ หรือ Space กระโดด</span>
+                <span>•</span>
+                <span>💥 Shift / Enter ตบลูกไฟ (กลางอากาศ) &amp; พุ่งรับ (บนพื้น)</span>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Mobile & iPad Multi-Touch Controls (< lg) */}
-          {!winnerTeam && (
-            <div className="flex lg:hidden fixed bottom-3 inset-x-3 pb-safe z-20 items-end justify-between pointer-events-none">
-              <div className="flex gap-2.5 pointer-events-auto">
+          {/* Multi-Touch Controls (Auto-shown on Mobile, iPad Portrait & iPad Landscape) */}
+          {!winnerTeam && showTouchControls && (
+            <div className="flex fixed bottom-4 inset-x-4 pb-safe z-20 items-end justify-between pointer-events-none">
+              <div className="flex gap-3 pointer-events-auto">
                 <button
                   type="button"
                   onPointerDown={(e) => {
@@ -1088,7 +1108,7 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('left', false)}
                   onPointerCancel={() => setTouchKey('left', false)}
                   onPointerLeave={() => setTouchKey('left', false)}
-                  className="w-16 h-16 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl font-black shadow-lg touch-none"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl sm:text-3xl font-black shadow-lg touch-none"
                 >
                   ◀
                 </button>
@@ -1101,13 +1121,13 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('right', false)}
                   onPointerCancel={() => setTouchKey('right', false)}
                   onPointerLeave={() => setTouchKey('right', false)}
-                  className="w-16 h-16 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl font-black shadow-lg touch-none"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/75 active:bg-amber-400 active:text-black border-2 border-amber-300/80 text-white text-2xl sm:text-3xl font-black shadow-lg touch-none"
                 >
                   ▶
                 </button>
               </div>
 
-              <div className="flex gap-2.5 pointer-events-auto">
+              <div className="flex gap-3 pointer-events-auto">
                 <button
                   type="button"
                   onPointerDown={(e) => {
@@ -1117,10 +1137,10 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('action', false)}
                   onPointerCancel={() => setTouchKey('action', false)}
                   onPointerLeave={() => setTouchKey('action', false)}
-                  className="w-16 h-16 rounded-2xl bg-gradient-to-b from-orange-500/90 to-rose-600/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-b from-orange-500/90 to-rose-600/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
                 >
-                  <span className="text-xl leading-none">💥</span>
-                  <span className="text-[10px] mt-0.5">ตบ/พุ่ง</span>
+                  <span className="text-xl sm:text-2xl leading-none">💥</span>
+                  <span className="text-[10px] sm:text-xs mt-0.5">ตบ/พุ่ง</span>
                 </button>
                 <button
                   type="button"
@@ -1131,10 +1151,10 @@ export function BeachVolleyballModal({
                   onPointerUp={() => setTouchKey('jump', false)}
                   onPointerCancel={() => setTouchKey('jump', false)}
                   onPointerLeave={() => setTouchKey('jump', false)}
-                  className="w-16 h-16 rounded-2xl bg-gradient-to-b from-sky-500/90 to-blue-700/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-b from-sky-500/90 to-blue-700/90 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-lg touch-none"
                 >
-                  <span className="text-xl leading-none">⬆</span>
-                  <span className="text-[10px] mt-0.5">กระโดด</span>
+                  <span className="text-xl sm:text-2xl leading-none">⬆</span>
+                  <span className="text-[10px] sm:text-xs mt-0.5">กระโดด</span>
                 </button>
               </div>
             </div>
