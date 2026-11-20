@@ -40,6 +40,7 @@ import {
   pickRandomGuardPranks,
   type GuardPrank,
 } from '@/lib/guard_pranks';
+import { createGuardPrankFxRig } from '@/lib/guard_prank_fx';
 import { startBgm, stopBgm } from '@/lib/bgm';
 import {
   SHOP_ITEMS,
@@ -74,6 +75,10 @@ const WardrobeShopModal = dynamic(
 );
 const LoginGateModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.LoginGateModal),
+  { ssr: false }
+);
+const BeachVolleyballModal = dynamic(
+  () => import('@/components/BeachVolleyballModal').then((m) => m.BeachVolleyballModal),
   { ssr: false }
 );
 
@@ -435,6 +440,24 @@ export default function Arena3DPage() {
   const [claimingCheckin, setClaimingCheckin] = useState<boolean>(false);
   const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [vbSession, setVbSession] = useState<{
+    roomCode: string;
+    mode: '1v1' | '2v2';
+    isHost: boolean;
+    targetName?: string;
+  } | null>(null);
+  const [liveVbLobby, setLiveVbLobby] = useState<{
+    roomCode: string;
+    mode: '1v1' | '2v2';
+    hostUserId: number;
+    hostName: string;
+    hostEmoji: string;
+    targetName?: string;
+    count: number;
+    max: number;
+    updatedAt: number;
+  } | null>(null);
+  const isVolleyballOpen = Boolean(vbSession);
   const realtimeSubscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -499,9 +522,9 @@ export default function Arena3DPage() {
 
   useEffect(() => {
     pauseArenaRenderRef.current = Boolean(
-      isJoinOpen || (authChecked && currentUserId === null)
+      isJoinOpen || isVolleyballOpen || (authChecked && currentUserId === null)
     );
-  }, [isJoinOpen, authChecked, currentUserId]);
+  }, [isJoinOpen, isVolleyballOpen, authChecked, currentUserId]);
 
   useEffect(() => {
     playersRef.current = players;
@@ -852,7 +875,7 @@ export default function Arena3DPage() {
 
         const me = playersRef.current.find((pl) => pl.id === currentUserId);
         if (me) {
-          broadcastRealtimeEvent('arena_refresh', {
+          broadcastRealtimeEvent('arena_sync', {
             reason: 'legendary_fish',
             actorId: me.id,
             actorName: me.name,
@@ -1095,6 +1118,24 @@ export default function Arena3DPage() {
           );
           fetchArenaDataRef.current({ force: true });
         }
+      } else if (event === 'vb_lobby') {
+        if (payload.status === 'waiting' && payload.roomCode) {
+          setLiveVbLobby({
+            roomCode: String(payload.roomCode),
+            mode: payload.mode === '2v2' ? '2v2' : '1v1',
+            hostUserId: Number(payload.hostUserId || 0),
+            hostName: String(payload.hostName || 'เพื่อน'),
+            hostEmoji: String(payload.hostEmoji || '🏐'),
+            targetName: payload.targetName ? String(payload.targetName) : undefined,
+            count: Number(payload.count || 1),
+            max: Number(payload.max || 2),
+            updatedAt: Date.now(),
+          });
+        } else {
+          setLiveVbLobby((prev) =>
+            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
+          );
+        }
       } else if (event === 'interaction') {
         // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
         const inter = payload;
@@ -1209,13 +1250,22 @@ export default function Arena3DPage() {
         .on('broadcast', { event: 'guard_eject' }, ({ payload }) =>
           handleIncomingRealtimeEvent('guard_eject', payload)
         )
+        .on('broadcast', { event: 'guard_prank' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('guard_prank', payload)
+        )
         .on('broadcast', { event: 'status' }, ({ payload }) => handleIncomingRealtimeEvent('status', payload))
         .on('broadcast', { event: 'activity' }, ({ payload }) => handleIncomingRealtimeEvent('activity', payload))
         .on('broadcast', { event: 'arena_sync' }, ({ payload }) =>
           handleIncomingRealtimeEvent('arena_sync', payload)
         )
+        .on('broadcast', { event: 'coin_claimed' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('coin_claimed', payload)
+        )
         .on('broadcast', { event: 'interaction' }, ({ payload }) =>
           handleIncomingRealtimeEvent('interaction', payload)
+        )
+        .on('broadcast', { event: 'vb_lobby' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('vb_lobby', payload)
         )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
@@ -2165,6 +2215,7 @@ export default function Arena3DPage() {
     guardParts.rootGroup.position.copy(guardPostPos);
     guardParts.rootGroup.rotation.y = Math.atan2(-crosswalkNorm.z, crosswalkNorm.x);
     scene.add(guardParts.rootGroup);
+    const guardPrankRig = createGuardPrankFxRig(scene);
 
     const guardTagEl = document.createElement('div');
     guardTagEl.className = 'player-tag cursor-pointer';
@@ -3584,68 +3635,10 @@ export default function Arena3DPage() {
           guardBadgeEl.textContent = `${activePrank.prank.icon} ${activePrank.prank.guardSpeech}`;
         }
 
-        // Reset transforms before applying reaction
-        guardParts.rootGroup.scale.set(1, 1, 1);
-        guardParts.rootGroup.rotation.x = 0;
-        guardParts.rootGroup.rotation.z = 0;
-        gPos.y = guardPostPos.y;
-
-        if (rx === 'launch') {
-          const arc = Math.sin(pNorm * Math.PI);
-          gPos.y = guardPostPos.y + arc * 7.5;
-          guardParts.rootGroup.rotation.y += 0.32;
-          guardParts.rootGroup.rotation.z = pNorm * Math.PI * 6;
-          guardParts.armL.rotation.z = 1.4;
-          guardParts.armR.rotation.z = 1.4;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 26) * 0.9;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 26) * 0.9;
-        } else if (rx === 'flatten') {
-          const squish = pNorm < 0.8 ? 0.22 : 0.22 + ((pNorm - 0.8) / 0.2) * 0.78;
-          const widen = 1 + (1 - squish) * 0.85;
-          guardParts.rootGroup.scale.set(widen, squish, widen);
-          guardParts.bounceGroup.position.y = Math.sin(elapsed * 22) * 0.04;
-        } else if (rx === 'spin') {
-          guardParts.rootGroup.rotation.y += 0.48;
-          guardParts.bounceGroup.position.y = 0.25 + Math.abs(Math.sin(elapsed * 18)) * 0.35;
-          guardParts.armL.rotation.z = 1.25;
-          guardParts.armR.rotation.z = -1.25;
-        } else if (rx === 'shock') {
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 45)) * 0.28;
-          guardParts.rootGroup.rotation.z = Math.sin(elapsed * 60) * 0.24;
-          guardParts.armL.rotation.z = 1.1 + Math.sin(elapsed * 55) * 0.4;
-          guardParts.armR.rotation.z = -1.1 - Math.sin(elapsed * 55) * 0.4;
-        } else if (rx === 'slip') {
-          guardParts.rootGroup.rotation.z = Math.PI * 0.46;
-          guardParts.bounceGroup.position.y = 0.32;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 24) * 0.85;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 24) * 0.85;
-          guardParts.armL.rotation.z = Math.sin(elapsed * 20) * 0.7;
-          guardParts.armR.rotation.z = -Math.sin(elapsed * 20) * 0.7;
-        } else if (rx === 'panic') {
-          const orbit = elapsed * 6.5;
-          gPos.x = guardPostPos.x + Math.cos(orbit) * 1.45;
-          gPos.z = guardPostPos.z + Math.sin(orbit) * 1.45;
-          guardParts.rootGroup.rotation.y = -orbit;
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 22)) * 0.3;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 22) * 0.85;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 22) * 0.85;
-          guardParts.armL.rotation.z = 1.3;
-          guardParts.armR.rotation.z = 1.3;
-        } else if (rx === 'bonk') {
-          guardParts.rootGroup.rotation.z = Math.sin(elapsed * 16) * 0.36;
-          guardParts.rootGroup.rotation.x = Math.cos(elapsed * 14) * 0.22;
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 10)) * 0.12;
-          guardParts.armL.rotation.z = 0.8;
-          guardParts.armR.rotation.z = -0.8;
-        } else if (rx === 'dance') {
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 12)) * 0.32;
-          guardParts.rootGroup.rotation.y = Math.sin(elapsed * 6) * 0.85;
-          guardParts.armL.rotation.z = Math.sin(elapsed * 12) * 1.2;
-          guardParts.armR.rotation.z = -Math.sin(elapsed * 12) * 1.2;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 12) * 0.55;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 12) * 0.55;
-        }
+        // แสดงพรอพ 3D + ท่าทางเฉพาะของแต่ละวิธีแกล้งทั้ง 12 แบบ!
+        guardPrankRig.update(activePrank.prank.id, pNorm, elapsed, gPos, guardPostPos, guardParts);
       } else {
+        guardPrankRig.hideAll();
         if (activePrank) {
           guardPrankFxRef.current = null;
           guardParts.rootGroup.scale.set(1, 1, 1);
@@ -6493,6 +6486,43 @@ export default function Arena3DPage() {
                     </button>
                   ))}
                   </div>
+                  {/* ชวนเล่นมินิเกมวอลเลย์บอลชายหาด 3D (คนจริงเท่านั้น 1v1 / 2v2) */}
+                  <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-black/15">
+                    {(['1v1', '2v2'] as const).map((vbMode) => {
+                      const canJoinExisting =
+                        liveVbLobby && liveVbLobby.mode === vbMode && liveVbLobby.count < liveVbLobby.max;
+                      return (
+                        <button
+                          key={vbMode}
+                          type="button"
+                          onClick={() => {
+                            setIsPairMenuOpen(false);
+                            if (canJoinExisting && liveVbLobby) {
+                              setVbSession({
+                                roomCode: liveVbLobby.roomCode,
+                                mode: liveVbLobby.mode,
+                                isHost: false,
+                                targetName: liveVbLobby.hostName,
+                              });
+                            } else {
+                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                              setVbSession({
+                                roomCode: newCode,
+                                mode: vbMode,
+                                isHost: true,
+                                targetName: nearbySpectator.name,
+                              });
+                            }
+                          }}
+                          className="border-2 border-black bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 hover:brightness-105 text-black rounded-xl px-2.5 py-2 text-xs font-extrabold cursor-pointer transition shadow"
+                        >
+                          {canJoinExisting
+                            ? `🏐 เข้าตี้ ${vbMode} (${liveVbLobby.count}/${liveVbLobby.max})`
+                            : `🏐 ชวนตีบอล ${vbMode}`}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               <button
@@ -6770,6 +6800,65 @@ export default function Arena3DPage() {
 
       {legendaryFlash && (
         <div className="fixed inset-0 z-50 pointer-events-none bg-gradient-to-b from-amber-300/45 via-yellow-200/25 to-transparent animate-pulse" />
+      )}
+
+      {/* Live Floating Invite Banner when a friend opens a Volleyball PvP Lobby */}
+      {liveVbLobby && !vbSession && !isJoinOpen && (
+        <div className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]">
+          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-amber-300">
+            <span className="text-base animate-bounce">🏐</span>
+            <span className="text-xs font-extrabold text-amber-100 truncate">
+              {liveVbLobby.hostEmoji} {liveVbLobby.hostName} ชวนตีวอลเลย์บอล {liveVbLobby.mode} ({liveVbLobby.count}/{liveVbLobby.max})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setVbSession({
+                  roomCode: liveVbLobby.roomCode,
+                  mode: liveVbLobby.mode,
+                  isHost: false,
+                  targetName: liveVbLobby.hostName,
+                });
+              }}
+              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
+            >
+              เข้าร่วมเลย!
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveVbLobby(null)}
+              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
+              title="ซ่อนแจ้งเตือน"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {vbSession && (
+        <BeachVolleyballModal
+          isOpen={Boolean(vbSession)}
+          onClose={() => setVbSession(null)}
+          players={players}
+          currentUserId={currentUserId}
+          qualityMode={qualityMode}
+          initialRoomCode={vbSession.roomCode}
+          initialMode={vbSession.mode}
+          initialIsHost={vbSession.isHost}
+          invitedTargetName={vbSession.targetName}
+          onLobbyBroadcast={(info) => {
+            broadcastRealtimeEvent('vb_lobby', { ...info });
+          }}
+          onRewardEarned={(earned, newPoints) => {
+            showToast(
+              '🏐',
+              `ชนะวอลเลย์บอลชายหาด! (+${earned} 💰)`,
+              `รับโบนัสผู้ชนะแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
+            );
+            void fetchArenaData({ force: true });
+          }}
+        />
       )}
 
     </div>

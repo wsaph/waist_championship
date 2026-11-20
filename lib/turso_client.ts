@@ -88,6 +88,8 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_count INTEGER NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_today INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN volleyball_wins_date TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN volleyball_wins_count INTEGER NOT NULL DEFAULT 0`);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS seasons (

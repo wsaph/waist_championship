@@ -8,6 +8,13 @@ import {
 } from '@/lib/lunch_coins';
 
 const DAILY_CHECKIN_BONUS = 10;
+const VOLLEYBALL_WIN_BONUS = 5;
+const VOLLEYBALL_DAILY_WIN_CAP = 3;
+
+function getBangkokDateKey() {
+  const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+  return bkk.toISOString().slice(0, 10);
+}
 
 export async function GET() {
   try {
@@ -125,6 +132,39 @@ export async function POST(req: Request) {
         spawnToken: String(spawnToken),
         winnerName: String(user.name),
         winnerEmoji: String(user.avatar_emoji),
+      });
+    }
+
+    if (type === 'volleyball_win') {
+      const bkkToday = getBangkokDateKey();
+      const prevDate = String(user.volleyball_wins_date || '');
+      const prevCount = prevDate === bkkToday ? Number(user.volleyball_wins_count ?? 0) : 0;
+
+      if (prevCount >= VOLLEYBALL_DAILY_WIN_CAP) {
+        return NextResponse.json({
+          success: true,
+          earned: 0,
+          points: currentPoints,
+          winsToday: prevCount,
+          dailyCap: VOLLEYBALL_DAILY_WIN_CAP,
+          capReached: true,
+        });
+      }
+
+      const nextWins = prevCount + 1;
+      const nextPoints = currentPoints + VOLLEYBALL_WIN_BONUS;
+      await turso.execute({
+        sql: 'UPDATE users SET points = ?, volleyball_wins_date = ?, volleyball_wins_count = ? WHERE id = ?',
+        args: [nextPoints, bkkToday, nextWins, uid],
+      });
+
+      return NextResponse.json({
+        success: true,
+        earned: VOLLEYBALL_WIN_BONUS,
+        points: nextPoints,
+        winsToday: nextWins,
+        dailyCap: VOLLEYBALL_DAILY_WIN_CAP,
+        capReached: false,
       });
     }
 
