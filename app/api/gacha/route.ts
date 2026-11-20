@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { userId, count } = body;
     if (!userId) {
-      return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบหรือเลือกตัวละครก่อนสุ่มกาชาปอง' }, { status: 400 });
+      return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบหรือเลือกตัวละครก่อนสุ่มGacha' }, { status: 400 });
     }
 
     const userRes = await turso.execute({
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 
     if (currentPoints < totalCost) {
       return NextResponse.json(
-        { error: `แต้มไม่พอสุ่มกาชาปอง ×${actualCount}! ใช้ ${totalCost.toLocaleString()} 🪙 (คุณมี ${currentPoints.toLocaleString()} 🪙)` },
+        { error: `แต้มไม่พอสุ่มGacha ×${actualCount}! ใช้ ${totalCost.toLocaleString()} 🪙 (คุณมี ${currentPoints.toLocaleString()} 🪙)` },
         { status: 400 }
       );
     }
@@ -165,6 +165,6 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('POST /api/gacha error:', error);
-    return NextResponse.json({ error: 'หมุนกาชาปองไม่สำเร็จ กรุณาลองใหม่' }, { status: 500 });
+    return NextResponse.json({ error: 'หมุนGachaไม่สำเร็จ กรุณาลองใหม่' }, { status: 500 });
   }
 }

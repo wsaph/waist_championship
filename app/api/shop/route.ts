@@ -29,7 +29,7 @@ export async function POST(req: Request) {
       const targetId = Number(recipientId);
       if (item.isGachaOnly) {
         return NextResponse.json(
-          { error: '🎰 ไอเทมจากตู้กาชาปองส่งเป็นของขวัญไม่ได้ครับ' },
+          { error: '🎰 ไอเทมจากตู้Gachaส่งเป็นของขวัญไม่ได้ครับ' },
           { status: 400 }
         );
       }
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
 
       if (currentPoints < item.cost) {
         return NextResponse.json(
-          { error: `Gacha Pong ไม่พอส่งของขวัญ! ต้องการ ${item.cost} 💰 (คุณมี ${currentPoints} 💰)` },
+          { error: `Gacha ไม่พอส่งของขวัญ! ต้องการ ${item.cost} 💰 (คุณมี ${currentPoints} 💰)` },
           { status: 400 }
         );
       }
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
     if (!ownedSet.has(itemId)) {
       if (item.isGachaOnly) {
         return NextResponse.json(
-          { error: '🎰 ไอเทมสุดแรร์ชิ้นนี้หาซื้อไม่ได้! ต้องสุ่มจากตู้กาชาปองเท่านั้น' },
+          { error: '🎰 ไอเทมสุดแรร์ชิ้นนี้หาซื้อไม่ได้! ต้องสุ่มจากตู้Gachaเท่านั้น' },
           { status: 400 }
         );
       }

@@ -297,7 +297,6 @@ export default function Arena3DPage() {
   const [boardMessage, setBoardMessage] = useState('');
   const [sendingBoard, setSendingBoard] = useState(false);
   const [actionTargetPlayer, setActionTargetPlayer] = useState<Player | null>(null);
-  const [dockTargetPlayer, setDockTargetPlayer] = useState<Player | null>(null);
   const [giftTargetPlayer, setGiftTargetPlayer] = useState<Player | null>(null);
   const [giftCategory, setGiftCategory] = useState<ShopCategory>('mount');
   const [giftMessage, setGiftMessage] = useState('');
@@ -382,7 +381,6 @@ export default function Arena3DPage() {
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const localBroadcastRef = useRef<BroadcastChannel | null>(null);
   const playersRef = useRef<Player[]>([]);
-  const openEditModalRef = useRef<(p: Player) => void>(() => {});
   const fetchArenaDataRef = useRef<(opts?: { force?: boolean; viewerId?: number | null }) => Promise<void>>(
     async () => {}
   );
@@ -1522,18 +1520,19 @@ export default function Arena3DPage() {
   const openEditModal = useCallback(
     (p: Player) => {
       focusOnCharacter(p.id);
-      if (p.role !== 'spectator' || p.id === currentUserId) {
-        setDockTargetPlayer(p);
+      if (p.role !== 'spectator') {
+        setBoardTargetId(p.id);
+        setBoardMessage('');
+        setActionTargetPlayer(p);
         return;
       }
-      setDockTargetPlayer(null);
+      if (p.id !== currentUserId) {
+        return;
+      }
+      openWardrobeModal(p);
     },
-    [focusOnCharacter, currentUserId]
+    [focusOnCharacter, currentUserId, openWardrobeModal]
   );
-
-  useEffect(() => {
-    openEditModalRef.current = openEditModal;
-  }, [openEditModal]);
 
   const getOverviewCameraPos = () => {
     const isPortrait = typeof window !== 'undefined' && window.innerWidth < window.innerHeight;
@@ -2359,7 +2358,7 @@ export default function Arena3DPage() {
       scene.add(rootGroup);
 
       const tagEl = document.createElement('div');
-      tagEl.className = 'player-tag flex flex-col items-center';
+      tagEl.className = 'player-tag cursor-pointer flex flex-col items-center';
       tagEl.onclick = () => {
         if (p.role !== 'spectator') {
           openEditModal(p);
@@ -3590,40 +3589,6 @@ export default function Arena3DPage() {
         }
       }
 
-      const hits = raycaster.intersectObjects(meshes.map((m) => m.rootGroup), true);
-      if (hits.length > 0) {
-        let obj: THREE.Object3D | null = hits[0].object;
-        while (obj && obj.userData.playerId === undefined) {
-          obj = obj.parent;
-        }
-        if (obj?.userData.playerId !== undefined) {
-          const found = playersRef.current.find((pl) => pl.id === obj!.userData.playerId);
-          if (found) {
-            if (found.role !== 'spectator') {
-              openEditModalRef.current(found);
-            } else {
-              focusOnCharacter(found.id);
-            }
-          }
-          return;
-        }
-      }
-
-      if (trackMarkers.length > 0) {
-        const markerHits = raycaster.intersectObjects(
-          trackMarkers.map((tm) => tm.parts.group),
-          true
-        );
-        if (markerHits.length > 0) {
-          const ownerId = markerHits[0].object.userData.markerOwnerId;
-          const owner = playersRef.current.find((pl) => pl.id === ownerId);
-          if (owner) {
-            openEditModalRef.current(owner);
-            return;
-          }
-        }
-      }
-      setDockTargetPlayer(null);
       if (walkingSpectatorIdRef.current !== null) {
         const groundHits = raycaster.intersectObject(island, false);
         if (groundHits.length > 0) {
@@ -4657,7 +4622,7 @@ export default function Arena3DPage() {
               title={`สลับโหมดกราฟิก 3D (ปัจจุบัน: ${QUALITY_MODE_OPTIONS.find((o) => o.id === qualityMode)?.label || 'อัตโนมัติ'})`}
             >
               <span>⚡</span>
-              <span className="hidden xl:inline text-[10px]">
+              <span className="text-[10px]">
                 {QUALITY_MODE_OPTIONS.find((o) => o.id === qualityMode)?.short || 'Auto'}
               </span>
             </button>
@@ -4824,9 +4789,6 @@ export default function Arena3DPage() {
                     key={p.id}
                     onClick={() => {
                       focusOnCharacter(p.id);
-                      if (p.role !== 'spectator' || p.id === currentUserId) {
-                        setDockTargetPlayer(p);
-                      }
                       if (window.innerWidth < 768) setIsDrawerOpen(false);
                     }}
                     className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${
@@ -4914,10 +4876,7 @@ export default function Arena3DPage() {
         const gMeta = getGoalTypeMeta(me.goalType);
         return (
           <div
-            onClick={() => {
-              setDockTargetPlayer(null);
-              setActionTargetPlayer(me);
-            }}
+            onClick={() => setActionTargetPlayer(me)}
             title="คลิกเพื่อดูเกจพลัง +/- ประจำวันของคุณ"
             className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 cursor-pointer hover:brightness-110 transition ${
               walkingSpectatorId !== null
@@ -5616,20 +5575,8 @@ export default function Arena3DPage() {
             </div>
 
             {liveTarget.id === currentUserId ? (
-              <div className="space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActionTargetPlayer(null);
-                    openWardrobeModal(liveTarget);
-                  }}
-                  className="w-full rpg-btn-blue font-extrabold text-xs py-2.5 rounded-xl cursor-pointer"
-                >
-                  🎨 เปิดหน้าต่างแต่งตัว 3D &amp; ร้านค้า Gacha Pong
-                </button>
-                <div className="rounded-xl border-2 border-black bg-amber-100/90 px-3 py-2 text-[11px] font-bold text-stone-800 text-center leading-snug">
-                  💡 ไม่สามารถเติมไฟหรือแกล้งตัวเองได้ — คลิกที่ตัวละครเพื่อนในสนามเพื่อส่งไฟเชียร์ (+1) หรือแกล้งเพื่อน (-1) และรับโบนัสเหรียญ!
-                </div>
+              <div className="rounded-xl border-2 border-black bg-amber-100/90 px-3 py-2 text-[11px] font-bold text-stone-800 text-center leading-snug">
+                💡 ไม่สามารถเติมไฟหรือแกล้งตัวเองได้ — คลิกที่ป้ายชื่อบนหัวเพื่อนในสนามเพื่อส่งไฟเชียร์ (+1) หรือแกล้งเพื่อน (-1) และรับโบนัสเหรียญ!
               </div>
             ) : (
             <div className="space-y-3">
@@ -5896,159 +5843,8 @@ export default function Arena3DPage() {
         }}
       />
 
-      {/* Context Dock ด้านล่างเมื่อคลิกเลือกตัวละครในสนาม (ไม่เด้ง Modal ใหญ่บังฉาก 3D) */}
-      {dockTargetPlayer && !actionTargetPlayer && !giftTargetPlayer && !isJoinOpen && !isLogOpen && (() => {
-        const liveTarget =
-          rankedPlayers.find((pl) => pl.id === dockTargetPlayer.id) ||
-          players.find((pl) => pl.id === dockTargetPlayer.id) ||
-          dockTargetPlayer;
-        const isSelf = liveTarget.id === currentUserId;
-        const isCompetitor = liveTarget.role !== 'spectator';
-        const pBoost = resolvePowerBoostMeta(
-          liveTarget.cheerCount ?? 0,
-          liveTarget.temptCount ?? 0
-        );
-        const netLabel =
-          pBoost.netPower > 0 ? `+${pBoost.netPower}` : String(pBoost.netPower);
-        const stepPct = liveTarget.stepProgressPct ?? liveTarget.progressPct ?? 0;
-
-        return (
-          <div
-            className={`fixed left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[96vw] w-max transition-all ${
-              walkingSpectatorId !== null
-                ? 'bottom-24 sm:bottom-20'
-                : 'bottom-[76px] md:bottom-4'
-            }`}
-          >
-            <div className="rpg-panel rounded-2xl px-2.5 sm:px-3 py-2 shadow-2xl flex items-center gap-2 sm:gap-3 border-2 border-amber-400/90">
-              {/* ข้อมูลย่อตัวละคร */}
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className="w-9 h-9 rounded-xl border-2 border-amber-300 flex items-center justify-center text-lg shrink-0 shadow-inner"
-                  style={{ backgroundColor: liveTarget.colorHex }}
-                >
-                  {liveTarget.emoji}
-                </div>
-                <div className="min-w-0 leading-tight">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm text-amber-200 truncate max-w-[110px] sm:max-w-[150px]">
-                      {liveTarget.name}
-                    </span>
-                    {isCompetitor && (
-                      <span
-                        className={`px-1.5 py-0.5 rounded-full border text-[10px] font-extrabold shrink-0 ${pBoost.badgeBgClass}`}
-                      >
-                        เกจ {netLabel}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] sm:text-[11px] font-bold text-emerald-300 truncate">
-                    {isCompetitor
-                      ? `👟 ${(liveTarget.stepCount ?? 0).toLocaleString()} ก้าว (${stepPct}%)`
-                      : '👀 โหมดผู้ชม'}
-                  </div>
-                </div>
-              </div>
-
-              {/* ปุ่ม Action ด่วน */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                {isSelf ? (
-                  <>
-                    {isCompetitor && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActionTargetPlayer(liveTarget);
-                          setDockTargetPlayer(null);
-                        }}
-                        className="rpg-btn-gold rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer flex items-center gap-1"
-                        title="ดูเกจพลัง +/- ประจำวัน"
-                      >
-                        <span>📊</span>
-                        <span className="hidden sm:inline">ดูเกจ</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDockTargetPlayer(null);
-                        openWardrobeModal(liveTarget, 'armor');
-                      }}
-                      className="rpg-btn-blue rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer flex items-center gap-1"
-                      title="แต่งตัว 3D & ร้านค้า"
-                    >
-                      <span>🎨</span>
-                      <span>แต่งตัว</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBoardKind('cheer');
-                        setBoardTargetId(liveTarget.id);
-                        setBoardMessage('');
-                        setActionTargetPlayer(liveTarget);
-                        setDockTargetPlayer(null);
-                      }}
-                      className="bg-gradient-to-b from-amber-400 to-orange-500 hover:brightness-110 text-black border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
-                      title="ส่งไฟเชียร์เพื่อน (+1)"
-                    >
-                      <span>🔥</span>
-                      <span>เติมไฟ</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBoardKind('tempt');
-                        setBoardTargetId(liveTarget.id);
-                        setBoardMessage('');
-                        setActionTargetPlayer(liveTarget);
-                        setDockTargetPlayer(null);
-                      }}
-                      className="bg-gradient-to-b from-pink-500 to-rose-600 hover:brightness-110 text-white border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
-                      title="ส่งของกินแกล้งเพื่อน (-1)"
-                    >
-                      <span>😈</span>
-                      <span>แกล้ง</span>
-                    </button>
-                    {currentUserId && currentUserId > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setGiftError('');
-                          setGiftMessage('');
-                          setGiftCategory('mount');
-                          setGiftTargetPlayer(liveTarget);
-                          setDockTargetPlayer(null);
-                        }}
-                        className="bg-gradient-to-r from-fuchsia-500 to-amber-400 hover:brightness-110 text-white border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
-                        title="ส่งของขวัญให้เพื่อน"
-                      >
-                        <span>🎁</span>
-                        <span className="hidden sm:inline">ของขวัญ</span>
-                      </button>
-                    )}
-                  </>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setDockTargetPlayer(null)}
-                  className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-amber-100 border border-slate-600 flex items-center justify-center text-xs font-extrabold cursor-pointer shrink-0 transition"
-                  title="ปิดแถบนี้"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Desktop/iPad Roam Pill (md+) */}
-      {walkingSpectatorId === null && !dockTargetPlayer && (() => {
+      {walkingSpectatorId === null && (() => {
         const me = players.find((pl) => pl.id === currentUserId);
         if (!me || me.role === 'spectator' || isJoinOpen) return null;
         return (
@@ -6072,7 +5868,6 @@ export default function Arena3DPage() {
         const currentUser = players.find((pl) => pl.id === currentUserId);
         return (
           <div className="flex md:hidden fixed bottom-2 inset-x-2 pb-safe z-30 flex-col items-center gap-1.5 pointer-events-none">
-            {!dockTargetPlayer && (
             <div className="flex flex-wrap items-center justify-center gap-1.5 pointer-events-auto">
               {isLunchRush && (
                 <div className="bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 text-stone-950 border-2 border-white rounded-full px-3 py-1 text-[11px] font-extrabold flex items-center gap-1 shadow animate-pulse">
@@ -6103,7 +5898,6 @@ export default function Arena3DPage() {
                 </button>
               )}
             </div>
-            )}
 
             {!currentUser ? (
               <button
@@ -6290,7 +6084,7 @@ export default function Arena3DPage() {
               onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
               className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
             >
-              😈 แกล้งพี่ยาม! (สุ่ม 30 วิธี 💰)
+              😈 แกล้งพี่ยาม!
             </button>
           )}
 
@@ -6409,11 +6203,10 @@ export default function Arena3DPage() {
                 type="button"
                 onClick={() => openGuardPrankMenu(guardPrankMenu.x, guardPrankMenu.y)}
                 className="w-18 h-18 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 text-black border-3 border-black shadow-[3px_3px_0px_#18181B] font-extrabold text-xs flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition z-10"
-                title="สุ่มวิธีแกล้งพี่ยามใหม่ 6 จาก 30 วิธี"
+                title="สุ่มวิธีแกล้งพี่ยามใหม่"
               >
                 <span className="text-lg leading-none">🎲</span>
                 <span className="text-[10px]">สุ่มใหม่</span>
-                <span className="text-[8.5px] opacity-80">30 วิธี</span>
               </button>
               {guardPrankMenu.options.map((prank, i) => {
                 const angle = (i / guardPrankMenu.options.length) * Math.PI * 2 - Math.PI / 2;

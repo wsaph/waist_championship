@@ -1648,7 +1648,7 @@ export function WardrobeShopModal({
 
     if (item.isGachaOnly) {
       setRightCategory('gacha');
-      setShopMsg('🎰 ไอเทมแรร์ชิ้นนี้หาซื้อไม่ได้! กดหมุนตู้กาชาปองเพื่อลุ้นรับได้เลย!');
+      setShopMsg('🎰 ไอเทมแรร์ชิ้นนี้หาซื้อไม่ได้! กดหมุนตู้Gachaเพื่อลุ้นรับได้เลย!');
       return;
     }
 
@@ -1771,7 +1771,7 @@ export function WardrobeShopModal({
   const handleGachaSpinClick = async (count: 1 | 8 = 1) => {
     setShopMsg('');
     if (mode === 'create' || !editingPlayerId) {
-      setShopMsg('💡 กด "อัญเชิญลงสนามแข่ง" สร้างตัวละครก่อน แล้วกลับมาหมุนกาชาปองได้เลย!');
+      setShopMsg('💡 กด "อัญเชิญลงสนามแข่ง" สร้างตัวละครก่อน แล้วกลับมาหมุนGachaได้เลย!');
       return;
     }
     if (gachaSpinning) return;
@@ -1788,7 +1788,7 @@ export function WardrobeShopModal({
         waitSkippable(count === 8 ? 1450 : 1150),
       ]);
       if (!rollResults || rollResults.length === 0) {
-        throw new Error('ไม่ได้รับไอเทมจากตู้กาชาปอง');
+        throw new Error('ไม่ได้รับไอเทมจากตู้Gacha');
       }
       setGachaOverlayResults(rollResults);
 
@@ -1841,7 +1841,7 @@ export function WardrobeShopModal({
     } catch (err: any) {
       setGachaStage(null);
       setGachaOverlayResults([]);
-      setShopMsg(err?.message || 'หมุนกาชาปองไม่สำเร็จ');
+      setShopMsg(err?.message || 'หมุนGachaไม่สำเร็จ');
     } finally {
       setGachaSpinning(false);
     }
@@ -1936,7 +1936,7 @@ export function WardrobeShopModal({
             <div className="rpg-ribbon-header px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl flex items-center gap-1 text-xs sm:text-sm font-extrabold">
               <span>💰</span>
               <span>{userPoints.toLocaleString()}</span>
-              <span className="hidden sm:inline">Gacha Pong</span>
+              <span className="hidden sm:inline">Gacha</span>
             </div>
             <button
               type="button"
@@ -2794,7 +2794,7 @@ export function WardrobeShopModal({
           {/* RIGHT PANEL: Carved Stone & Gold Props + Vertical Category Sidebar */}
           <div className={`${mobileSheetTab === 'shop' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto h-[48dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
             <StoneFrameCorners />
-            <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha Pong 💰)" />
+            <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha 💰)" />
 
             {/* Vertical Bookmark Sidebar on Wide Desktop (xl:, protruding left edge of right panel), horizontal scroll strip on tablet/mobile so it never overlaps Center Stage */}
             <div className="flex gap-1 overflow-x-auto pb-1 xl:pb-0 xl:overflow-visible xl:absolute xl:right-full xl:top-6 xl:flex-col xl:gap-1 xl:mr-[5px] z-10 shrink-0">
@@ -3182,7 +3182,7 @@ export function WardrobeShopModal({
 
             {rightCategory === 'gacha' ? (
               <div className="space-y-2 overflow-y-auto pr-1 flex-1">
-                {/* ตู้หมุนกาชาปอง */}
+                {/* ตู้หมุนGacha */}
                 <div className="rounded-2xl border-2 border-pink-400/80 bg-gradient-to-b from-indigo-950 via-purple-950 to-slate-950 p-3 text-center space-y-2 shadow-lg">
                   <div className="flex items-center justify-between text-[11px] font-extrabold">
                     <span className="text-pink-300">✨ ลิมิเต็ดเฉพาะตู้กาชา</span>
@@ -3239,13 +3239,13 @@ export function WardrobeShopModal({
                   </div>
                 </div>
 
-                {/* รายการของรางวัลลิมิเต็ดในตู้กาชาปองทั้งหมด (กดลองใส่พรีวิวได้ทุกชิ้น!) */}
+                {/* รายการของรางวัลลิมิเต็ดในตู้Gachaทั้งหมด (กดลองใส่พรีวิวได้ทุกชิ้น!) */}
                 <div className="text-[11px] font-extrabold text-amber-200 px-1">
                   🎁 รายการไอเทมในตู้ ({onlyOwnedFilter ? `มีแล้ว ${displayedCategoryItems.length} ชิ้น` : 'กด 👀 ลองใส่พรีวิวได้!'}):
                 </div>
                 {displayedCategoryItems.length === 0 ? (
                   <div className="rounded-xl bg-slate-950/75 border border-amber-500/40 p-4 text-center text-xs font-bold text-amber-100/75">
-                    ยังไม่มีไอเทมจากตู้กาชาปอง ลองหมุนด้านบนหรือเอาติ๊ก &quot;มีแล้ว&quot; ออกเพื่อดูของทั้งหมดครับ!
+                    ยังไม่มีไอเทมจากตู้Gacha ลองหมุนด้านบนหรือเอาติ๊ก &quot;มีแล้ว&quot; ออกเพื่อดูของทั้งหมดครับ!
                   </div>
                 ) : displayedCategoryItems.map((item) => {
                   const isOwned = ownedSet.has(item.id);
@@ -3961,7 +3961,7 @@ export function WardrobeShopModal({
                         ? 'LEGENDARY • แจ็กพอตระดับตำนาน!!'
                         : isEpic
                         ? 'EPIC • แรร์สุดอลังการ!'
-                        : 'RARE • ลิมิเต็ดกาชาปอง!'}
+                        : 'RARE • ลิมิเต็ดGacha!'}
                     </span>
                   </div>
                   {totalRefund > 0 && (

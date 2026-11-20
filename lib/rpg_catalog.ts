@@ -885,7 +885,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'aura_sakura', category: 'aura', name: 'กลีบซากุระปลิว', icon: '🌸', cost: 480, desc: 'กลีบดอกไม้ชมพูละมุนรอบตัว', colorHex: 0xF472B6, accentHex: 0xFBCFE8 },
   { id: 'aura_flame', category: 'aura', name: 'ออร่าเปลวไฟนักสู้', icon: '🔥', cost: 720, desc: 'ไฟลุกโชนรอบตัวเผาผลาญแคลอรี่! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF97316, accentHex: 0xEF4444 },
 
-  // Category 7: Pet + Pet Gear — 20 ชนิด! (ฟรี 2 + ร้านค้า 14 + กาชาปอง 4)
+  // Category 7: Pet + Pet Gear — 20 ชนิด! (ฟรี 2 + ร้านค้า 14 + Gacha 4)
   { id: 'pet_none', category: 'pet', name: 'ไม่มีสัตว์เลี้ยงเดินตาม', icon: '➖', cost: 0, desc: 'ลุยเดี่ยวไม่ง้อใคร', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'pet_fox_scarf', category: 'pet', name: 'จิ้งจอกจิบิอัศวิน', icon: '🦊', cost: 0, desc: 'จิ้งจอกส้มจิบิพันผ้าคลุมวิ่งเคียงข้าง (ฟรี)', colorHex: 0xEA580C, accentHex: 0x2563EB },
   { id: 'pet_bear_shield', category: 'pet', name: 'หมีจิบิผู้พิทักษ์', icon: '🐻‍❄️', cost: 0, desc: 'หมีน้อยจิบิคอยคุ้มกันเข้าเส้นชัย (ฟรี)', colorHex: 0xF1F5F9, accentHex: 0xFACC15 },
@@ -904,7 +904,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'pet_pig_chef', category: 'pet', name: 'หมูจิ๋วหมวกเชฟทอง', icon: '🐖', cost: 420, desc: 'ลูกหมูสีชมพูใส่หมวกเชฟคอยเชียร์', colorHex: 0xF472B6, accentHex: 0xFACC15 },
   { id: 'pet_bunny_wings', category: 'pet', name: 'กระต่ายน้อยติดปีกนางฟ้า', icon: '🐇', cost: 700, desc: 'กระต่ายขาวติดปีกนางฟ้าบินตามเจ้านาย! (ไอเทมหรูสะสม ~2 สัปดาห์)', colorHex: 0xF8FAFC, accentHex: 0xF472B6 },
 
-  // Category 8: Mounts — 30 ชนิด! (ฟรี 1 + ร้านค้า 20 + กาชาปอง 9)
+  // Category 8: Mounts — 30 ชนิด! (ฟรี 1 + ร้านค้า 20 + Gacha 9)
   { id: 'mount_none', category: 'mount', name: 'เดิน-วิ่งเองฟิตจัด', icon: '➖', cost: 0, desc: 'วิ่งสองขาเบิร์นแคลอรี่ด้วยตัวเอง', colorHex: 0x000000, accentHex: 0x000000 },
   { id: 'mount_cloud', category: 'mount', name: 'เมฆวิเศษสีขาวนุ่มฟู', icon: '☁️', cost: 0, desc: 'ก้อนเมฆปุยนุ่นลอยฟ้านุ่มนิ่มสไตล์ MapleSim (ฟรี)', colorHex: 0xFFFFFF, accentHex: 0xBAE6FD },
   // 🟢 Tier 1: สายกิน & ชิลริมหาด (180..280)
@@ -933,44 +933,44 @@ export const SHOP_ITEMS: ShopItem[] = [
   { id: 'mount_gold_pegasus', category: 'mount', name: 'เพกาซัสทองคำติดปีกนางฟ้า', icon: '🐎', cost: 1200, desc: 'อาชาสวรรค์สีทองอร่ามสยายปีกขนนกโบยบินเหนือทุกสาย!', colorHex: 0xFACC15, accentHex: 0xFFFFFF },
 
   // =========================================================================
-  // 🎰 GACHAPON EXCLUSIVE ITEMS (หาซื้อไม่ได้! สุ่มได้จากตู้กาชาปองเท่านั้น!)
+  // 🎰 GACHAPON EXCLUSIVE ITEMS (หาซื้อไม่ได้! สุ่มได้จากตู้Gachaเท่านั้น!)
   // =========================================================================
   // 🌟 RARE (55%)
-  { id: 'hat_gacha_sprout', category: 'hat', name: 'ต้นอ่อนนำโชคงอกบนหัว', icon: '🌱', cost: 0, desc: 'ก้านต้นอ่อนสีเขียวดุ๊กดิ๊กบนหัว (เฉพาะกาชาปอง)', colorHex: 0x22C55E, accentHex: 0x86EFAC, isGachaOnly: true, rarity: 'rare' },
-  { id: 'hat_gacha_chef', category: 'hat', name: 'หมวกเชฟมิชลินจอมโซ้ย', icon: '👨‍🍳', cost: 0, desc: 'หมวกเชฟทรงสูงสีขาวระดับภัตตาคาร (เฉพาะกาชาปอง)', colorHex: 0xFFFFFF, accentHex: 0xE2E8F0, isGachaOnly: true, rarity: 'rare' },
-  { id: 'face_gacha_star_shades', category: 'face', name: 'แว่นตาดาวซุปตาร์', icon: '🤩', cost: 0, desc: 'แว่นกันแดดกรอบดาวทองเลนส์ชมพู (เฉพาะกาชาปอง)', colorHex: 0xFACC15, accentHex: 0xEC4899, isGachaOnly: true, rarity: 'rare' },
-  { id: 'weapon_gacha_jumbo_drumstick', category: 'weapon', name: 'น่องไก่ทอดกรอบจัมโบ้', icon: '🍗', cost: 0, desc: 'น่องไก่ทอดสีทองชิ้นยักษ์ยั่วน้ำลาย (เฉพาะกาชาปอง)', colorHex: 0xD97706, accentHex: 0xFEF3C7, isGachaOnly: true, rarity: 'rare' },
+  { id: 'hat_gacha_sprout', category: 'hat', name: 'ต้นอ่อนนำโชคงอกบนหัว', icon: '🌱', cost: 0, desc: 'ก้านต้นอ่อนสีเขียวดุ๊กดิ๊กบนหัว (เฉพาะGacha)', colorHex: 0x22C55E, accentHex: 0x86EFAC, isGachaOnly: true, rarity: 'rare' },
+  { id: 'hat_gacha_chef', category: 'hat', name: 'หมวกเชฟมิชลินจอมโซ้ย', icon: '👨‍🍳', cost: 0, desc: 'หมวกเชฟทรงสูงสีขาวระดับภัตตาคาร (เฉพาะGacha)', colorHex: 0xFFFFFF, accentHex: 0xE2E8F0, isGachaOnly: true, rarity: 'rare' },
+  { id: 'face_gacha_star_shades', category: 'face', name: 'แว่นตาดาวซุปตาร์', icon: '🤩', cost: 0, desc: 'แว่นกันแดดกรอบดาวทองเลนส์ชมพู (เฉพาะGacha)', colorHex: 0xFACC15, accentHex: 0xEC4899, isGachaOnly: true, rarity: 'rare' },
+  { id: 'weapon_gacha_jumbo_drumstick', category: 'weapon', name: 'น่องไก่ทอดกรอบจัมโบ้', icon: '🍗', cost: 0, desc: 'น่องไก่ทอดสีทองชิ้นยักษ์ยั่วน้ำลาย (เฉพาะGacha)', colorHex: 0xD97706, accentHex: 0xFEF3C7, isGachaOnly: true, rarity: 'rare' },
   { id: 'hat_gacha_slime_crown', category: 'hat', name: 'สไลม์เขียวนุ่มนิ่มเกาะหัว', icon: '💧', cost: 0, desc: 'น้องสไลม์หยดน้ำสีเขียวมะนาวดุ๊กดิ๊กบนหัว (MapleSim SSB)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7, isGachaOnly: true, rarity: 'rare' },
   { id: 'weapon_gacha_bunny_plush', category: 'weapon', name: 'ตุ๊กตากระต่ายชมพูกอดอุ่น', icon: '🐰', cost: 0, desc: 'ตุ๊กตาผ้ากระต่ายหูยาวถืออุ้มสุดคิวท์ (MapleSim SSB)', colorHex: 0xF9A8D4, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'rare' },
-  { id: 'mount_gacha_banana_boat', category: 'mount', name: 'เรือกล้วยบานาน่าโบ๊ท', icon: '🍌', cost: 0, desc: 'เรือกล้วยสีเหลืองสดลอยโต้ลมทะเลสุดมันส์! (Rare กาชาปอง)', colorHex: 0xFACC15, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'rare' },
-  { id: 'mount_gacha_butter_toast', category: 'mount', name: 'ขนมปังปิ้งทาเนยลอยฟ้า', icon: '🍞', cost: 0, desc: 'ขนมปังปิ้งขอบกรอบโปะเนยสดก้อนโตลอยหอมฉุย! (Rare กาชาปอง)', colorHex: 0xD97706, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'rare' },
-  { id: 'mount_gacha_pepe_frog', category: 'mount', name: 'กบอ้วนเปเป้กระโดดดึ๋ง', icon: '🐸', cost: 0, desc: 'น้องกบอ้วนตาโตบนใบบัวกระโดดเด้งดึ๋งดั๋ง! (Rare กาชาปอง)', colorHex: 0x22C55E, accentHex: 0x86EFAC, isGachaOnly: true, rarity: 'rare' },
-  { id: 'pet_gacha_slime', category: 'pet', name: 'สไลม์คริสตัลเด้งดึ๋ง', icon: '🟢', cost: 0, desc: 'น้องสไลม์ใสสีเขียวมะนาวกระโดดดึ๋งตามข้างตัว! (Rare กาชาปอง)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_banana_boat', category: 'mount', name: 'เรือกล้วยบานาน่าโบ๊ท', icon: '🍌', cost: 0, desc: 'เรือกล้วยสีเหลืองสดลอยโต้ลมทะเลสุดมันส์! (Rare Gacha)', colorHex: 0xFACC15, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_butter_toast', category: 'mount', name: 'ขนมปังปิ้งทาเนยลอยฟ้า', icon: '🍞', cost: 0, desc: 'ขนมปังปิ้งขอบกรอบโปะเนยสดก้อนโตลอยหอมฉุย! (Rare Gacha)', colorHex: 0xD97706, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'rare' },
+  { id: 'mount_gacha_pepe_frog', category: 'mount', name: 'กบอ้วนเปเป้กระโดดดึ๋ง', icon: '🐸', cost: 0, desc: 'น้องกบอ้วนตาโตบนใบบัวกระโดดเด้งดึ๋งดั๋ง! (Rare Gacha)', colorHex: 0x22C55E, accentHex: 0x86EFAC, isGachaOnly: true, rarity: 'rare' },
+  { id: 'pet_gacha_slime', category: 'pet', name: 'สไลม์คริสตัลเด้งดึ๋ง', icon: '🟢', cost: 0, desc: 'น้องสไลม์ใสสีเขียวมะนาวกระโดดดึ๋งตามข้างตัว! (Rare Gacha)', colorHex: 0x4ADE80, accentHex: 0xDCFCE7, isGachaOnly: true, rarity: 'rare' },
 
   // 💜 EPIC (33%)
-  { id: 'pet_gacha_ghost', category: 'pet', name: 'ผีน้อยน่ารักลอยตาม', icon: '👻', cost: 0, desc: 'ผีน้อยผ้าคลุมขาวตาแป๋วลอยปลิวตามเจ้านาย! (Epic กาชาปอง)', colorHex: 0xF8FAFC, accentHex: 0xC084FC, isGachaOnly: true, rarity: 'epic' },
-  { id: 'pet_gacha_unicorn', category: 'pet', name: 'ลูกยูนิคอร์นพาสเทล', icon: '🦄', cost: 0, desc: 'ลูกม้ายูนิคอร์นเขาทองแผงคอชมพูวิ่งเคียงข้าง! (Epic กาชาปอง)', colorHex: 0xFDF4FF, accentHex: 0xF472B6, isGachaOnly: true, rarity: 'epic' },
-  { id: 'armor_gacha_shiba_pajama', category: 'armor', name: 'ชุดนอนพาสเทลกระดุมดาว', icon: '🔮', cost: 0, desc: 'ชุดนอนลาเวนเดอร์พาสเทลสุดนุ่มนิ่ม (เฉพาะกาชาปอง)', colorHex: 0xC084FC, accentHex: 0xFDE047, isGachaOnly: true, rarity: 'epic' },
-  { id: 'hat_gacha_angel_halo', category: 'hat', name: 'วงแหวนเทวดาเรืองแสง', icon: '😇', cost: 0, desc: 'วงแหวนทองคำเปล่งแสงลอยเหนือหัว (เฉพาะกาชาปอง)', colorHex: 0xFDE047, accentHex: 0xFEF9C3, isGachaOnly: true, rarity: 'epic' },
-  { id: 'wings_gacha_ufo_cape', category: 'wings', name: 'พวงลูกโป่งพาสเทลลอยฟ้า', icon: '🎈', cost: 0, desc: 'ลูกโป่ง 3 สีผูกหลังเด้งดึ๋งเวลาวิ่ง (เฉพาะกาชาปอง)', colorHex: 0xF472B6, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'epic' },
-  { id: 'weapon_gacha_golden_pan', category: 'weapon', name: 'กระทะทองคำทอดไข่ดาว', icon: '🍳', cost: 0, desc: 'กระทะทองคำเงาวับพร้อมไข่ดาวเยิ้มๆ (เฉพาะกาชาปอง)', colorHex: 0xFACC15, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'epic' },
+  { id: 'pet_gacha_ghost', category: 'pet', name: 'ผีน้อยน่ารักลอยตาม', icon: '👻', cost: 0, desc: 'ผีน้อยผ้าคลุมขาวตาแป๋วลอยปลิวตามเจ้านาย! (Epic Gacha)', colorHex: 0xF8FAFC, accentHex: 0xC084FC, isGachaOnly: true, rarity: 'epic' },
+  { id: 'pet_gacha_unicorn', category: 'pet', name: 'ลูกยูนิคอร์นพาสเทล', icon: '🦄', cost: 0, desc: 'ลูกม้ายูนิคอร์นเขาทองแผงคอชมพูวิ่งเคียงข้าง! (Epic Gacha)', colorHex: 0xFDF4FF, accentHex: 0xF472B6, isGachaOnly: true, rarity: 'epic' },
+  { id: 'armor_gacha_shiba_pajama', category: 'armor', name: 'ชุดนอนพาสเทลกระดุมดาว', icon: '🔮', cost: 0, desc: 'ชุดนอนลาเวนเดอร์พาสเทลสุดนุ่มนิ่ม (เฉพาะGacha)', colorHex: 0xC084FC, accentHex: 0xFDE047, isGachaOnly: true, rarity: 'epic' },
+  { id: 'hat_gacha_angel_halo', category: 'hat', name: 'วงแหวนเทวดาเรืองแสง', icon: '😇', cost: 0, desc: 'วงแหวนทองคำเปล่งแสงลอยเหนือหัว (เฉพาะGacha)', colorHex: 0xFDE047, accentHex: 0xFEF9C3, isGachaOnly: true, rarity: 'epic' },
+  { id: 'wings_gacha_ufo_cape', category: 'wings', name: 'พวงลูกโป่งพาสเทลลอยฟ้า', icon: '🎈', cost: 0, desc: 'ลูกโป่ง 3 สีผูกหลังเด้งดึ๋งเวลาวิ่ง (เฉพาะGacha)', colorHex: 0xF472B6, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'epic' },
+  { id: 'weapon_gacha_golden_pan', category: 'weapon', name: 'กระทะทองคำทอดไข่ดาว', icon: '🍳', cost: 0, desc: 'กระทะทองคำเงาวับพร้อมไข่ดาวเยิ้มๆ (เฉพาะGacha)', colorHex: 0xFACC15, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'epic' },
   { id: 'hat_gacha_pepe_hood', category: 'hat', name: 'หมวกเพนกวินราชาเปเป้', icon: '🐧', cost: 0, desc: 'หมวกหัวเพนกวินอ้วนกลมมีปากส้มและมงกุฎจิ๋ว (MapleSim SSB)', colorHex: 0x1D4ED8, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
   { id: 'weapon_gacha_cloud_umbrella', category: 'weapon', name: 'ร่มก้อนเมฆพาสเทลลอยฟ้า', icon: '☂️', cost: 0, desc: 'ร่มโดมสีฟ้าพาสเทลประดับปุยเมฆนุ่มฟู (MapleSim SSB)', colorHex: 0x38BDF8, accentHex: 0xFFFFFF, isGachaOnly: true, rarity: 'epic' },
   { id: 'mount_gacha_pink_bear', category: 'mount', name: 'หมีชมพูคอปเตอร์ไม้ไผ่', icon: '🐻', cost: 0, desc: 'สัตว์ขี่ตุ๊กตาหมีชมพูติดใบพัดไม้ไผ่หมุนติ้วพาบิน! (MapleSim SSB)', colorHex: 0xF472B6, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
-  { id: 'mount_gacha_cat_bus', category: 'mount', name: 'รถบัสน้องแมวเหมียว', icon: '🐱', cost: 0, desc: 'รถบัสแมวส้มลายเสือตาส่องไฟหน้ารีบวิ่งพาไปเส้นชัย! (Epic กาชาปอง)', colorHex: 0xF97316, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'epic' },
-  { id: 'mount_gacha_magic_carpet', category: 'mount', name: 'พรมวิเศษอะลาดินลอยลม', icon: '🧞', cost: 0, desc: 'พรมวิเศษสีม่วงขลิบทองพู่ 4 มุมลอยพริ้วกลางอากาศ! (Epic กาชาปอง)', colorHex: 0x7C3AED, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
+  { id: 'mount_gacha_cat_bus', category: 'mount', name: 'รถบัสน้องแมวเหมียว', icon: '🐱', cost: 0, desc: 'รถบัสแมวส้มลายเสือตาส่องไฟหน้ารีบวิ่งพาไปเส้นชัย! (Epic Gacha)', colorHex: 0xF97316, accentHex: 0xFEF08A, isGachaOnly: true, rarity: 'epic' },
+  { id: 'mount_gacha_magic_carpet', category: 'mount', name: 'พรมวิเศษอะลาดินลอยลม', icon: '🧞', cost: 0, desc: 'พรมวิเศษสีม่วงขลิบทองพู่ 4 มุมลอยพริ้วกลางอากาศ! (Epic Gacha)', colorHex: 0x7C3AED, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'epic' },
 
   // 🌈 LEGENDARY (12%)
-  { id: 'armor_gacha_dino', category: 'armor', name: 'ชุดมาสคอตไดโนเสาร์พุงกลม', icon: '🦖', cost: 0, desc: 'ชุดวันซี่ไดโนเสาร์เขียวมิ้นท์มีหนามหลัง! (Legendary กาชาปอง)', colorHex: 0x10B981, accentHex: 0xF97316, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'armor_gacha_dino', category: 'armor', name: 'ชุดมาสคอตไดโนเสาร์พุงกลม', icon: '🦖', cost: 0, desc: 'ชุดวันซี่ไดโนเสาร์เขียวมิ้นท์มีหนามหลัง! (Legendary Gacha)', colorHex: 0x10B981, accentHex: 0xF97316, isGachaOnly: true, rarity: 'legendary' },
   { id: 'armor_gacha_pink_bean', category: 'armor', name: 'ชุดวันซี่พิงก์บีนพุงเด้ง', icon: '💖', cost: 0, desc: 'ชุดมอนสเตอร์สีชมพูบับเบิ้ลกัมสุดแรร์ในตำนาน! (MapleSim SSB)', colorHex: 0xF472B6, accentHex: 0xFBCFE8, isGachaOnly: true, rarity: 'legendary' },
-  { id: 'wings_gacha_jetpack', category: 'wings', name: 'เจ็ทแพ็คเทอร์โบพ่นไฟ', icon: '🚀', cost: 0, desc: 'กระเป๋าจรวดคู่พ่นไอพ่นสีฟ้า-ส้มสุดล้ำ! (Legendary กาชาปอง)', colorHex: 0xE2E8F0, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'wings_gacha_jetpack', category: 'wings', name: 'เจ็ทแพ็คเทอร์โบพ่นไฟ', icon: '🚀', cost: 0, desc: 'กระเป๋าจรวดคู่พ่นไอพ่นสีฟ้า-ส้มสุดล้ำ! (Legendary Gacha)', colorHex: 0xE2E8F0, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_rainbow', category: 'aura', name: 'ออร่าสายรุ้งปริซึมเจ็ดสี', icon: '🌈', cost: 0, desc: 'วงแหวนสายรุ้ง 5 ชั้นและคริสตัลหลากสีหมุนรอบตัว! (Legendary)', colorHex: 0xEC4899, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_snack_orbit', category: 'aura', name: 'ออร่าโดนัท & ชานมโคจร', icon: '🍩', cost: 0, desc: 'โดนัทเคลือบชมพูและชานม 3D ลอยโคจรรอบพุง! (Legendary)', colorHex: 0xF472B6, accentHex: 0xFBBF24, isGachaOnly: true, rarity: 'legendary' },
   { id: 'aura_gacha_maple_leaves', category: 'aura', name: 'ออร่าพายุใบเมเปิ้ลสีทอง', icon: '🍁', cost: 0, desc: 'ใบเมเปิ้ลสีส้มทองปลิวหมุนวนรอบตัวสุดคลาสสิก! (MapleSim SSB)', colorHex: 0xF97316, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
   { id: 'mount_gacha_red_dragon', category: 'mount', name: 'มังกรแดงจิบิติดปีกเพลิง', icon: '🐉', cost: 0, desc: 'ขี่มังกรแดงเขาทองกระพือปีกบินโฉบเข้าเส้นชัย! (MapleSim Legendary)', colorHex: 0xEF4444, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
   { id: 'mount_gacha_ufo', category: 'mount', name: 'จานบิน UFO ลำแสงนีออน', icon: '🛸', cost: 0, desc: 'ขี่จานบินอวกาศไฟนีออนหมุนรอบลำพร้อมลำแสงแทรกเตอร์! (MapleSim Legendary)', colorHex: 0x94A3B8, accentHex: 0x38BDF8, isGachaOnly: true, rarity: 'legendary' },
-  { id: 'mount_gacha_phoenix', category: 'mount', name: 'นกฟีนิกซ์เพลิงอมตะ', icon: '🔥', cost: 0, desc: 'พญาฟีนิกซ์สีเพลิงสยายปีกไฟศักดิ์สิทธิ์ทะยานฟ้า! (Legendary กาชาปอง)', colorHex: 0xF97316, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
-  { id: 'pet_gacha_dragon', category: 'pet', name: 'ลูกมังกรทองพ่นไฟ', icon: '🐉', cost: 0, desc: 'ลูกมังกรทองคำติดปีกเพลิงบินวนตามเจ้านาย! (Legendary กาชาปอง)', colorHex: 0xF59E0B, accentHex: 0xEF4444, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'mount_gacha_phoenix', category: 'mount', name: 'นกฟีนิกซ์เพลิงอมตะ', icon: '🔥', cost: 0, desc: 'พญาฟีนิกซ์สีเพลิงสยายปีกไฟศักดิ์สิทธิ์ทะยานฟ้า! (Legendary Gacha)', colorHex: 0xF97316, accentHex: 0xFACC15, isGachaOnly: true, rarity: 'legendary' },
+  { id: 'pet_gacha_dragon', category: 'pet', name: 'ลูกมังกรทองพ่นไฟ', icon: '🐉', cost: 0, desc: 'ลูกมังกรทองคำติดปีกเพลิงบินวนตามเจ้านาย! (Legendary Gacha)', colorHex: 0xF59E0B, accentHex: 0xEF4444, isGachaOnly: true, rarity: 'legendary' },
 
   // Category 9: Marker (ป้ายจองลู่ 3D — 10 ชนิด! อัปเกรดได้ตั้งแต่ฟรีถึง 1,200 🪙!)
   { id: 'marker_wood', category: 'marker', name: 'ป้ายไม้ตอกตะปูบ้านๆ', icon: '📍', cost: 0, desc: 'แผ่นไม้ปักดินเอียงนิดๆ จองคิวบนลู่ตอนแวะไปเดินเล่น (ฟรี)', colorHex: 0x92400E, accentHex: 0xFDE68A },
