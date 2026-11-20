@@ -453,30 +453,30 @@ export function ShabuCoopModal({
       localInputRef.current.mz = (k.down ? 1 : 0) - (k.up ? 1 : 0);
     };
     const onKey = (e: KeyboardEvent, down: boolean) => {
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', ' '].includes(e.key)) {
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) {
         e.preventDefault();
       }
-      const key = e.key.toLowerCase();
-      if (key === 'a' || e.key === 'ArrowLeft') {
+      const c = e.code;
+      if (c === 'KeyA' || c === 'ArrowLeft') {
         keyStateRef.current.left = down;
         syncAxis();
       }
-      if (key === 'd' || e.key === 'ArrowRight') {
+      if (c === 'KeyD' || c === 'ArrowRight') {
         keyStateRef.current.right = down;
         syncAxis();
       }
-      if (key === 'w' || e.key === 'ArrowUp') {
+      if (c === 'KeyW' || c === 'ArrowUp') {
         keyStateRef.current.up = down;
         syncAxis();
       }
-      if (key === 's' || e.key === 'ArrowDown') {
+      if (c === 'KeyS' || c === 'ArrowDown') {
         keyStateRef.current.down = down;
         syncAxis();
       }
-      if (e.key === ' ' || key === 'e' || e.key === 'Enter') {
+      if (c === 'Space' || c === 'KeyE' || c === 'Enter') {
         localInputRef.current.interact = down;
       }
-      if (e.key === 'Shift' || key === 'j') {
+      if (c === 'ShiftLeft' || c === 'ShiftRight' || c === 'KeyJ') {
         localInputRef.current.dash = down;
       }
     };
@@ -579,96 +579,294 @@ export function ShabuCoopModal({
     rug.receiveShadow = true;
     scene.add(rug);
 
-    // 4 Buffet Counters
+    // 4 Sculpted 3D Buffet Counters with Appetizing 3D Food Platters!
     SHABU_STATIONS.forEach((st) => {
       const grp = new THREE.Group();
+
+      // Warm wood & stone buffet counter base
       const counter = new THREE.Mesh(
-        new THREE.BoxGeometry(2.5, 1.05, 1.55),
-        new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 0.7 })
+        new THREE.BoxGeometry(2.6, 1.02, 1.6),
+        new THREE.MeshStandardMaterial({ color: 0x3b2618, roughness: 0.72 })
       );
-      counter.position.y = 0.525;
+      counter.position.y = 0.51;
       counter.castShadow = true;
       counter.receiveShadow = true;
       grp.add(counter);
 
+      // Marble / colored accent counter top
       const topTrim = new THREE.Mesh(
-        new THREE.BoxGeometry(2.62, 0.14, 1.66),
-        new THREE.MeshStandardMaterial({ color: st.colorHex, roughness: 0.4 })
+        new THREE.BoxGeometry(2.74, 0.14, 1.74),
+        new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.35 })
       );
-      topTrim.position.y = 1.08;
+      topTrim.position.y = 1.07;
       grp.add(topTrim);
 
-      const tray = new THREE.Mesh(
-        new THREE.BoxGeometry(1.75, 0.12, 0.95),
-        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.25, metalness: 0.4 })
+      // Glowing color strip around counter front
+      const neonStrip = new THREE.Mesh(
+        new THREE.BoxGeometry(2.64, 0.1, 1.64),
+        new THREE.MeshBasicMaterial({ color: st.colorHex })
       );
-      tray.position.y = 1.18;
-      grp.add(tray);
+      neonStrip.position.y = 0.96;
+      grp.add(neonStrip);
+
+      // 3D Sculpted Food Platter per station
+      if (st.id === 'meat') {
+        // Wooden board + stacked marbled sliced beef & pork belly rolls
+        const board = new THREE.Mesh(
+          new THREE.BoxGeometry(2.1, 0.08, 1.15),
+          new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.65 })
+        );
+        board.position.y = 1.18;
+        grp.add(board);
+
+        const meatRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.45 });
+        const fatWhiteMat = new THREE.MeshStandardMaterial({ color: 0xfef2f2, roughness: 0.4 });
+        for (let r = 0; r < 6; r++) {
+          const rx = -0.72 + (r % 3) * 0.72;
+          const rz = r < 3 ? -0.26 : 0.26;
+          const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.48, 12), meatRedMat);
+          roll.rotation.z = Math.PI / 2;
+          roll.position.set(rx, 1.35, rz);
+          roll.castShadow = true;
+          const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.166, 0.166, 0.12, 12), fatWhiteMat);
+          stripe.rotation.z = Math.PI / 2;
+          stripe.position.set(rx, 1.35, rz);
+          grp.add(roll, stripe);
+        }
+      } else if (st.id === 'seafood') {
+        // Ice tray + bright orange shrimp & white squid rings
+        const iceBed = new THREE.Mesh(
+          new THREE.BoxGeometry(2.15, 0.14, 1.2),
+          new THREE.MeshStandardMaterial({ color: 0xbae6fd, roughness: 0.15, metalness: 0.1 })
+        );
+        iceBed.position.y = 1.2;
+        grp.add(iceBed);
+
+        const shrimpMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.35 });
+        const squidMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 });
+        for (let i = 0; i < 4; i++) {
+          const shrimp = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.075, 8, 14, Math.PI * 1.35), shrimpMat);
+          shrimp.rotation.x = Math.PI / 2;
+          shrimp.position.set(-0.68 + i * 0.45, 1.33, -0.22);
+          shrimp.castShadow = true;
+          grp.add(shrimp);
+        }
+        for (let i = 0; i < 3; i++) {
+          const squid = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.06, 8, 14), squidMat);
+          squid.rotation.x = Math.PI / 2;
+          squid.position.set(-0.52 + i * 0.52, 1.32, 0.28);
+          grp.add(squid);
+        }
+      } else if (st.id === 'veggie') {
+        // Bamboo basket + fresh green cabbage leaves & mushrooms
+        const basket = new THREE.Mesh(
+          new THREE.BoxGeometry(2.1, 0.16, 1.15),
+          new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 })
+        );
+        basket.position.y = 1.21;
+        grp.add(basket);
+
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.55 });
+        const stemMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, roughness: 0.6 });
+        const capMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.65 });
+        for (let i = 0; i < 4; i++) {
+          const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), leafMat);
+          leaf.scale.set(1.25, 0.55, 0.9);
+          leaf.position.set(-0.68 + i * 0.45, 1.36, -0.2);
+          grp.add(leaf);
+        }
+        for (let i = 0; i < 3; i++) {
+          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.22, 8), stemMat);
+          stem.position.set(-0.5 + i * 0.5, 1.34, 0.26);
+          const cap = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+          cap.position.set(-0.5 + i * 0.5, 1.44, 0.26);
+          grp.add(stem, cap);
+        }
+      } else {
+        // Ceramic Suki Sauce Pots + Ladles + Chili/Garlic Bowls
+        const tray = new THREE.Mesh(
+          new THREE.BoxGeometry(2.1, 0.08, 1.15),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 })
+        );
+        tray.position.y = 1.18;
+        grp.add(tray);
+
+        const potColors = [0xdc2626, 0xea580c, 0x16a34a];
+        potColors.forEach((col, i) => {
+          const jar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.24, 0.2, 0.34, 14),
+            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+          );
+          jar.position.set(-0.62 + i * 0.62, 1.38, 0);
+          const sauceTop = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.2, 0.2, 0.04, 14),
+            new THREE.MeshBasicMaterial({ color: col })
+          );
+          sauceTop.position.set(-0.62 + i * 0.62, 1.54, 0);
+          const ladle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.025, 0.025, 0.42, 6),
+            new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.7, roughness: 0.2 })
+          );
+          ladle.position.set(-0.54 + i * 0.62, 1.66, 0.05);
+          ladle.rotation.z = -0.35;
+          grp.add(jar, sauceTop, ladle);
+        });
+      }
 
       const labelSp = makeLabelSprite(`${st.emoji} ${st.label}`, '#0f172a', `#${st.colorHex.toString(16).padStart(6, '0')}`);
-      labelSp.position.set(0, 2.15, 0);
+      labelSp.position.set(0, 2.32, 0);
       grp.add(labelSp);
 
       grp.position.set(st.x, 0, st.z);
       scene.add(grp);
     });
 
-    // Center Shabu Table + Induction Stove + Flippable 2-Broth Hotpot!
-    const tableMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(3.1, 0.88, 2.05),
-      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.65 })
-    );
-    tableMesh.position.set(SHABU_POT_POS.x, 0.44, SHABU_POT_POS.z);
-    tableMesh.castShadow = true;
-    tableMesh.receiveShadow = true;
-    scene.add(tableMesh);
+    // Warm Japanese/Thai Shabu Hanging Lanterns along back wall
+    [-3.2, -1.6, 1.6, 3.2].forEach((lx) => {
+      const lantern = new THREE.Mesh(
+        new THREE.SphereGeometry(0.32, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0xf97316 })
+      );
+      lantern.scale.set(0.9, 1.25, 0.9);
+      lantern.position.set(lx, 3.4, -4.5);
+      const capTop = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.16, 0.08, 10),
+        new THREE.MeshStandardMaterial({ color: 0x1c1917 })
+      );
+      capTop.position.set(lx, 3.8, -4.5);
+      scene.add(lantern, capTop);
+    });
 
+    // Center Shabu Table + Induction Stove + Dipping Bowls + Chopsticks + Upgraded 2-Broth Hotpot!
+    const tableGroup = new THREE.Group();
+    const tableTop = new THREE.Mesh(
+      new THREE.BoxGeometry(3.25, 0.16, 2.15),
+      new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.5 })
+    );
+    tableTop.position.y = 0.84;
+    tableTop.castShadow = true;
+    tableTop.receiveShadow = true;
+    const tableBase = new THREE.Mesh(
+      new THREE.BoxGeometry(2.85, 0.78, 1.75),
+      new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.8 })
+    );
+    tableBase.position.y = 0.39;
+    tableBase.castShadow = true;
+    tableGroup.add(tableTop, tableBase);
+
+    // Induction Stove Plate with glowing heat ring
+    const stovePlate = new THREE.Mesh(
+      new THREE.BoxGeometry(1.75, 0.05, 1.75),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.4 })
+    );
+    stovePlate.position.y = 0.93;
+    const heatGlowRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.78, 0.86, 28),
+      new THREE.MeshBasicMaterial({ color: 0xf97316, side: THREE.DoubleSide })
+    );
+    heatGlowRing.rotation.x = -Math.PI / 2;
+    heatGlowRing.position.y = 0.96;
+    tableGroup.add(stovePlate, heatGlowRing);
+
+    // Guard's personal sauce bowl & chopsticks right in front of him on the table!
+    const guardBowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.14, 0.14, 14),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+    );
+    guardBowl.position.set(-0.62, 0.99, -0.78);
+    const guardSauce = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.16, 0.03, 14),
+      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+    );
+    guardSauce.position.set(-0.62, 1.05, -0.78);
+    const chopstickMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.5 });
+    const stick1 = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.012, 0.65, 6), chopstickMat);
+    stick1.rotation.z = Math.PI / 2;
+    stick1.position.set(0.55, 0.95, -0.78);
+    const stick2 = stick1.clone();
+    stick2.position.z = -0.71;
+    tableGroup.add(guardBowl, guardSauce, stick1, stick2);
+
+    tableGroup.position.set(SHABU_POT_POS.x, 0, SHABU_POT_POS.z);
+    scene.add(tableGroup);
+
+    // Gorgeous Copper-Trimmed 2-Broth Shabu Hotpot (flippable!)
     const potGroup = new THREE.Group();
     const potOuter = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.76, 0.68, 0.36, 24),
-      new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.25, metalness: 0.65 })
+      new THREE.CylinderGeometry(0.84, 0.72, 0.42, 28),
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.3, metalness: 0.7 })
     );
     potOuter.castShadow = true;
-    potGroup.add(potOuter);
+    const potRim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.84, 0.055, 10, 28),
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.25, metalness: 0.75 })
+    );
+    potRim.rotation.x = Math.PI / 2;
+    potRim.position.y = 0.2;
+    const handleL = new THREE.Mesh(
+      new THREE.TorusGeometry(0.15, 0.038, 8, 12, Math.PI),
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.7, roughness: 0.3 })
+    );
+    handleL.position.set(-0.88, 0.12, 0);
+    handleL.rotation.z = Math.PI / 2;
+    const handleR = handleL.clone();
+    handleR.position.x = 0.88;
+    handleR.rotation.z = -Math.PI / 2;
+    potGroup.add(potOuter, potRim, handleL, handleR);
 
-    // Split 2-broth soup (Clear Golden + Spicy Red Mala!)
+    // Split 2-broth soup (Golden Dashi + Spicy Red Mala with garnish!)
     const clearSoup = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.7, 0.04, 20, 1, false, 0, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0xfde68a })
+      new THREE.CylinderGeometry(0.78, 0.78, 0.04, 24, 1, false, 0, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
     );
     clearSoup.position.y = 0.16;
     const malaSoup = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.7, 0.04, 20, 1, false, Math.PI, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+      new THREE.CylinderGeometry(0.78, 0.78, 0.04, 24, 1, false, Math.PI, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0xb91c1c })
     );
     malaSoup.position.y = 0.16;
     const divider = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 0.12, 1.4),
-      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.7, roughness: 0.2 })
+      new THREE.BoxGeometry(0.06, 0.16, 1.56),
+      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.75, roughness: 0.2 })
     );
     divider.position.y = 0.16;
     potGroup.add(clearSoup, malaSoup, divider);
 
-    // Floating Steam Orbs above Pot
+    // Garnish & simmering food pieces inside the pot
+    const potBits: THREE.Mesh[] = [];
+    const bitColors = [0xdc2626, 0x22c55e, 0xf97316, 0xfef9c3, 0xef4444, 0x4ade80];
+    bitColors.forEach((col, bi) => {
+      const bit = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 8, 8),
+        new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 })
+      );
+      bit.scale.set(1.2, 0.45, 0.9);
+      const ang = (bi / bitColors.length) * Math.PI * 2;
+      bit.position.set(Math.cos(ang) * 0.38, 0.19, Math.sin(ang) * 0.38);
+      potGroup.add(bit);
+      potBits.push(bit);
+    });
+
+    // Bubbling Steam Orbs above Pot
     const steamOrbs: THREE.Mesh[] = [];
-    for (let si = 0; si < 5; si++) {
+    for (let si = 0; si < 6; si++) {
       const orb = new THREE.Mesh(
         new THREE.SphereGeometry(0.14, 10, 8),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
       );
-      orb.position.set((si - 2) * 0.22, 0.4 + si * 0.22, (si % 2 - 0.5) * 0.25);
+      orb.position.set((si - 2.5) * 0.2, 0.4 + si * 0.2, (si % 2 - 0.5) * 0.28);
       potGroup.add(orb);
       steamOrbs.push(orb);
     }
 
-    potGroup.position.set(SHABU_POT_POS.x, 0.95, SHABU_POT_POS.z);
+    potGroup.position.set(SHABU_POT_POS.x, 1.05, SHABU_POT_POS.z);
     scene.add(potGroup);
 
-    // Guard Boss sitting at head of table!
+    // Guard Boss sitting RIGHT IN FRONT OF THE POT facing directly toward the hotpot & camera (-Math.PI / 2)!
     const guardParts = buildCustomGuardCharacter();
     guardParts.rootGroup.position.set(SHABU_GUARD_POS.x, 0, SHABU_GUARD_POS.z);
-    guardParts.rootGroup.rotation.y = Math.PI / 2; // face +Z (toward the hotpot!)
-    guardParts.rootGroup.scale.setScalar(0.95);
+    guardParts.rootGroup.rotation.y = -Math.PI / 2; // faces +Z (directly facing the hotpot!)
+    guardParts.rootGroup.scale.setScalar(1.0);
     scene.add(guardParts.rootGroup);
 
     // Build Real 3D Players with Equipped Props + Holding Badges
@@ -885,9 +1083,12 @@ export function ShabuCoopModal({
         void claimShabuReward(st.score);
       }
 
-      // Animate Pot & Steam
-      potGroup.position.set(SHABU_POT_POS.x, st.potY, SHABU_POT_POS.z);
+      // Animate Pot, Simmering Ingredients & Steam
+      potGroup.position.set(SHABU_POT_POS.x, st.potY + 0.1, SHABU_POT_POS.z);
       potGroup.rotation.set(st.potRotX, 0, st.potRotZ);
+      potBits.forEach((bit, bi) => {
+        bit.position.y = 0.19 + Math.sin(elapsed * 5.2 + bi * 1.3) * 0.03;
+      });
       steamOrbs.forEach((orb, idx) => {
         orb.visible = st.phase === 'playing';
         orb.position.y = 0.35 + ((elapsed * 0.9 + idx * 0.37) % 1.25);
@@ -895,12 +1096,23 @@ export function ShabuCoopModal({
         orb.scale.setScalar(s);
       });
 
-      // Animate Guard Boss (chill -> nervous -> angry pot flip!)
+      // Animate Guard Boss sitting at hotpot: eating chopsticks motion -> angry shaking -> flipping pot!
       const isAngry = st.hunger < 32 || st.phase !== 'playing';
-      const shakeAmt = isAngry ? Math.sin(elapsed * 32) * 0.1 : 0;
+      const shakeAmt = isAngry ? Math.sin(elapsed * 32) * 0.09 : 0;
       guardParts.rootGroup.position.set(SHABU_GUARD_POS.x + shakeAmt, 0, SHABU_GUARD_POS.z);
-      guardParts.armL.rotation.z = st.phase !== 'playing' ? 2.6 : isAngry ? 1.6 + Math.sin(elapsed * 18) * 0.4 : Math.sin(elapsed * 4) * 0.25;
-      guardParts.armR.rotation.z = st.phase !== 'playing' ? -2.6 : isAngry ? -1.6 - Math.sin(elapsed * 18) * 0.4 : -Math.sin(elapsed * 4) * 0.25;
+      guardParts.bounceGroup.position.y = isAngry ? Math.abs(Math.sin(elapsed * 16)) * 0.08 : Math.sin(elapsed * 5.5) * 0.03;
+      if (st.phase !== 'playing') {
+        guardParts.armL.rotation.z = 2.6;
+        guardParts.armR.rotation.z = -2.6;
+      } else if (isAngry) {
+        guardParts.armL.rotation.z = 1.6 + Math.sin(elapsed * 20) * 0.45;
+        guardParts.armR.rotation.z = -1.6 - Math.sin(elapsed * 20) * 0.45;
+      } else {
+        // Cute eating / scooping shabu motion!
+        const eatWave = Math.sin(elapsed * (5.5 * st.speedMult));
+        guardParts.armL.rotation.z = 0.85 + eatWave * 0.35;
+        guardParts.armR.rotation.z = -0.85 - eatWave * 0.35;
+      }
 
       // Animate 3D Players
       for (const vis of visuals) {

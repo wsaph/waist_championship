@@ -25,8 +25,8 @@ export const SHABU_STATION_MAP: Record<ShabuIngredient, ShabuIngredientMeta> = {
   sauce: SHABU_STATIONS[3],
 };
 
-export const SHABU_POT_POS = { x: 0, z: 0.55 };
-export const SHABU_GUARD_POS = { x: 0, z: -2.35 };
+export const SHABU_POT_POS = { x: 0, z: 0.45 };
+export const SHABU_GUARD_POS = { x: 0, z: -1.15 };
 export const SHABU_BOUNDS = { halfW: 6.4, halfD: 4.3 };
 
 export interface ShabuInputState {
@@ -83,8 +83,11 @@ export interface ShabuStepEvents {
 
 const ALL_INGREDIENTS: ShabuIngredient[] = ['meat', 'seafood', 'veggie', 'sauce'];
 
-function generateOrder(dishesServed: number): ShabuOrderItem[] {
-  const count = dishesServed < 2 ? 2 : 3;
+function generateOrder(dishesServed: number, playerCount: number): ShabuOrderItem[] {
+  // จำนวนอาหารที่พี่ยามสั่งเพิ่มตามจำนวนคนเล่น (1คน: 2-3, 2คน: 3-4, 3คน: 4-5, 4คน: 5-6 ชิ้น)
+  const baseForPlayers = Math.max(2, Math.min(5, playerCount + 1));
+  const waveExtra = dishesServed >= 2 ? 1 : 0;
+  const count = Math.min(6, baseForPlayers + waveExtra);
   const items: ShabuOrderItem[] = [];
   for (let i = 0; i < count; i++) {
     const pick = ALL_INGREDIENTS[Math.floor(Math.random() * ALL_INGREDIENTS.length)];
@@ -116,7 +119,7 @@ export function createInitialShabuState(activeSlots: ShabuSlotId[]): ShabuGameSt
 
   return {
     players,
-    order: generateOrder(0),
+    order: generateOrder(0, players.length),
     hunger: 100,
     speedMult: 1.0,
     score: 0,
@@ -257,10 +260,10 @@ export function stepShabuGame(
             state.dishesServed++;
             state.combo++;
             if (state.combo > state.maxCombo) state.maxCombo = state.combo;
-            const gained = 100 + Math.min(150, (state.combo - 1) * 25);
+            const gained = 50 * state.order.length + Math.min(180, (state.combo - 1) * 25);
             state.score += gained;
-            state.hunger = Math.min(100, state.hunger + 24);
-            state.order = generateOrder(state.dishesServed);
+            state.hunger = Math.min(100, state.hunger + 26);
+            state.order = generateOrder(state.dishesServed, state.players.length);
             state.feedbackText = `😋 พี่ยามฟิน! +${gained} แต้ม (คอมโบ x${state.combo})`;
             state.feedbackTimer = 1.3;
             events.serve = true;

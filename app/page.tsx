@@ -85,6 +85,10 @@ const ShabuCoopModal = dynamic(
   () => import('@/components/ShabuCoopModal').then((m) => m.ShabuCoopModal),
   { ssr: false }
 );
+const CasinoCardModal = dynamic(
+  () => import('@/components/CasinoCardModal').then((m) => m.CasinoCardModal),
+  { ssr: false }
+);
 
 interface Player {
   id: number;
@@ -478,6 +482,23 @@ export default function Arena3DPage() {
     updatedAt: number;
   } | null>(null);
   const isShabuOpen = Boolean(shabuSession);
+  const [cardSession, setCardSession] = useState<{
+    roomCode: string;
+    isHost: boolean;
+    targetName?: string;
+  } | null>(null);
+  const [liveCardLobby, setLiveCardLobby] = useState<{
+    roomCode: string;
+    gameType: string;
+    hostUserId: number;
+    hostName: string;
+    hostEmoji: string;
+    targetName?: string;
+    count: number;
+    max: number;
+    updatedAt: number;
+  } | null>(null);
+  const isCardOpen = Boolean(cardSession);
   const realtimeSubscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -542,9 +563,9 @@ export default function Arena3DPage() {
 
   useEffect(() => {
     pauseArenaRenderRef.current = Boolean(
-      isJoinOpen || isVolleyballOpen || isShabuOpen || (authChecked && currentUserId === null)
+      isJoinOpen || isVolleyballOpen || isShabuOpen || isCardOpen || (authChecked && currentUserId === null)
     );
-  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, authChecked, currentUserId]);
+  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, authChecked, currentUserId]);
 
   useEffect(() => {
     playersRef.current = players;
@@ -1173,6 +1194,24 @@ export default function Arena3DPage() {
             prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
           );
         }
+      } else if (event === 'card_lobby') {
+        if (payload.status === 'waiting' && payload.roomCode) {
+          setLiveCardLobby({
+            roomCode: String(payload.roomCode),
+            gameType: String(payload.gameType || 'pokdeng'),
+            hostUserId: Number(payload.hostUserId || 0),
+            hostName: String(payload.hostName || 'เพื่อน'),
+            hostEmoji: String(payload.hostEmoji || '🃏'),
+            targetName: payload.targetName ? String(payload.targetName) : undefined,
+            count: Number(payload.count || 1),
+            max: Number(payload.max || 5),
+            updatedAt: Date.now(),
+          });
+        } else {
+          setLiveCardLobby((prev) =>
+            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
+          );
+        }
       } else if (event === 'interaction') {
         // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
         const inter = payload;
@@ -1306,6 +1345,9 @@ export default function Arena3DPage() {
         )
         .on('broadcast', { event: 'shabu_lobby' }, ({ payload }) =>
           handleIncomingRealtimeEvent('shabu_lobby', payload)
+        )
+        .on('broadcast', { event: 'card_lobby' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('card_lobby', payload)
         )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
@@ -6509,6 +6551,24 @@ export default function Arena3DPage() {
                           }
                           return;
                         }
+                        if (act.animType === 'play_cards') {
+                          setIsPairMenuOpen(false);
+                          if (liveCardLobby && liveCardLobby.count < liveCardLobby.max) {
+                            setCardSession({
+                              roomCode: liveCardLobby.roomCode,
+                              isHost: false,
+                              targetName: liveCardLobby.hostName,
+                            });
+                          } else {
+                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                            setCardSession({
+                              roomCode: newCode,
+                              isHost: true,
+                              targetName: nearbySpectator.name,
+                            });
+                          }
+                          return;
+                        }
                         if (act.animType === 'picnic_shabu') {
                           setIsPairMenuOpen(false);
                           if (liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max) {
@@ -6563,6 +6623,8 @@ export default function Arena3DPage() {
                           ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
                           : act.animType === 'picnic_shabu'
                           ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
+                          : act.animType === 'play_cards'
+                          ? 'bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-black hover:brightness-105 shadow'
                           : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
                       }`}
                     >
@@ -6570,6 +6632,8 @@ export default function Arena3DPage() {
                         ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
                         : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
                         ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
+                        : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
+                        ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
                         : act.label}
                     </button>
                   ))}
@@ -6966,6 +7030,60 @@ export default function Arena3DPage() {
               `ตั้งวงชาบูสำเร็จ! (+${earned} 💰)`,
               `รับโบนัสจากแต้มตี้ชาบูแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
             );
+            void fetchArenaData({ force: true });
+          }}
+        />
+      )}
+
+      {/* Live Floating Invite Banner when a friend opens a Guard Casino Card Table */}
+      {liveCardLobby && !cardSession && !shabuSession && !vbSession && !isJoinOpen && (
+        <div
+          className={`fixed ${liveVbLobby || liveShabuLobby ? 'top-28 md:top-32' : 'top-16 md:top-20'} left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]`}
+        >
+          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-emerald-300">
+            <span className="text-base animate-bounce">🃏</span>
+            <span className="text-xs font-extrabold text-amber-100 truncate">
+              {liveCardLobby.hostEmoji} {liveCardLobby.hostName} เปิดวงไพ่คาสิโนพี่ยาม ({liveCardLobby.count}/{liveCardLobby.max})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setCardSession({
+                  roomCode: liveCardLobby.roomCode,
+                  isHost: false,
+                  targetName: liveCardLobby.hostName,
+                });
+              }}
+              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
+            >
+              เข้าวงเลย!
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveCardLobby(null)}
+              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
+              title="ซ่อนแจ้งเตือน"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cardSession && (
+        <CasinoCardModal
+          isOpen={Boolean(cardSession)}
+          onClose={() => setCardSession(null)}
+          players={players}
+          currentUserId={currentUserId}
+          currentUserPoints={players.find((pl) => pl.id === currentUserId)?.points ?? 0}
+          initialRoomCode={cardSession.roomCode}
+          initialIsHost={cardSession.isHost}
+          invitedTargetName={cardSession.targetName}
+          onLobbyBroadcast={(info) => {
+            broadcastRealtimeEvent('card_lobby', { ...info });
+          }}
+          onPointsUpdated={() => {
             void fetchArenaData({ force: true });
           }}
         />

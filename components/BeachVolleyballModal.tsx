@@ -478,14 +478,14 @@ export function BeachVolleyballModal({
   useEffect(() => {
     if (!isOpen || screen !== 'playing') return;
     const onKey = (e: KeyboardEvent, down: boolean) => {
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space', ' '].includes(e.key)) {
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space'].includes(e.code)) {
         e.preventDefault();
       }
-      const k = e.key.toLowerCase();
-      if (k === 'a' || e.key === 'ArrowLeft') localInputRef.current.left = down;
-      if (k === 'd' || e.key === 'ArrowRight') localInputRef.current.right = down;
-      if (k === 'w' || e.key === 'ArrowUp' || e.key === ' ') localInputRef.current.jump = down;
-      if (e.key === 'Shift' || e.key === 'Enter' || k === 'j' || k === 'k') {
+      const c = e.code;
+      if (c === 'KeyA' || c === 'ArrowLeft') localInputRef.current.left = down;
+      if (c === 'KeyD' || c === 'ArrowRight') localInputRef.current.right = down;
+      if (c === 'KeyW' || c === 'ArrowUp' || c === 'Space') localInputRef.current.jump = down;
+      if (c === 'ShiftLeft' || c === 'ShiftRight' || c === 'Enter' || c === 'KeyJ' || c === 'KeyK') {
         localInputRef.current.action = down;
       }
     };
