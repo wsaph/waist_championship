@@ -7077,6 +7077,7 @@ export default function Arena3DPage() {
           players={players}
           currentUserId={currentUserId}
           currentUserPoints={players.find((pl) => pl.id === currentUserId)?.points ?? 0}
+          qualityMode={qualityMode}
           initialRoomCode={cardSession.roomCode}
           initialIsHost={cardSession.isHost}
           invitedTargetName={cardSession.targetName}

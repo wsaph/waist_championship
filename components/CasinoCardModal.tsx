@@ -1,8 +1,19 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
 import confetti from 'canvas-confetti';
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  buildCharacterMesh,
+  buildCustomGuardCharacter,
+  type CharacterMeshParts,
+} from '@/lib/character_3d';
+import {
+  getQualityConfig,
+  disposeObject3D,
+  type QualityMode,
+} from '@/lib/device_perf';
 import type { VolleyballPlayerSummary } from '@/components/BeachVolleyballModal';
 import {
   createShuffledDeck,
@@ -42,6 +53,7 @@ interface CasinoCardModalProps {
   players: VolleyballPlayerSummary[];
   currentUserId: number | null;
   currentUserPoints: number;
+  qualityMode?: QualityMode;
   initialRoomCode: string;
   initialIsHost: boolean;
   invitedTargetName?: string;
@@ -287,6 +299,7 @@ export function CasinoCardModal({
   players,
   currentUserId,
   currentUserPoints,
+  qualityMode = 'auto',
   initialRoomCode,
   initialIsHost,
   invitedTargetName,
@@ -310,6 +323,12 @@ export function CasinoCardModal({
   }>({ guardBalance: 0, guardTotalWon: 0, guardRoundsPlayed: 0 });
   const [guardMood, setGuardMood] = useState<GuardMoodMeta>(() => resolveGuardMood(0));
   const [settling, setSettling] = useState<boolean>(false);
+
+  const casinoCanvasRef = useRef<HTMLDivElement | null>(null);
+  const guardMoodRef = useRef<GuardMoodMeta>(guardMood);
+  guardMoodRef.current = guardMood;
+  const guardBankRef = useRef(guardBank);
+  guardBankRef.current = guardBank;
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabaseRef = useRef<SupabaseClient | null>(null);
@@ -1292,6 +1311,369 @@ export function CasinoCardModal({
     }
   };
 
+  // ============================================================
+  // 3D CASINO TABLE + LIVE EXPRESSIVE 3D GUARD DEALER SCENE
+  // ============================================================
+  useEffect(() => {
+    if (!isOpen || screen !== 'table' || !casinoCanvasRef.current) return;
+    const container = casinoCanvasRef.current;
+    container.innerHTML = '';
+
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
+    const qCfg = getQualityConfig(qualityMode);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b1320);
+    scene.fog = new THREE.FogExp2(0x0b1320, 0.032);
+
+    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 80);
+    const updateCam = (w: number, h: number) => {
+      const aspect = Math.max(0.45, w / Math.max(1, h));
+      const pullBack = aspect < 1.1 ? (1.1 / aspect) * 0.72 : 1;
+      camera.aspect = aspect;
+      // Frame the 3D Guard Dealer's face & emerald table nicely in the upper half above the HUD cards
+      camera.position.set(0, 3.65 * Math.max(1, pullBack * 0.9), 6.2 * Math.max(1, pullBack));
+      camera.lookAt(0, 1.35, -1.6);
+      camera.updateProjectionMatrix();
+    };
+    updateCam(width, height);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: qCfg.antialias });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qCfg.maxPixelRatio));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = qCfg.shadowType;
+    container.appendChild(renderer.domElement);
+
+    // Warm Casino Overhead Spotlight + Rim Lights
+    scene.add(new THREE.HemisphereLight(0xfef3c7, 0x052e16, 0.85));
+    const spotLight = new THREE.DirectionalLight(0xfffbeb, 1.45);
+    spotLight.position.set(1.5, 9, 5.5);
+    spotLight.castShadow = true;
+    const sSize = Math.min(1024, qCfg.shadowMapSize);
+    spotLight.shadow.mapSize.set(sSize, sSize);
+    scene.add(spotLight);
+
+    const rimLight = new THREE.DirectionalLight(0xfacc15, 0.55);
+    rimLight.position.set(-4, 5, -4);
+    scene.add(rimLight);
+
+    // Luxury Oval Emerald Felt Casino Table
+    const tableGroup = new THREE.Group();
+    const felt = new THREE.Mesh(
+      new THREE.CylinderGeometry(4.3, 4.3, 0.24, 40),
+      new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.78 })
+    );
+    felt.scale.set(1.32, 1, 0.84);
+    felt.position.y = 0.82;
+    felt.receiveShadow = true;
+    tableGroup.add(felt);
+
+    // Mahogany Wood & Gold Beveled Rail
+    const woodRim = new THREE.Mesh(
+      new THREE.TorusGeometry(4.32, 0.28, 12, 48),
+      new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.45, metalness: 0.15 })
+    );
+    woodRim.rotation.x = Math.PI / 2;
+    woodRim.scale.set(1.32, 0.84, 1);
+    woodRim.position.y = 0.96;
+    woodRim.castShadow = true;
+    tableGroup.add(woodRim);
+
+    const goldLine = new THREE.Mesh(
+      new THREE.TorusGeometry(3.55, 0.035, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+    );
+    goldLine.rotation.x = Math.PI / 2;
+    goldLine.scale.set(1.32, 0.84, 1);
+    goldLine.position.y = 0.955;
+    tableGroup.add(goldLine);
+
+    // Pedestal under table
+    const tableBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.9, 2.3, 0.82, 20),
+      new THREE.MeshStandardMaterial({ color: 0x271202, roughness: 0.7 })
+    );
+    tableBase.position.y = 0.41;
+    tableGroup.add(tableBase);
+
+    // Card Shoe & Stack of Casino Chips on Table
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.34, 0.82),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.5 })
+    );
+    shoe.position.set(1.85, 1.12, -1.55);
+    shoe.rotation.y = -0.35;
+    tableGroup.add(shoe);
+
+    // Guard's Gold Chip Stacks (grow visually with Guard Bank!)
+    const guardChipsGroup = new THREE.Group();
+    const chipMatGold = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.72, roughness: 0.22 });
+    const chipMatRed = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35 });
+    const chipMatBlue = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.35 });
+    const chipMats = [chipMatGold, chipMatRed, chipMatBlue, chipMatGold, chipMatGold];
+    const chipStacks: THREE.Mesh[] = [];
+    for (let si = 0; si < 5; si++) {
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.28, 16), chipMats[si]);
+      stack.position.set(-1.75 + si * 0.34, 1.08, -1.65 + (si % 2) * 0.22);
+      stack.castShadow = true;
+      guardChipsGroup.add(stack);
+      chipStacks.push(stack);
+    }
+    tableGroup.add(guardChipsGroup);
+
+    // Center Betting Pot Chips
+    const potChipGroup = new THREE.Group();
+    for (let pi = 0; pi < 6; pi++) {
+      const a = (pi / 6) * Math.PI * 2;
+      const chip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.12 + (pi % 3) * 0.08, 14),
+        pi % 2 === 0 ? chipMatGold : chipMatRed
+      );
+      chip.position.set(Math.cos(a) * 0.36, 1.02, Math.sin(a) * 0.3);
+      potChipGroup.add(chip);
+    }
+    potChipGroup.position.set(0, 0, -0.45);
+    tableGroup.add(potChipGroup);
+
+    tableGroup.position.set(0, 0, 0.2);
+    scene.add(tableGroup);
+
+    // ==================== 3D GUARD DEALER AT HEAD OF TABLE ====================
+    const guardParts = buildCustomGuardCharacter();
+    guardParts.rootGroup.position.set(0, 0.28, -2.55);
+    guardParts.rootGroup.rotation.y = -Math.PI / 2; // face directly toward camera & players (+Z)!
+    guardParts.rootGroup.scale.setScalar(1.22);
+    scene.add(guardParts.rootGroup);
+
+    // 3D Expressive Accessories attached to Guard's bounceGroup (local +X is forward!)
+    const guardCrown = new THREE.Group();
+    const crownBand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.28, 0.24, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.78, roughness: 0.2 })
+    );
+    guardCrown.add(crownBand);
+    for (let ci = 0; ci < 5; ci++) {
+      const a = (ci / 5) * Math.PI * 2;
+      const spike = new THREE.Mesh(
+        new THREE.ConeGeometry(0.08, 0.2, 5),
+        new THREE.MeshStandardMaterial({ color: 0xfde047, metalness: 0.8, roughness: 0.2 })
+      );
+      spike.position.set(Math.cos(a) * 0.26, 0.2, Math.sin(a) * 0.26);
+      guardCrown.add(spike);
+    }
+    guardCrown.position.set(0, 2.38, 0);
+    guardCrown.visible = false;
+    guardParts.bounceGroup.add(guardCrown);
+
+    // 3D Cool Deal-With-It Sunglasses (drops down when Guard wins!)
+    const guardShades = new THREE.Group();
+    const lensMat = new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.12, metalness: 0.85 });
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.8, roughness: 0.2 });
+    const lensL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.24), lensMat);
+    lensL.position.set(0.45, 1.78, -0.16);
+    const lensR = lensL.clone();
+    lensR.position.z = 0.16;
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.62), frameMat);
+    bridge.position.set(0.46, 1.84, 0);
+    guardShades.add(lensL, lensR, bridge);
+    guardShades.visible = false;
+    guardParts.bounceGroup.add(guardShades);
+
+    // 3D Punchable Wide Toothy Grin (scales bigger from smirk -> grin -> mega_troll!)
+    const guardGrin = new THREE.Group();
+    const smileOuter = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.16, 0.44),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    const smileBorder = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.2, 0.48),
+      new THREE.MeshBasicMaterial({ color: 0x1e293b })
+    );
+    smileBorder.position.x = -0.015;
+    guardGrin.add(smileBorder, smileOuter);
+    guardGrin.position.set(0.44, 1.48, 0);
+    guardGrin.visible = false;
+    guardParts.bounceGroup.add(guardGrin);
+
+    // 3D Blue Tear / Sweat Drops when Guard loses!
+    const tearMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const tearL = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), tearMat);
+    tearL.scale.set(0.8, 1.5, 0.8);
+    tearL.position.set(0.45, 1.62, -0.22);
+    const tearR = tearL.clone();
+    tearR.position.z = 0.22;
+    const tearGroup = new THREE.Group();
+    tearGroup.add(tearL, tearR);
+    tearGroup.visible = false;
+    guardParts.bounceGroup.add(tearGroup);
+
+    // 3D Sparkling Coins floating around Guard on mega_troll!
+    const trollCoins: THREE.Mesh[] = [];
+    for (let tc = 0; tc < 8; tc++) {
+      const coin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.14, 0.04, 14),
+        chipMatGold
+      );
+      coin.rotation.x = Math.PI / 2;
+      const a = (tc / 8) * Math.PI * 2;
+      coin.position.set(Math.cos(a) * 1.15, 1.5 + (tc % 3) * 0.45, -2.55 + Math.sin(a) * 0.7);
+      coin.visible = false;
+      scene.add(coin);
+      trollCoins.push(coin);
+    }
+
+    // 3D Seated Player Avatars on Left & Right Sides of the Table
+    const seatCoords: Array<{ x: number; z: number; yaw: number }> = [
+      { x: -3.9, z: -0.6, yaw: 0.25 },
+      { x: 3.9, z: -0.6, yaw: Math.PI - 0.25 },
+      { x: -3.2, z: 1.55, yaw: 0.65 },
+      { x: 3.2, z: 1.55, yaw: Math.PI - 0.65 },
+      { x: -4.4, z: -1.9, yaw: -0.15 },
+    ];
+    const seatChars: CharacterMeshParts[] = [];
+    const activeMembers = SEAT_ORDER.filter((s) => Boolean(membersRef.current[s])).map((s) => membersRef.current[s]!);
+    activeMembers.forEach((m, idx) => {
+      const found = players.find((p) => p.id === m.userId);
+      const pos = seatCoords[idx % seatCoords.length];
+      const cp = buildCharacterMesh({
+        colorHex: found?.colorHex || '#F8FAFC',
+        accessory: 'none',
+        bandColor: found?.bandColor || '#FACC15',
+        bellyScale: found?.bellyScale ?? found?.bmiBellyScale ?? 1,
+        muscleScale: found?.muscleScale ?? 1,
+        species: found?.breed || found?.species || 'bunny',
+        equipHat: found?.equipHat || 'none',
+        equipFace: found?.equipFace || 'face_none',
+        equipArmor: found?.equipArmor || 'armor_none',
+        equipWeapon: found?.equipWeapon || 'weapon_none',
+        equipWings: found?.equipWings || 'wings_none',
+        equipAura: found?.equipAura || 'aura_none',
+        equipMount: 'mount_none',
+        propColors: found?.propColors,
+        animMode: 'cheer',
+        animSeed: idx * 1.3,
+      });
+      cp.rootGroup.position.set(pos.x, 0.18, pos.z);
+      cp.rootGroup.rotation.y = pos.yaw;
+      cp.rootGroup.scale.setScalar(0.88);
+      scene.add(cp.rootGroup);
+      seatChars.push(cp);
+    });
+
+    const onResize = () => {
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+      updateCam(w, h);
+      renderer.setSize(w, h);
+    };
+    window.addEventListener('resize', onResize);
+
+    const clock = new THREE.Clock();
+    let frameId = 0;
+    let t = 0;
+    const animate = () => {
+      frameId = requestAnimationFrame(animate);
+      if (typeof document !== 'undefined' && document.hidden) {
+        clock.getDelta();
+        return;
+      }
+      const delta = Math.min(0.04, clock.getDelta());
+      t += delta;
+
+      const moodId = guardMoodRef.current.id;
+      const isTroll = moodId === 'mega_troll';
+      const isGrin = moodId === 'grin';
+      const isSmirk = moodId === 'smirk';
+      const isCry = moodId === 'cry';
+      const isAnnoyed = moodId === 'annoyed';
+
+      // Toggle 3D Guard Facial Props & Scale Punchable Grin!
+      guardCrown.visible = isTroll;
+      guardShades.visible = isSmirk || isGrin || isTroll;
+      guardGrin.visible = isSmirk || isGrin || isTroll;
+      tearGroup.visible = isCry;
+
+      if (isTroll) {
+        guardGrin.scale.set(1.25, 1.35 + Math.sin(t * 18) * 0.18, 1.28);
+        guardCrown.rotation.y = t * 1.8;
+        guardParts.bounceGroup.position.y = Math.abs(Math.sin(t * 10)) * 0.22;
+        guardParts.bounceGroup.rotation.z = Math.sin(t * 8) * 0.12;
+        guardParts.armL.rotation.z = 2.1 + Math.sin(t * 14) * 0.45;
+        guardParts.armR.rotation.z = -2.1 - Math.sin(t * 14) * 0.45;
+      } else if (isGrin) {
+        guardGrin.scale.set(1.1, 1.05 + Math.sin(t * 12) * 0.1, 1.08);
+        guardParts.bounceGroup.position.y = Math.abs(Math.sin(t * 6.5)) * 0.12;
+        guardParts.bounceGroup.rotation.z = Math.sin(t * 4.5) * 0.06;
+        guardParts.armL.rotation.z = 1.2 + Math.sin(t * 8) * 0.3;
+        guardParts.armR.rotation.z = -1.2 - Math.sin(t * 8) * 0.3;
+      } else if (isSmirk) {
+        guardGrin.scale.set(1, 0.58, 0.72);
+        guardParts.bounceGroup.position.y = Math.sin(t * 3.5) * 0.04;
+        guardParts.bounceGroup.rotation.z = 0.05;
+        guardParts.armL.rotation.z = 0.45;
+        guardParts.armR.rotation.z = -0.45;
+      } else if (isCry) {
+        guardParts.bounceGroup.position.y = -0.08 + Math.sin(t * 22) * 0.03;
+        guardParts.bounceGroup.rotation.z = Math.sin(t * 24) * 0.08;
+        guardParts.armL.rotation.z = 2.45;
+        guardParts.armR.rotation.z = -2.45;
+        tearL.position.y = 1.62 - ((t * 1.2) % 0.35);
+        tearR.position.y = 1.62 - (((t * 1.2) + 0.17) % 0.35);
+      } else if (isAnnoyed) {
+        guardParts.bounceGroup.position.y = 0;
+        guardParts.bounceGroup.rotation.z = Math.sin(t * 14) * 0.05;
+        guardParts.armL.rotation.z = 0.9;
+        guardParts.armR.rotation.z = -0.9;
+      } else {
+        guardParts.bounceGroup.position.y = Math.sin(t * 2.5) * 0.03;
+        guardParts.bounceGroup.rotation.z = 0;
+        guardParts.armL.rotation.z = Math.sin(t * 2.8) * 0.18;
+        guardParts.armR.rotation.z = -Math.sin(t * 2.8) * 0.18;
+      }
+
+      // Update Guard's Gold Chip Stack height based on persistent Guard Bank!
+      const bankScale = Math.min(3.5, Math.max(0.4, 0.5 + guardBankRef.current.guardBalance / 80));
+      chipStacks.forEach((st, idx) => {
+        const sy = bankScale * (0.7 + (idx % 3) * 0.25);
+        st.scale.y = sy;
+        st.position.y = 0.95 + sy * 0.14;
+      });
+
+      // Floating gold coins around Guard on mega_troll!
+      trollCoins.forEach((coin, idx) => {
+        coin.visible = isTroll || isGrin;
+        if (coin.visible) {
+          coin.rotation.y = t * 4 + idx;
+          coin.position.y = 1.35 + ((t * 1.1 + idx * 0.35) % 1.45);
+        }
+      });
+
+      // Subtle idle animation for seated 3D player avatars
+      seatChars.forEach((cp, idx) => {
+        cp.mixer?.update(delta);
+        if (cp.auraSpinGroup) cp.auraSpinGroup.rotation.y = t * 1.5;
+        if (!cp.mixer) {
+          cp.bounceGroup.position.y = Math.sin(t * 2.6 + idx) * 0.04;
+        }
+      });
+
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', onResize);
+      seatChars.forEach((cp) => {
+        cp.rootGroup.userData.disposed = true;
+      });
+      disposeObject3D(scene);
+      renderer.dispose();
+    };
+  }, [isOpen, screen, qualityMode, players]);
+
   if (!isOpen) return null;
 
   const joinedCount = Object.keys(members).length;
@@ -1436,23 +1818,20 @@ export function CasinoCardModal({
           </div>
         </div>
       ) : (
-        /* ==================== CASINO FELT TABLE SCREEN ==================== */
-        <div
-          className="relative w-full h-dvh overflow-y-auto flex flex-col justify-between p-2.5 sm:p-4 pt-safe pb-safe"
-          style={{
-            background:
-              'radial-gradient(ellipse at 50% 42%, #15803d 0%, #14532d 55%, #052e16 100%)',
-          }}
-        >
-          {/* Top Bar: Exit + Game Badge + Guard Bank + Sound */}
-          <div className="flex flex-wrap items-center justify-between gap-2 z-10">
+        /* ==================== 3D CASINO TABLE + FLOATING HUD SCREEN ==================== */
+        <div className="relative w-full h-dvh overflow-hidden flex flex-col justify-between">
+          {/* Full-Screen 3D Casino Table & Expressive 3D Guard Dealer Backdrop */}
+          <div ref={casinoCanvasRef} className="fixed inset-0 w-full h-full z-0 pointer-events-none" />
+
+          {/* Top Bar: Exit + Game Badge + Persistent Guard Bank + Sound */}
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 px-2.5 sm:px-4 pt-2.5 sm:pt-3 pt-safe">
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={onClose}
                 className="rpg-panel px-2.5 py-1.5 rounded-xl text-xs font-extrabold text-amber-100 hover:bg-rose-600 cursor-pointer"
               >
-                ← ออกจากโต๊ะ
+                ← ออก
               </button>
               {initialIsHost && (
                 <button
@@ -1468,11 +1847,11 @@ export function CasinoCardModal({
               )}
             </div>
 
-            <div className="rpg-banner rounded-full px-3.5 py-1 text-xs font-extrabold flex items-center gap-2 shadow-lg">
+            <div className="rpg-banner rounded-full px-3 sm:px-4 py-1 text-xs font-extrabold flex items-center gap-2 shadow-xl">
               <span>{activeGameMeta.icon} {activeGameMeta.title}</span>
               <span className="text-amber-300">|</span>
               <span className="text-yellow-300">🏦 คลังพี่ยาม: {guardBank.guardBalance.toLocaleString()} 💰</span>
-              <span className="hidden sm:inline text-emerald-300 text-[10.5px]">
+              <span className="hidden md:inline text-emerald-300 text-[10.5px]">
                 (กินรวม {guardBank.guardTotalWon.toLocaleString()} • {guardBank.guardRoundsPlayed} รอบ)
               </span>
             </div>
@@ -1491,78 +1870,76 @@ export function CasinoCardModal({
             </div>
           </div>
 
-          {/* CENTER FELT ARENA: GUARD DEALER + TABLE CARDS + PLAYERS */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 sm:gap-4 my-2 max-w-4xl w-full mx-auto">
-            {/* Guard Dealer Head-of-Table Area */}
-            <div className="flex flex-col sm:flex-row items-center gap-3 bg-black/30 border-2 border-amber-400/60 rounded-3xl px-4 py-3 shadow-2xl w-full max-w-2xl">
-              <GuardDealerAvatar mood={guardMood} />
-              <div className="flex-1 text-center sm:text-left space-y-1.5">
-                <div className="bg-white/95 text-slate-900 border-2 border-amber-400 rounded-2xl px-3 py-1.5 text-xs font-extrabold shadow inline-block">
-                  💬 &ldquo;{guardMood.speech}&rdquo;
-                </div>
-
-                {/* Dealer Cards (Pok Deng / Blackjack / 1P Hold'em) */}
-                {round && round.dealerCards.length > 0 && (
-                  <div className="flex items-center justify-center sm:justify-start gap-2 pt-1">
-                    {round.dealerCards.map((c, idx) => (
-                      <PlayingCardView
-                        key={c.id}
-                        card={c}
-                        compact
-                        faceDown={
-                          !round.dealerRevealed &&
-                          !(round.gameType === 'blackjack' && idx === 0)
-                        }
-                      />
-                    ))}
-                    {round.dealerRevealed && round.gameType === 'pokdeng' && (
-                      <span className="bg-amber-400 text-black px-2 py-1 rounded-lg text-xs font-black">
-                        {evaluatePokDengHand(round.dealerCards).label}
-                      </span>
-                    )}
-                    {round.dealerRevealed && round.gameType === 'blackjack' && (
-                      <span className="bg-amber-400 text-black px-2 py-1 rounded-lg text-xs font-black">
-                        {evaluateBlackjackHand(round.dealerCards).label}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Texas Hold'em Community Cards & Pot */}
-                {round && round.gameType === 'holdem' && round.phase !== 'betting' && (
-                  <div className="space-y-1.5 pt-1">
-                    <div className="text-xs font-extrabold text-amber-300">
-                      💰 กองกลาง (Pot): {round.pot || 0} GP • รอบ: {(round.street || 'preflop').toUpperCase()}
-                    </div>
-                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
-                      {[0, 1, 2, 3, 4].map((ci) => (
-                        <PlayingCardView
-                          key={ci}
-                          card={round.community[ci]}
-                          compact
-                          faceDown={!round.community[ci]}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
+          {/* UPPER STAGE OVERLAY: Guard Face Close-Up Badge + Speech Bubble (leaves 3D Guard clearly visible!) */}
+          <div className="relative z-10 flex flex-col items-center px-3 pt-1 pointer-events-none">
+            <div className="flex items-center gap-2.5 bg-slate-950/65 backdrop-blur-xs border border-amber-400/70 rounded-full pl-1.5 pr-3.5 py-1 shadow-xl max-w-[94vw]">
+              <div className="scale-75 -my-3 -mx-1">
+                <GuardDealerAvatar mood={guardMood} />
+              </div>
+              <div className="text-xs font-extrabold text-amber-100 truncate">
+                💬 &ldquo;{guardMood.speech}&rdquo;
               </div>
             </div>
 
-            {/* Settled Round Summary Banner */}
+            {/* Dealer Cards / Hold'em Community Cards floating cleanly over the 3D green felt */}
+            {round && round.dealerCards.length > 0 && (
+              <div className="mt-2 flex items-center justify-center gap-2 bg-black/45 backdrop-blur-xs border border-amber-400/50 rounded-2xl px-3 py-1.5 shadow-xl pointer-events-auto">
+                <span className="text-[10.5px] font-extrabold text-amber-300">👮 เจ้ามือ:</span>
+                {round.dealerCards.map((c, idx) => (
+                  <PlayingCardView
+                    key={c.id}
+                    card={c}
+                    compact
+                    faceDown={
+                      !round.dealerRevealed &&
+                      !(round.gameType === 'blackjack' && idx === 0)
+                    }
+                  />
+                ))}
+                {round.dealerRevealed && round.gameType === 'pokdeng' && (
+                  <span className="bg-amber-400 text-black px-2 py-1 rounded-lg text-xs font-black">
+                    {evaluatePokDengHand(round.dealerCards).label}
+                  </span>
+                )}
+                {round.dealerRevealed && round.gameType === 'blackjack' && (
+                  <span className="bg-amber-400 text-black px-2 py-1 rounded-lg text-xs font-black">
+                    {evaluateBlackjackHand(round.dealerCards).label}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {round && round.gameType === 'holdem' && round.phase !== 'betting' && (
+              <div className="mt-2 bg-black/50 backdrop-blur-xs border border-amber-400/60 rounded-2xl px-3 py-1.5 text-center space-y-1 shadow-xl pointer-events-auto">
+                <div className="text-xs font-extrabold text-amber-300">
+                  💰 กองกลาง (Pot): {round.pot || 0} GP • {(round.street || 'preflop').toUpperCase()}
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {[0, 1, 2, 3, 4].map((ci) => (
+                    <PlayingCardView
+                      key={ci}
+                      card={round.community[ci]}
+                      compact
+                      faceDown={!round.community[ci]}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {round && round.phase === 'settled' && round.summaryText && (
-              <div className="rpg-btn-gold px-4 py-2 rounded-2xl text-xs sm:text-sm font-extrabold text-center shadow-xl max-w-xl">
+              <div className="mt-2 rpg-btn-gold px-4 py-1.5 rounded-2xl text-xs sm:text-sm font-extrabold text-center shadow-xl max-w-xl">
                 {round.summaryText}
               </div>
             )}
 
-            {/* Old Maid Interactive Draw Fan (when it's YOUR turn to pick from target!) */}
+            {/* Old Maid Interactive Draw Fan */}
             {round &&
               round.gameType === 'oldmaid' &&
               round.phase === 'playing' &&
               oldMaidTargetSeat &&
               round.seats[round.turnIndex ?? 0]?.seatId === mySeat && (
-                <div className="bg-amber-950/85 border-2 border-yellow-300 rounded-2xl p-3 text-center space-y-2 shadow-2xl max-w-xl w-full">
+                <div className="mt-2 bg-amber-950/90 border-2 border-yellow-300 rounded-2xl p-2.5 text-center space-y-1.5 shadow-2xl max-w-xl w-full pointer-events-auto">
                   <div className="text-xs sm:text-sm font-extrabold text-yellow-300 animate-pulse">
                     👆 ตาคุณแล้ว! แตะเลือกดึงไพ่ 1 ใบจากมือ {oldMaidTargetSeat.emoji} {oldMaidTargetSeat.name}
                   </div>
@@ -1578,10 +1955,12 @@ export function CasinoCardModal({
                   </div>
                 </div>
               )}
+          </div>
 
-            {/* Player Seats Around the Emerald Table */}
+          {/* BOTTOM DOCK: Compact Player Cards Strip + Action Bar */}
+          <div className="relative z-10 mt-auto px-2.5 sm:px-4 pb-2.5 sm:pb-4 pb-safe space-y-2 max-w-5xl w-full mx-auto">
             {round && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full">
+              <div className="flex gap-2 overflow-x-auto pb-1 justify-start sm:justify-center">
                 {round.seats.map((seat, idx) => {
                   const isMe = seat.seatId === mySeat;
                   const isTurn =
@@ -1593,38 +1972,37 @@ export function CasinoCardModal({
                   return (
                     <div
                       key={seat.seatId}
-                      className={`rounded-2xl p-2.5 border-2 transition ${
+                      className={`shrink-0 min-w-[165px] sm:min-w-[195px] rounded-2xl p-2 border-2 backdrop-blur-xs transition ${
                         isTurn
-                          ? 'bg-amber-500/25 border-yellow-300 shadow-[0_0_18px_rgba(250,204,21,0.65)]'
+                          ? 'bg-amber-500/30 border-yellow-300 shadow-[0_0_18px_rgba(250,204,21,0.7)]'
                           : isMe
-                          ? 'bg-black/45 border-amber-400'
-                          : 'bg-black/30 border-emerald-400/40'
+                          ? 'bg-slate-950/75 border-amber-400'
+                          : 'bg-slate-950/60 border-emerald-400/45'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1.5 mb-2">
+                      <div className="flex items-center justify-between gap-1.5 mb-1.5">
                         <div className="text-xs font-extrabold text-amber-100 truncate">
                           {seat.emoji} {seat.name} {isMe ? '⭐' : ''}
                         </div>
-                        <div className="text-[10.5px] font-extrabold text-amber-300 shrink-0">
+                        <div className="text-[10px] font-extrabold text-amber-300 shrink-0">
                           {round.gameType === 'oldmaid'
                             ? seat.safe
-                              ? '✅ รอดแล้ว!'
-                              : `ถือ ${seat.cards.length} ใบ`
-                            : `เดิมพัน ${seat.bet} 💰`}
+                              ? '✅ รอด!'
+                              : `${seat.cards.length} ใบ`
+                            : `${seat.bet}💰`}
                         </div>
                       </div>
 
-                      {/* Cards */}
-                      <div className="flex flex-wrap items-center justify-center gap-1.5 min-h-[68px]">
+                      <div className="flex flex-wrap items-center justify-center gap-1 min-h-[64px]">
                         {seat.cards.length === 0 ? (
-                          <span className="text-[11px] font-bold text-emerald-200/70">
+                          <span className="text-[10.5px] font-bold text-emerald-200/80">
                             {round.phase === 'betting'
                               ? seat.ready
-                                ? '✅ ลงชิปพร้อมแล้ว'
-                                : 'กำลังเลือกชิป...'
+                                ? '✅ พร้อมแล้ว'
+                                : 'เลือกชิป...'
                               : seat.safe
-                              ? '🎉 ไพ่หมดมือแล้ว!'
-                              : 'รอแจกไพ่...'}
+                              ? '🎉 รอดแล้ว!'
+                              : 'รอแจก...'}
                           </span>
                         ) : (
                           seat.cards.map((c) => (
@@ -1639,11 +2017,10 @@ export function CasinoCardModal({
                         )}
                       </div>
 
-                      {/* Live Hand Badge / Final Delta */}
-                      <div className="mt-2 text-center min-h-[18px]">
+                      <div className="mt-1.5 text-center min-h-[16px]">
                         {seat.resultLabel ? (
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-black ${
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black ${
                               (seat.deltaGp ?? 0) > 0
                                 ? 'bg-emerald-500 text-black'
                                 : (seat.deltaGp ?? 0) < 0
@@ -1654,15 +2031,15 @@ export function CasinoCardModal({
                             {seat.resultLabel}
                           </span>
                         ) : isMe && seat.cards.length > 0 && round.gameType === 'pokdeng' ? (
-                          <span className="text-[11px] font-extrabold text-yellow-300">
+                          <span className="text-[10.5px] font-extrabold text-yellow-300">
                             {evaluatePokDengHand(seat.cards).label}
                           </span>
                         ) : isMe && seat.cards.length > 0 && round.gameType === 'blackjack' ? (
-                          <span className="text-[11px] font-extrabold text-yellow-300">
+                          <span className="text-[10.5px] font-extrabold text-yellow-300">
                             {evaluateBlackjackHand(seat.cards).label}
                           </span>
                         ) : isMe && seat.cards.length > 0 && round.gameType === 'holdem' && round.community.length >= 3 ? (
-                          <span className="text-[11px] font-extrabold text-yellow-300">
+                          <span className="text-[10.5px] font-extrabold text-yellow-300">
                             {evaluateTexasHoldem7([...seat.cards, ...round.community]).label}
                           </span>
                         ) : null}
@@ -1672,7 +2049,6 @@ export function CasinoCardModal({
                 })}
               </div>
             )}
-          </div>
 
           {/* BOTTOM ACTION BAR (Context-aware for all 4 games!) */}
           {round && (
@@ -1869,6 +2245,7 @@ export function CasinoCardModal({
               )}
             </div>
           )}
+          </div>
         </div>
       )}
     </div>
