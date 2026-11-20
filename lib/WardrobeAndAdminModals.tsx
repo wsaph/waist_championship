@@ -8,6 +8,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import {
+  getQualityConfig,
+  disposeObject3D,
+  type QualityMode,
+} from '@/lib/device_perf';
+import {
   GOAL_TYPES,
   SPECIES_CATEGORIES,
   SPECIES_LIST,
@@ -62,6 +67,7 @@ interface WardrobeModalProps {
   isOpen: boolean;
   onClose: () => void;
   mode: 'create' | 'edit';
+  qualityMode?: QualityMode;
   editingPlayerId: number | null;
   currentUserId: number | null;
   userPoints: number;
@@ -1004,6 +1010,7 @@ export function WardrobeShopModal({
   isOpen,
   onClose,
   mode,
+  qualityMode = 'auto',
   editingPlayerId,
   currentUserId,
   userPoints,
@@ -1105,6 +1112,9 @@ export function WardrobeShopModal({
   const [showBmiCard, setShowBmiCard] = useState<boolean>(true);
   const [showConfirmBmiEdit, setShowConfirmBmiEdit] = useState<boolean>(false);
   const [rightCategory, setRightCategory] = useState<ShopCategory | 'gacha'>(initialRightTab || 'armor');
+  const [mobileSheetTab, setMobileSheetTab] = useState<'species' | 'shop' | 'bmi'>(
+    initialRightTab === 'gacha' ? 'shop' : 'species'
+  );
   const [previewBelly, setPreviewBelly] = useState<number>(1.0);
   const [shopBusyId, setShopBusyId] = useState<string | null>(null);
   const [shopMsg, setShopMsg] = useState<string>('');
@@ -1172,6 +1182,7 @@ export function WardrobeShopModal({
       setShowConfirmModal(false);
       setShowConfirmBmiEdit(false);
       setLastWonGachaItem(null);
+      setMobileSheetTab(initialRightTab === 'gacha' ? 'shop' : 'species');
       clearAllPreviewOverrides();
       const curBreed = resolveBreedOption(joinSpecies);
       if (isJobSpecies(joinSpecies) || curBreed.jobCategory) {
@@ -1203,6 +1214,8 @@ export function WardrobeShopModal({
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
+    const qCfg = getQualityConfig(qualityMode);
+    const isCompactStage = width < 1024;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x7dd3fc);
@@ -1210,24 +1223,35 @@ export function WardrobeShopModal({
 
     const hasMount = effectiveMount && effectiveMount !== 'mount_none';
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 140);
-    camera.position.set(0, hasMount ? 2.65 : 2.35, hasMount ? 10.4 : 9.6);
-    camera.lookAt(0, hasMount ? 0.65 : 0.45, 0);
+    // On mobile/iPad portrait (< 1024px), shift camera lookAt lower so the character sits cleanly in the upper 42% above the bottom sheet
+    const targetY = hasMount ? (isCompactStage ? -0.45 : 0.65) : isCompactStage ? -0.55 : 0.45;
+    camera.position.set(
+      0,
+      hasMount ? (isCompactStage ? 2.25 : 2.65) : isCompactStage ? 1.95 : 2.35,
+      hasMount ? (isCompactStage ? 11.4 : 10.4) : isCompactStage ? 10.4 : 9.6
+    );
+    camera.lookAt(0, targetY, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: qCfg.antialias });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qCfg.maxPixelRatio));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = qCfg.shadowType;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     container.appendChild(renderer.domElement);
 
-    // EffectComposer with subtle UnrealBloomPass for glowing wings, golden ring, and star motes
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.36, 0.55, 0.8);
-    composer.addPass(bloomPass);
-    composer.addPass(new OutputPass());
+    // EffectComposer with subtle UnrealBloomPass (full on Desktop, half-res on iPad, bypassed on Mobile Lite)
+    let composer: EffectComposer | null = null;
+    if (qCfg.enableBloom) {
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      const bw = Math.max(1, Math.floor(width * qCfg.bloomResolutionScale));
+      const bh = Math.max(1, Math.floor(height * qCfg.bloomResolutionScale));
+      const bloomPass = new UnrealBloomPass(new THREE.Vector2(bw, bh), 0.36, 0.55, 0.8);
+      composer.addPass(bloomPass);
+      composer.addPass(new OutputPass());
+    }
 
     // Warm Sunlight + Sky Hemisphere Light + Cool Blue-White Rim Light behind character
     const hemi = new THREE.HemisphereLight(0xffffff, 0xfef08a, 0.9);
@@ -1237,7 +1261,8 @@ export function WardrobeShopModal({
     const dir = new THREE.DirectionalLight(0xfffbeb, 1.25);
     dir.position.set(5, 11, 8);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
+    const wShadowSize = Math.min(1024, qCfg.shadowMapSize);
+    dir.shadow.mapSize.set(wShadowSize, wShadowSize);
     scene.add(dir);
 
     const rimLight = new THREE.DirectionalLight(0xe0f2fe, 1.45);
@@ -1424,7 +1449,7 @@ export function WardrobeShopModal({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      composer.setSize(w, h);
+      composer?.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
 
@@ -1433,6 +1458,10 @@ export function WardrobeShopModal({
     const clock = new THREE.Clock();
     const animate = () => {
       frameId = requestAnimationFrame(animate);
+      if (typeof document !== 'undefined' && document.hidden) {
+        clock.getDelta();
+        return;
+      }
       const delta = Math.min(0.05, clock.getDelta());
       t += delta;
       if (autoSpinRef.current) {
@@ -1476,7 +1505,11 @@ export function WardrobeShopModal({
       if (markerPreviewParts) {
         animateTrackMarkerMesh(markerPreviewParts, t, 0);
       }
-      composer.render();
+      if (composer) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
     };
     const showMarkerOnStage = rightCategory === 'marker' || Boolean(previewOverrides.marker);
     const markerPreviewParts = showMarkerOnStage
@@ -1497,11 +1530,13 @@ export function WardrobeShopModal({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('resize', onResize);
-      composer.dispose();
+      composer?.dispose();
+      disposeObject3D(scene);
       renderer.dispose();
     };
   }, [
     isOpen,
+    qualityMode,
     joinColor,
     joinBandColor,
     joinSpecies,
@@ -1851,16 +1886,16 @@ export function WardrobeShopModal({
       />
 
       {/* OVERLAY HUD & STONE-GOLD RPG PANELS */}
-      <div className="relative z-10 h-dvh max-w-[1440px] mx-auto px-3 sm:px-6 py-3 flex flex-col justify-between pointer-events-none">
+      <div className="relative z-10 h-dvh max-w-[1440px] mx-auto px-2.5 sm:px-6 pt-2.5 sm:py-3 pb-2 pb-safe pt-safe flex flex-col justify-between pointer-events-none">
         {/* TOP HUD BAR */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pointer-events-auto">
+        <div className="flex flex-nowrap lg:flex-wrap items-center justify-between gap-2 pointer-events-auto">
           <button
             type="button"
             onClick={() => setShowConfirmModal(true)}
             title="คลิกเพื่อเปลี่ยนชื่อตัวละคร / ตั้งค่าสายภารกิจ"
-            className="rpg-stone-frame rounded-2xl px-3 py-2 flex items-center gap-2.5 min-w-[210px] text-left cursor-pointer hover:brightness-110 transition group"
+            className="rpg-stone-frame rounded-xl sm:rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 flex items-center gap-2 sm:gap-2.5 min-w-0 sm:min-w-[210px] max-w-[55vw] sm:max-w-none text-left cursor-pointer hover:brightness-110 transition group"
           >
-            <div className="w-11 h-11 rounded-xl border-2 border-amber-300 bg-slate-900/90 flex items-center justify-center overflow-hidden shrink-0 shadow">
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl border-2 border-amber-300 bg-slate-900/90 flex items-center justify-center overflow-hidden shrink-0 shadow">
               <ChibiHeroBustSvg
                 species={{ ...activeBreedMeta, colorHex: joinColor }}
                 outfitHex={joinBandColor}
@@ -1871,13 +1906,13 @@ export function WardrobeShopModal({
               <div className="text-xs font-extrabold text-amber-200 truncate flex items-center gap-1">
                 <span className="truncate">{joinName || 'ผู้กล้าคนใหม่'}</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-400/20 border border-amber-400/60 text-amber-300 shrink-0 group-hover:bg-amber-400 group-hover:text-black transition">
-                  ✏️ แก้ชื่อ
+                  ✏️ <span className="hidden sm:inline">แก้ชื่อ</span>
                 </span>
               </div>
-              <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-amber-500/70 mt-1">
+              <div className="hidden sm:block w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-amber-500/70 mt-1">
                 <div className="h-full bg-gradient-to-r from-lime-400 to-emerald-400 w-3/4" />
               </div>
-              <div className="text-[10px] font-bold text-amber-100/85 mt-0.5 truncate">
+              <div className="hidden sm:block text-[10px] font-bold text-amber-100/85 mt-0.5 truncate">
                 {joinGoal
                   ? `👟 Step Challenge • เสริม: ${goalMeta.shortTag} (${joinGoal} ${goalMeta.unit})`
                   : '👟 ผู้เข้าแข่งขัน Step Challenge'}
@@ -1885,7 +1920,7 @@ export function WardrobeShopModal({
             </div>
           </button>
 
-          <div className="text-center mx-auto">
+          <div className="hidden lg:block text-center mx-auto">
             <h2 className="font-[family-name:var(--font-kanit)] text-2xl sm:text-4xl font-extrabold tracking-wide rpg-gold-title">
               ศึกชิงบัลลังก์เอวเอส 3D
             </h2>
@@ -1897,25 +1932,79 @@ export function WardrobeShopModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto">
-            <div className="rpg-ribbon-header px-3.5 py-2 rounded-xl flex items-center gap-1.5 text-xs sm:text-sm font-extrabold">
+          <div className="flex items-center gap-1.5 sm:gap-2 ml-auto shrink-0">
+            <div className="rpg-ribbon-header px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl flex items-center gap-1 text-xs sm:text-sm font-extrabold">
               <span>💰</span>
-              <span>{userPoints.toLocaleString()} Gacha Pong</span>
+              <span>{userPoints.toLocaleString()}</span>
+              <span className="hidden sm:inline">Gacha Pong</span>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="w-10 h-10 bg-gradient-to-b from-rose-500 to-rose-700 text-white border-2 border-amber-300 rounded-xl font-extrabold text-base cursor-pointer shadow-lg hover:brightness-110"
+              className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-b from-rose-500 to-rose-700 text-white border-2 border-amber-300 rounded-xl font-extrabold text-base cursor-pointer shadow-lg hover:brightness-110"
             >
               ✕
             </button>
           </div>
         </div>
 
+        {/* MOBILE / IPAD PORTRAIT (< lg): Compact 360° Pill + Tab Bar sitting cleanly below the open top 3D stage */}
+        <div className="lg:hidden mt-auto flex flex-col gap-1.5 pointer-events-none">
+          <div className="flex items-center justify-between gap-2 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !autoSpinRef.current;
+                autoSpinRef.current = next;
+                setAutoSpinUi(next);
+              }}
+              className={`px-2.5 py-1 rounded-full border-2 flex items-center gap-1 text-[11px] font-extrabold shadow-lg cursor-pointer ${
+                autoSpinUi
+                  ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950'
+                  : 'bg-slate-900/90 border-amber-400/80 text-amber-200'
+              }`}
+            >
+              <span>🔄</span>
+              <span>หมุน 360°</span>
+            </button>
+
+            <div className="flex md:hidden items-center gap-1 rpg-panel rounded-xl p-1">
+              {(
+                [
+                  { id: 'species', label: '🐾 สายพันธุ์' },
+                  { id: 'shop', label: '👕 ชุด/ร้าน' },
+                  { id: 'bmi', label: '⚖️ BMI' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setMobileSheetTab(tab.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold cursor-pointer transition ${
+                    mobileSheetTab === tab.id
+                      ? 'rpg-btn-gold'
+                      : 'text-amber-100/90'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowConfirmModal(true)}
+              className="md:hidden rpg-btn-blue px-3 py-1 rounded-full text-[11px] font-extrabold cursor-pointer shadow-lg"
+            >
+              🚀 บันทึก
+            </button>
+          </div>
+        </div>
+
         {/* MIDDLE ROW: LEFT STONE PANEL + OPEN SKY CENTER STAGE + RIGHT STONE PANEL */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end lg:items-center flex-1 my-2 min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2.5 lg:gap-4 items-end lg:items-center lg:flex-1 my-1 lg:my-2 min-h-0">
           {/* LEFT PANEL: Carved Stone & Gold Selector (🐾 120 Animals vs 🏰 56 Disney vs 🎌 56 Anime) */}
-          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] lg:h-[68dvh] flex flex-col relative">
+          <div className={`${mobileSheetTab === 'species' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto h-[48dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
             <StoneFrameCorners />
             <RpgWingedHeaderPlaque
               title={
@@ -2554,8 +2643,8 @@ export function WardrobeShopModal({
           </div>
 
           {/* CENTER STAGE: Clean open sky + 360° pill + BMI Card aligned flush with Left & Right panel bottom edges */}
-          <div className="lg:col-span-4 xl:col-span-6 lg:h-[68dvh] flex flex-col items-center justify-end min-h-[260px] pointer-events-none relative">
-            {/* Floating Compact 360° Spin Pill centered cleanly above BMI Card (never overlaps Sidebars!) */}
+          <div className={`${mobileSheetTab === 'bmi' ? 'flex' : 'hidden'} lg:flex lg:col-span-4 xl:col-span-6 lg:h-[68dvh] flex-col items-center justify-end lg:min-h-[260px] pointer-events-none relative`}>
+            {/* Floating Compact 360° Spin Pill centered cleanly above BMI Card (Desktop lg+ only; < lg uses pill above sheet) */}
             <button
               type="button"
               onClick={() => {
@@ -2564,7 +2653,7 @@ export function WardrobeShopModal({
                 setAutoSpinUi(next);
               }}
               title="เปิด/ปิดหมุนตัวละครอัตโนมัติ 360°"
-              className={`pointer-events-auto self-center mb-2 px-3 py-1 rounded-full border-2 flex items-center gap-1.5 text-xs font-extrabold shadow-lg cursor-pointer transition hover:scale-105 ${
+              className={`hidden lg:flex pointer-events-auto self-center mb-2 px-3 py-1 rounded-full border-2 items-center gap-1.5 text-xs font-extrabold shadow-lg cursor-pointer transition hover:scale-105 ${
                 autoSpinUi
                   ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950'
                   : 'bg-slate-900/90 border-amber-400/80 text-amber-200'
@@ -2703,7 +2792,7 @@ export function WardrobeShopModal({
           </div>
 
           {/* RIGHT PANEL: Carved Stone & Gold Props + Vertical Category Sidebar */}
-          <div className="lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto max-h-[68dvh] lg:h-[68dvh] flex flex-col relative">
+          <div className={`${mobileSheetTab === 'shop' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto h-[48dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
             <StoneFrameCorners />
             <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha Pong 💰)" />
 
@@ -4096,6 +4185,7 @@ export interface LoginGatePlayerSummary {
 
 interface LoginGateModalProps {
   isOpen: boolean;
+  qualityMode?: QualityMode;
   players: LoginGatePlayerSummary[];
   champion: LoginGatePlayerSummary | null;
   signInUsername: string;
@@ -4110,6 +4200,7 @@ interface LoginGateModalProps {
 
 export function LoginGateModal({
   isOpen,
+  qualityMode = 'auto',
   players,
   champion,
   signInUsername,
@@ -4142,10 +4233,12 @@ export function LoginGateModal({
     camera.position.set(0, hasMount ? 2.85 : 2.35, hasMount ? 7.8 : 6.4);
     camera.lookAt(0, hasMount ? 1.65 : 1.35, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const qCfg = getQualityConfig(qualityMode);
+    const renderer = new THREE.WebGLRenderer({ antialias: qCfg.antialias, alpha: true });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qCfg.maxPixelRatio));
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = qCfg.shadowType;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
@@ -4155,6 +4248,8 @@ export function LoginGateModal({
     const key = new THREE.DirectionalLight(0xfffbeb, 1.35);
     key.position.set(3, 7, 5);
     key.castShadow = true;
+    const cShadowSize = Math.min(1024, qCfg.shadowMapSize);
+    key.shadow.mapSize.set(cShadowSize, cShadowSize);
     scene.add(key);
 
     // Stone & Gold Champion Pedestal
@@ -4234,6 +4329,10 @@ export function LoginGateModal({
     void propColorsSig;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
+      if (typeof document !== 'undefined' && document.hidden) {
+        clock.getDelta();
+        return;
+      }
       const delta = Math.min(0.05, clock.getDelta());
       t += delta;
       charParts.rootGroup.rotation.y = -Math.PI / 2 + 0.35 + Math.sin(t * 0.9) * 0.25;
@@ -4258,10 +4357,12 @@ export function LoginGateModal({
       cancelAnimationFrame(frameId);
       charParts.rootGroup.userData.disposed = true;
       if (petParts) petParts.petGroup.userData.disposed = true;
+      disposeObject3D(scene);
       renderer.dispose();
     };
   }, [
     isOpen,
+    qualityMode,
     champion?.id,
     champion?.breed,
     champion?.species,
@@ -4295,7 +4396,7 @@ export function LoginGateModal({
           </h1>
           <div
             ref={champContainerRef}
-            className="w-full h-[230px] sm:h-[340px] flex items-center justify-center"
+            className="w-full h-[180px] sm:h-[280px] lg:h-[340px] flex items-center justify-center"
           />
           <div className="rpg-stone-frame rounded-2xl px-5 py-2.5 -mt-3 max-w-xs w-full relative">
             <StoneFrameCorners />

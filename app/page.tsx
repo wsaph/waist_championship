@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
-import { Trophy, Scale, UserPlus } from 'lucide-react';
+import { Trophy, Scale, UserPlus, Menu } from 'lucide-react';
 import {
   buildCharacterMesh,
   animateCharacterMotion,
@@ -54,9 +55,22 @@ import {
   type PropColorMap,
 } from '@/lib/rpg_catalog';
 import {
-  WardrobeShopModal,
-  LoginGateModal,
-} from '@/lib/WardrobeAndAdminModals';
+  loadQualityMode,
+  saveQualityMode,
+  getQualityConfig,
+  disposeObject3D,
+  QUALITY_MODE_OPTIONS,
+  type QualityMode,
+} from '@/lib/device_perf';
+
+const WardrobeShopModal = dynamic(
+  () => import('@/lib/WardrobeAndAdminModals').then((m) => m.WardrobeShopModal),
+  { ssr: false }
+);
+const LoginGateModal = dynamic(
+  () => import('@/lib/WardrobeAndAdminModals').then((m) => m.LoginGateModal),
+  { ssr: false }
+);
 
 interface Player {
   id: number;
@@ -283,6 +297,7 @@ export default function Arena3DPage() {
   const [boardMessage, setBoardMessage] = useState('');
   const [sendingBoard, setSendingBoard] = useState(false);
   const [actionTargetPlayer, setActionTargetPlayer] = useState<Player | null>(null);
+  const [dockTargetPlayer, setDockTargetPlayer] = useState<Player | null>(null);
   const [giftTargetPlayer, setGiftTargetPlayer] = useState<Player | null>(null);
   const [giftCategory, setGiftCategory] = useState<ShopCategory>('mount');
   const [giftMessage, setGiftMessage] = useState('');
@@ -389,6 +404,18 @@ export default function Arena3DPage() {
   const claimedTokensRef = useRef<Set<string>>(new Set());
   const [isLunchRush, setIsLunchRush] = useState<boolean>(false);
   const [claimingCheckin, setClaimingCheckin] = useState<boolean>(false);
+  const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const realtimeSubscribedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setQualityMode(loadQualityMode());
+  }, []);
+
+  const handleChangeQualityMode = useCallback((next: QualityMode) => {
+    setQualityMode(next);
+    saveQualityMode(next);
+  }, []);
 
   const [isFeedbackOpen, setIsFeedbackOpen] = useState<boolean>(false);
   const [feedbackTab, setFeedbackTab] = useState<'submit' | 'board'>('submit');
@@ -955,9 +982,14 @@ export default function Arena3DPage() {
       localBroadcastRef.current = bc;
     }
 
-    // 2. Smart Background Diff-Polling + Tab Focus Sync (รับประกันการอัปเดตสด 100% ทุกกรณีโดยไม่กระพริบ)
+    // 2. Smart Background Diff-Polling + Tab Focus Sync (ยืดรอบเป็น 25 วิเมื่อ Realtime ทำงานอยู่ เพื่อประหยัดแบตมือถือ)
+    let pollTick = 0;
     const pollInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        pollTick++;
+        if (realtimeSubscribedRef.current && pollTick % 5 !== 0) {
+          return;
+        }
         fetchArenaDataRef.current();
       }
     }, 5000);
@@ -1027,6 +1059,7 @@ export default function Arena3DPage() {
           }
         })
         .subscribe((status) => {
+          realtimeSubscribedRef.current = status === 'SUBSCRIBED';
           if (status === 'SUBSCRIBED' && channel) {
             channel.send({ type: 'broadcast', event: 'hello', payload: {} });
           }
@@ -1036,6 +1069,7 @@ export default function Arena3DPage() {
     }
 
     return () => {
+      realtimeSubscribedRef.current = false;
       clearInterval(pollInterval);
       window.removeEventListener('focus', onVisibilityOrFocus);
       document.removeEventListener('visibilitychange', onVisibilityOrFocus);
@@ -1298,16 +1332,18 @@ export default function Arena3DPage() {
         return true;
       })
       .slice(0, 6);
-    const pad = 145;
-    const x = Math.max(pad, Math.min(window.innerWidth - pad, cx));
-    const y = Math.max(pad, Math.min(window.innerHeight - pad, cy));
+    const padX = Math.min(145, Math.max(115, window.innerWidth / 2 - 12));
+    const padY = Math.min(155, Math.max(125, window.innerHeight / 2 - 12));
+    const x = Math.max(padX, Math.min(window.innerWidth - padX, cx));
+    const y = Math.max(padY, Math.min(window.innerHeight - padY, cy));
     setRadialMenu({ x, y, options: shuffled });
   }, []);
 
   const openGuardPrankMenu = useCallback((cx: number, cy: number) => {
-    const pad = 152;
-    const x = Math.max(pad, Math.min(window.innerWidth - pad, cx));
-    const y = Math.max(pad, Math.min(window.innerHeight - pad, cy));
+    const padX = Math.min(152, Math.max(120, window.innerWidth / 2 - 12));
+    const padY = Math.min(160, Math.max(130, window.innerHeight / 2 - 12));
+    const x = Math.max(padX, Math.min(window.innerWidth - padX, cx));
+    const y = Math.max(padY, Math.min(window.innerHeight - padY, cy));
     setGuardPrankMenu({ x, y, options: pickRandomGuardPranks(6) });
   }, []);
 
@@ -1486,18 +1522,13 @@ export default function Arena3DPage() {
   const openEditModal = useCallback(
     (p: Player) => {
       focusOnCharacter(p.id);
-      if (p.role !== 'spectator') {
-        setBoardTargetId(p.id);
-        setBoardMessage('');
-        setActionTargetPlayer(p);
+      if (p.role !== 'spectator' || p.id === currentUserId) {
+        setDockTargetPlayer(p);
         return;
       }
-      if (p.id !== currentUserId) {
-        return;
-      }
-      openWardrobeModal(p);
+      setDockTargetPlayer(null);
     },
-    [focusOnCharacter, currentUserId, openWardrobeModal]
+    [focusOnCharacter, currentUserId]
   );
 
   useEffect(() => {
@@ -1616,8 +1647,11 @@ export default function Arena3DPage() {
     const islandW = halfLen * 2 + 24;
     const islandD = Math.max(38, trackWidth + 21 + (specRows - 1) * 5.0);
 
+    // Adaptive quality profile (Desktop = High unchanged, iPad = Medium, Mobile = Lite)
+    const qCfg = getQualityConfig(qualityMode);
+
     // 3D Rain particles (synced with Bangkok weather)
-    const rainCount = 520;
+    const rainCount = qCfg.rainCount;
     const rainPositions = new Float32Array(rainCount * 3);
     for (let i = 0; i < rainCount; i++) {
       rainPositions[i * 3] = islandCenterX + (Math.random() - 0.5) * (islandW + 16);
@@ -1644,7 +1678,7 @@ export default function Arena3DPage() {
     );
     moonMesh.position.set(-24, 28, -(islandD / 2 + 22));
     nightGroup.add(moonMesh);
-    const starCount = 200;
+    const starCount = qCfg.starCount;
     const starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
       starPos[i * 3] = (Math.random() - 0.5) * (islandW + 60);
@@ -1666,11 +1700,11 @@ export default function Arena3DPage() {
     }
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: qCfg.antialias, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qCfg.maxPixelRatio));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = qCfg.shadowType;
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -1693,8 +1727,8 @@ export default function Arena3DPage() {
     const dirLight = new THREE.DirectionalLight(initWeather.targetLightHex, initWeather.targetDir);
     dirLight.position.set(16, 32, 18);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.mapSize.width = qCfg.shadowMapSize;
+    dirLight.shadow.mapSize.height = qCfg.shadowMapSize;
 
     dirLight.shadow.camera.near = 5;
     dirLight.shadow.camera.far = 160;
@@ -1875,6 +1909,7 @@ export default function Arena3DPage() {
         islandW,
         islandD,
         specRows,
+        oceanSegments: qCfg.oceanSegments,
       });
     scene.add(decorGroup);
 
@@ -2560,8 +2595,8 @@ export default function Arena3DPage() {
     const animate = () => {
       frameId = requestAnimationFrame(animate);
       frameCounter++;
-      // หยุดเรนเดอร์ฉากสนามด้านหลังชั่วคราวเมื่อเปิดหน้าแต่งตัวเต็มจอ หรือหลังเรนเดอร์ฉากหลังหน้าล็อกอินเสร็จแล้ว เพื่อไม่ให้การ์ดจอทำงานซ้อน 2 WebGL พร้อมกัน!
-      if (pauseArenaRenderRef.current && frameCounter > 30) {
+      // หยุดเรนเดอร์ฉากสนามด้านหลังชั่วคราวเมื่อพับแท็บ, เปิดหน้าแต่งตัวเต็มจอ, หรือหน้าล็อกอิน เพื่อไม่ให้การ์ดจอทำงานซ้อน 2 WebGL พร้อมกัน!
+      if ((typeof document !== 'undefined' && document.hidden) || (pauseArenaRenderRef.current && frameCounter > 30)) {
         clock.getDelta();
         return;
       }
@@ -2618,7 +2653,7 @@ export default function Arena3DPage() {
         const fMat = foam.material as THREE.MeshBasicMaterial;
         fMat.opacity = (fi === 0 ? 0.66 : 0.38) + wave * 0.14;
       });
-      if (oceanMesh && frameCounter % 2 === 0) {
+      if (oceanMesh && frameCounter % qCfg.oceanFrameSkip === 0) {
         const oPos = oceanMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
         for (let oi = 0; oi < oPos.count; oi++) {
           const ox = oPos.getX(oi);
@@ -3588,6 +3623,7 @@ export default function Arena3DPage() {
           }
         }
       }
+      setDockTargetPlayer(null);
       if (walkingSpectatorIdRef.current !== null) {
         const groundHits = raycaster.intersectObject(island, false);
         if (groundHits.length > 0) {
@@ -3651,10 +3687,12 @@ export default function Arena3DPage() {
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('resize', handleResize);
+      controls.dispose();
+      disposeObject3D(scene);
       renderer.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneSignature, pairedActivities, currentUserId]);
+  }, [sceneSignature, pairedActivities, currentUserId, qualityMode]);
 
   const loadFeedbackItems = useCallback(async () => {
     setLoadingFeedback(true);
@@ -4475,22 +4513,22 @@ export default function Arena3DPage() {
       <div ref={canvasRef} className="fixed inset-0 w-full h-full z-[1] touch-none cursor-grab active:cursor-grabbing" />
       <div ref={labelsRef} className="fixed inset-0 pointer-events-none z-10 overflow-hidden" />
 
-      <header ref={headerRef} className="fixed top-3 left-3 right-3 z-30 pointer-events-none flex flex-wrap items-center justify-between gap-2">
-        <div className="rpg-banner rounded-2xl px-3.5 py-2 pointer-events-auto flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-amber-400 border-2 border-amber-100 rounded-xl flex items-center justify-center text-lg shadow-[0_2px_0_#422006] shrink-0">
+      <header ref={headerRef} className="fixed top-2 sm:top-3 left-2 sm:left-3 right-2 sm:right-3 pt-safe z-30 pointer-events-none flex flex-nowrap md:flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+        <div className="rpg-banner rounded-xl sm:rounded-2xl px-2.5 sm:px-3.5 py-1.5 sm:py-2 pointer-events-auto flex items-center gap-2 sm:gap-2.5 min-w-0">
+          <div className="w-7 h-7 sm:w-9 sm:h-9 bg-amber-400 border-2 border-amber-100 rounded-lg sm:rounded-xl flex items-center justify-center text-sm sm:text-lg shadow-[0_2px_0_#422006] shrink-0">
             ⚔️
           </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h1 className="font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base text-amber-300 leading-none drop-shadow">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 flex-nowrap sm:flex-wrap">
+              <h1 className="font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-base text-amber-300 leading-none drop-shadow truncate">
                 ศึกชิงบัลลังก์เอวเอส 3D
               </h1>
-              <span className="bg-emerald-500 text-black text-[9px] font-extrabold px-1.5 py-0.5 rounded">
+              <span className="hidden sm:inline bg-emerald-500 text-black text-[9px] font-extrabold px-1.5 py-0.5 rounded">
                 MMO ARENA
               </span>
               {bkkWeather && (
                 <span
-                  className="bg-black/45 border border-amber-400/50 text-amber-200 text-[10px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-1"
+                  className="bg-black/45 border border-amber-400/50 text-amber-200 text-[9.5px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 sm:gap-1 shrink-0"
                   title={`สภาพอากาศกรุงเทพฯ ล่าสุด: ${bkkWeather.label} ${bkkWeather.temp}°C`}
                 >
                   <span>{bkkWeather.emoji}</span>
@@ -4504,7 +4542,8 @@ export default function Arena3DPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+        {/* Desktop & iPad (md+) Action Buttons + Control Bar (คงหน้าตาเดิม 100%) */}
+        <div className="hidden md:flex flex-wrap items-center gap-1.5 pointer-events-auto">
           {isLunchRush && (
             <div
               className="bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 text-stone-950 border-2 border-white rounded-xl px-2.5 py-1.5 text-xs font-extrabold flex items-center gap-1 shadow-[0_2px_0_#000] animate-pulse"
@@ -4586,7 +4625,7 @@ export default function Arena3DPage() {
             );
           })()}
 
-          <div className="rpg-panel rounded-xl p-1 flex items-center gap-0.5">
+          <div className="rpg-panel rounded-xl p-1 flex items-center gap-0.5 relative">
             <button
               onClick={() => setIsDrawerOpen((v) => !v)}
               className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1 ${
@@ -4606,6 +4645,21 @@ export default function Arena3DPage() {
             >
               <span>💬</span>
               <span className="hidden lg:inline">Feedback</span>
+            </button>
+            <button
+              onClick={() => {
+                const idx = QUALITY_MODE_OPTIONS.findIndex((o) => o.id === qualityMode);
+                const next = QUALITY_MODE_OPTIONS[(idx + 1) % QUALITY_MODE_OPTIONS.length];
+                handleChangeQualityMode(next.id);
+                showToast('⚡', `โหมดกราฟิก: ${next.label}`, 'ปรับความละเอียดและเอฟเฟกต์ 3D เรียบร้อยแล้ว');
+              }}
+              className="px-2 py-1.5 rounded-lg text-xs font-extrabold text-amber-200 hover:bg-amber-400 hover:text-black transition cursor-pointer flex items-center gap-1"
+              title={`สลับโหมดกราฟิก 3D (ปัจจุบัน: ${QUALITY_MODE_OPTIONS.find((o) => o.id === qualityMode)?.label || 'อัตโนมัติ'})`}
+            >
+              <span>⚡</span>
+              <span className="hidden xl:inline text-[10px]">
+                {QUALITY_MODE_OPTIONS.find((o) => o.id === qualityMode)?.short || 'Auto'}
+              </span>
             </button>
             <button
               onClick={toggleMusic}
@@ -4629,10 +4683,99 @@ export default function Arena3DPage() {
             )}
           </div>
         </div>
+
+        {/* Mobile (< md) Compact 1-Row Right Controls */}
+        <div className="flex md:hidden items-center gap-1 pointer-events-auto shrink-0 relative">
+          <button
+            type="button"
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              setIsDrawerOpen((v) => !v);
+            }}
+            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center gap-1 cursor-pointer ${
+              isDrawerOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
+            }`}
+            aria-label="เปิด/ปิดกระดานอันดับ"
+          >
+            <Trophy className="w-4 h-4 text-amber-400" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen((v) => !v)}
+            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center cursor-pointer ${
+              isMobileMenuOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
+            }`}
+            aria-label="เมนูเพิ่มเติม"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+
+          {isMobileMenuOpen && (
+            <div className="absolute right-0 top-12 w-56 rpg-panel rounded-2xl p-2.5 space-y-1.5 shadow-2xl z-40">
+              <div className="text-[10px] font-extrabold text-amber-300/90 px-1.5 pb-1 border-b border-amber-500/30">
+                ⚡ โหมดกราฟิก 3D
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {QUALITY_MODE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      handleChangeQualityMode(opt.id);
+                      showToast('⚡', `โหมดกราฟิก: ${opt.label}`, 'ปรับความละเอียดและเอฟเฟกต์ 3D เรียบร้อย');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
+                      qualityMode === opt.id
+                        ? 'bg-amber-400 text-black border-white'
+                        : 'bg-slate-900/90 text-amber-100 border-slate-700'
+                    }`}
+                  >
+                    {opt.short}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  openFeedbackModal();
+                }}
+                className="w-full text-left px-2.5 py-2 rounded-xl bg-slate-900/80 text-cyan-200 text-xs font-extrabold flex items-center gap-2 cursor-pointer"
+              >
+                <span>💬</span>
+                <span>แจ้งบั๊ก / Feedback</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  toggleMusic();
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left px-2.5 py-2 rounded-xl bg-slate-900/80 text-amber-100 text-xs font-extrabold flex items-center gap-2 cursor-pointer"
+              >
+                <span>{isMusicOn ? '🔊' : '🔇'}</span>
+                <span>{isMusicOn ? 'ปิดเพลงประกอบ' : 'เปิดเพลงประกอบ'}</span>
+              </button>
+              {players.some((pl) => pl.id === currentUserId) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    handleSignOut();
+                  }}
+                  className="w-full text-left px-2.5 py-2 rounded-xl bg-rose-950/80 text-rose-200 text-xs font-extrabold flex items-center gap-2 cursor-pointer"
+                >
+                  <span>🔄</span>
+                  <span>สลับบัญชีผู้ใช้</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       <aside
-        className={`fixed top-32 sm:top-20 right-3 bottom-3 w-[345px] max-w-[calc(100vw-24px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
+        className={`fixed top-16 md:top-20 right-2 sm:right-3 bottom-24 md:bottom-3 w-[345px] max-w-[calc(100vw-16px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
           isDrawerOpen ? 'translate-x-0' : 'translate-x-[120%]'
         }`}
       >
@@ -4681,6 +4824,9 @@ export default function Arena3DPage() {
                     key={p.id}
                     onClick={() => {
                       focusOnCharacter(p.id);
+                      if (p.role !== 'spectator' || p.id === currentUserId) {
+                        setDockTargetPlayer(p);
+                      }
                       if (window.innerWidth < 768) setIsDrawerOpen(false);
                     }}
                     className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${
@@ -4768,7 +4914,12 @@ export default function Arena3DPage() {
         const gMeta = getGoalTypeMeta(me.goalType);
         return (
           <div
-            className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 ${
+            onClick={() => {
+              setDockTargetPlayer(null);
+              setActionTargetPlayer(me);
+            }}
+            title="คลิกเพื่อดูเกจพลัง +/- ประจำวันของคุณ"
+            className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 cursor-pointer hover:brightness-110 transition ${
               walkingSpectatorId !== null
                 ? 'hidden xl:flex bottom-20'
                 : 'hidden lg:flex bottom-3'
@@ -5265,6 +5416,7 @@ export default function Arena3DPage() {
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
         mode={joinMode}
+        qualityMode={qualityMode}
         editingPlayerId={editingPlayerId}
         currentUserId={currentUserId}
         userPoints={
@@ -5348,8 +5500,14 @@ export default function Arena3DPage() {
           pBoost.netPower > 0 ? `+${pBoost.netPower}` : String(pBoost.netPower);
 
         return (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="rpg-panel rounded-2xl max-w-sm w-full p-5 relative">
+        <div
+          onClick={() => setActionTargetPlayer(null)}
+          className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="rpg-panel rounded-2xl max-w-sm w-full p-5 relative"
+          >
             <button
               onClick={() => setActionTargetPlayer(null)}
               className="absolute top-3 right-3 w-8 h-8 bg-rose-600 text-white rounded-lg flex items-center justify-center font-bold cursor-pointer"
@@ -5722,6 +5880,7 @@ export default function Arena3DPage() {
 
       <LoginGateModal
         isOpen={Boolean(authChecked && currentUserId === null && !isJoinOpen)}
+        qualityMode={qualityMode}
         players={players}
         champion={rankedPlayers[0] ?? competitors[0] ?? null}
         signInUsername={signInUsername}
@@ -5737,11 +5896,163 @@ export default function Arena3DPage() {
         }}
       />
 
-      {walkingSpectatorId === null && (() => {
+      {/* Context Dock ด้านล่างเมื่อคลิกเลือกตัวละครในสนาม (ไม่เด้ง Modal ใหญ่บังฉาก 3D) */}
+      {dockTargetPlayer && !actionTargetPlayer && !giftTargetPlayer && !isJoinOpen && !isLogOpen && (() => {
+        const liveTarget =
+          rankedPlayers.find((pl) => pl.id === dockTargetPlayer.id) ||
+          players.find((pl) => pl.id === dockTargetPlayer.id) ||
+          dockTargetPlayer;
+        const isSelf = liveTarget.id === currentUserId;
+        const isCompetitor = liveTarget.role !== 'spectator';
+        const pBoost = resolvePowerBoostMeta(
+          liveTarget.cheerCount ?? 0,
+          liveTarget.temptCount ?? 0
+        );
+        const netLabel =
+          pBoost.netPower > 0 ? `+${pBoost.netPower}` : String(pBoost.netPower);
+        const stepPct = liveTarget.stepProgressPct ?? liveTarget.progressPct ?? 0;
+
+        return (
+          <div
+            className={`fixed left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[96vw] w-max transition-all ${
+              walkingSpectatorId !== null
+                ? 'bottom-24 sm:bottom-20'
+                : 'bottom-[76px] md:bottom-4'
+            }`}
+          >
+            <div className="rpg-panel rounded-2xl px-2.5 sm:px-3 py-2 shadow-2xl flex items-center gap-2 sm:gap-3 border-2 border-amber-400/90">
+              {/* ข้อมูลย่อตัวละคร */}
+              <div className="flex items-center gap-2 min-w-0">
+                <div
+                  className="w-9 h-9 rounded-xl border-2 border-amber-300 flex items-center justify-center text-lg shrink-0 shadow-inner"
+                  style={{ backgroundColor: liveTarget.colorHex }}
+                >
+                  {liveTarget.emoji}
+                </div>
+                <div className="min-w-0 leading-tight">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm text-amber-200 truncate max-w-[110px] sm:max-w-[150px]">
+                      {liveTarget.name}
+                    </span>
+                    {isCompetitor && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full border text-[10px] font-extrabold shrink-0 ${pBoost.badgeBgClass}`}
+                      >
+                        เกจ {netLabel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] sm:text-[11px] font-bold text-emerald-300 truncate">
+                    {isCompetitor
+                      ? `👟 ${(liveTarget.stepCount ?? 0).toLocaleString()} ก้าว (${stepPct}%)`
+                      : '👀 โหมดผู้ชม'}
+                  </div>
+                </div>
+              </div>
+
+              {/* ปุ่ม Action ด่วน */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isSelf ? (
+                  <>
+                    {isCompetitor && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionTargetPlayer(liveTarget);
+                          setDockTargetPlayer(null);
+                        }}
+                        className="rpg-btn-gold rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer flex items-center gap-1"
+                        title="ดูเกจพลัง +/- ประจำวัน"
+                      >
+                        <span>📊</span>
+                        <span className="hidden sm:inline">ดูเกจ</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDockTargetPlayer(null);
+                        openWardrobeModal(liveTarget, 'armor');
+                      }}
+                      className="rpg-btn-blue rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer flex items-center gap-1"
+                      title="แต่งตัว 3D & ร้านค้า"
+                    >
+                      <span>🎨</span>
+                      <span>แต่งตัว</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBoardKind('cheer');
+                        setBoardTargetId(liveTarget.id);
+                        setBoardMessage('');
+                        setActionTargetPlayer(liveTarget);
+                        setDockTargetPlayer(null);
+                      }}
+                      className="bg-gradient-to-b from-amber-400 to-orange-500 hover:brightness-110 text-black border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
+                      title="ส่งไฟเชียร์เพื่อน (+1)"
+                    >
+                      <span>🔥</span>
+                      <span>เติมไฟ</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBoardKind('tempt');
+                        setBoardTargetId(liveTarget.id);
+                        setBoardMessage('');
+                        setActionTargetPlayer(liveTarget);
+                        setDockTargetPlayer(null);
+                      }}
+                      className="bg-gradient-to-b from-pink-500 to-rose-600 hover:brightness-110 text-white border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
+                      title="ส่งของกินแกล้งเพื่อน (-1)"
+                    >
+                      <span>😈</span>
+                      <span>แกล้ง</span>
+                    </button>
+                    {currentUserId && currentUserId > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGiftError('');
+                          setGiftMessage('');
+                          setGiftCategory('mount');
+                          setGiftTargetPlayer(liveTarget);
+                          setDockTargetPlayer(null);
+                        }}
+                        className="bg-gradient-to-r from-fuchsia-500 to-amber-400 hover:brightness-110 text-white border-2 border-black rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold cursor-pointer shadow-[0_2px_0_#000] flex items-center gap-1"
+                        title="ส่งของขวัญให้เพื่อน"
+                      >
+                        <span>🎁</span>
+                        <span className="hidden sm:inline">ของขวัญ</span>
+                      </button>
+                    )}
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setDockTargetPlayer(null)}
+                  className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-amber-100 border border-slate-600 flex items-center justify-center text-xs font-extrabold cursor-pointer shrink-0 transition"
+                  title="ปิดแถบนี้"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Desktop/iPad Roam Pill (md+) */}
+      {walkingSpectatorId === null && !dockTargetPlayer && (() => {
         const me = players.find((pl) => pl.id === currentUserId);
         if (!me || me.role === 'spectator' || isJoinOpen) return null;
         return (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 pointer-events-auto">
+          <div className="hidden md:flex fixed bottom-4 left-1/2 -translate-x-1/2 z-30 items-center gap-2 pointer-events-auto">
             <button
               type="button"
               onClick={handleToggleRoam}
@@ -5756,8 +6067,119 @@ export default function Arena3DPage() {
         );
       })()}
 
+      {/* Mobile (< md) Thumb-Friendly Bottom Action Bar */}
+      {walkingSpectatorId === null && !isJoinOpen && (() => {
+        const currentUser = players.find((pl) => pl.id === currentUserId);
+        return (
+          <div className="flex md:hidden fixed bottom-2 inset-x-2 pb-safe z-30 flex-col items-center gap-1.5 pointer-events-none">
+            {!dockTargetPlayer && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 pointer-events-auto">
+              {isLunchRush && (
+                <div className="bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 text-stone-950 border-2 border-white rounded-full px-3 py-1 text-[11px] font-extrabold flex items-center gap-1 shadow animate-pulse">
+                  <span>💰</span>
+                  <span>แย่งเหรียญเที่ยง LIVE!</span>
+                </div>
+              )}
+              {currentUser && !currentUser.checkedInToday && (
+                <button
+                  type="button"
+                  onClick={handleDailyCheckin}
+                  disabled={claimingCheckin}
+                  className="neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 cursor-pointer animate-bounce"
+                >
+                  <span>🎁</span>
+                  <span>เช็คอิน +10💰</span>
+                </button>
+              )}
+              {currentUser && currentUser.role !== 'spectator' && (
+                <button
+                  type="button"
+                  onClick={handleToggleRoam}
+                  disabled={togglingRoam}
+                  className="neo-btn bg-gradient-to-r from-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 cursor-pointer"
+                >
+                  <span>🚩</span>
+                  <span>เดินเล่นริมหาด</span>
+                </button>
+              )}
+            </div>
+            )}
+
+            {!currentUser ? (
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className="pointer-events-auto neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-sm px-5 py-2.5 rounded-2xl flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4 stroke-[2.5]" />
+                <span>+ สร้างผู้กล้า / เข้าร่วม</span>
+              </button>
+            ) : (
+              <div className="pointer-events-auto w-full max-w-md rpg-panel rounded-2xl p-1.5 grid grid-cols-3 gap-1.5 shadow-2xl">
+                {currentUser.role !== 'spectator' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const gMeta = getGoalTypeMeta(currentUser.goalType);
+                      setSelectedPlayerId(currentUser.id);
+                      const curVal = currentUser.currentVal ?? currentUser.currentWeight;
+                      setNewWeightInput(
+                        gMeta.isCumulative || curVal === undefined ? '' : String(curVal)
+                      );
+                      setStepInput('');
+                      setStepInputMode('add');
+                      setLogTab('steps');
+                      setModalError('');
+                      setIsLogOpen(true);
+                    }}
+                    className="rpg-btn-green rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+                  >
+                    <span className="text-base leading-none">👟</span>
+                    <span className="text-[10.5px] font-extrabold leading-none">ส่งก้าว/ภารกิจ</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsDrawerOpen((v) => !v)}
+                    className="rpg-btn-green rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+                  >
+                    <span className="text-base leading-none">🏆</span>
+                    <span className="text-[10.5px] font-extrabold leading-none">กระดานอันดับ</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => openWardrobeModal(currentUser, 'gacha')}
+                  className="bg-gradient-to-r from-fuchsia-600 via-amber-400 to-cyan-400 text-black border-2 border-white rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow"
+                >
+                  <span className="text-base leading-none">🎰</span>
+                  <span className="text-[10.5px] font-extrabold leading-none">กาชาปอง</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openWardrobeModal(currentUser, 'armor')}
+                  className="rpg-btn-blue rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer min-w-0"
+                >
+                  <div className="flex items-center gap-1 max-w-full">
+                    <span className="text-sm leading-none">{currentUser.emoji}</span>
+                    <span className="text-[10px] bg-black/50 text-amber-300 px-1 py-0.2 rounded border border-amber-400 font-extrabold">
+                      💰{currentUser.points ?? 100}
+                    </span>
+                  </div>
+                  <span className="text-[10.5px] font-extrabold leading-none truncate max-w-full">
+                    แต่งตัว/ร้านค้า
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {walkingSpectatorId !== null && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[94vw]">
+        <div className="fixed bottom-3 sm:bottom-4 pb-safe left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[95vw]">
           {nearbySpectator && (
             <div className="flex flex-col items-center gap-2">
               {isPairMenuOpen && (
@@ -5932,7 +6354,7 @@ export default function Arena3DPage() {
             style={{ left: radialMenu.x, top: radialMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="relative -translate-x-1/2 -translate-y-1/2 w-[260px] h-[260px] rounded-full bg-black/25 backdrop-blur-xs border-2 border-dashed border-black/40 flex items-center justify-center">
+            <div className="relative -translate-x-1/2 -translate-y-1/2 scale-90 sm:scale-100 w-[260px] h-[260px] rounded-full bg-black/25 backdrop-blur-xs border-2 border-dashed border-black/40 flex items-center justify-center">
               <button
                 type="button"
                 onClick={() => openRadialActivityMenu(radialMenu.x, radialMenu.y)}
@@ -5982,7 +6404,7 @@ export default function Arena3DPage() {
             style={{ left: guardPrankMenu.x, top: guardPrankMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="relative -translate-x-1/2 -translate-y-1/2 w-[285px] h-[285px] rounded-full bg-rose-950/55 backdrop-blur-xs border-2 border-dashed border-amber-300/80 flex items-center justify-center shadow-[0_0_40px_rgba(244,63,94,0.45)]">
+            <div className="relative -translate-x-1/2 -translate-y-1/2 scale-90 sm:scale-100 w-[285px] h-[285px] rounded-full bg-rose-950/55 backdrop-blur-xs border-2 border-dashed border-amber-300/80 flex items-center justify-center shadow-[0_0_40px_rgba(244,63,94,0.45)]">
               <button
                 type="button"
                 onClick={() => openGuardPrankMenu(guardPrankMenu.x, guardPrankMenu.y)}

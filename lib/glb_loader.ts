@@ -186,6 +186,12 @@ export async function loadNormalizedGLB(
       m.castShadow = true;
       m.receiveShadow = true;
       m.frustumCulled = false;
+      m.userData.isSharedGltfResource = true;
+      if (m.geometry) m.geometry.userData.isSharedGltfResource = true;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.forEach((mat) => {
+        if (mat) mat.userData.isSharedGltfResource = true;
+      });
     }
   });
 
@@ -310,9 +316,16 @@ export async function loadChibiOutfitRigGLB({
       m.castShadow = true;
       m.receiveShadow = true;
       m.frustumCulled = false;
+      m.userData.isSharedGltfResource = true;
+      if (m.geometry) m.geometry.userData.isSharedGltfResource = true;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.forEach((mat) => {
+        if (mat) mat.userData.isSharedGltfResource = true;
+      });
 
       if (m.material && isGoldTracksuit && child.name === 'body-mesh') {
         const clonedMat = (m.material as THREE.MeshStandardMaterial).clone();
+        clonedMat.userData.isSharedGltfResource = false;
         clonedMat.emissive = new THREE.Color(0xd97706);
         clonedMat.emissiveIntensity = 0.2;
         m.material = clonedMat;

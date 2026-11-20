@@ -5,12 +5,26 @@
   --foreground: #f8fafc;
 }
 
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background: linear-gradient(180deg, #38bdf8 0%, #bae6fd 55%, #fef08a 100%);
   color: var(--foreground);
   font-family: var(--font-prompt), sans-serif;
   overflow: hidden;
   user-select: none;
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Dragon Nest / Fantasy MMO 3D Beveled RPG Styles */

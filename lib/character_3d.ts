@@ -8561,6 +8561,7 @@ export function buildFantasyArenaDecor(
     islandW: number;
     islandD: number;
     specRows?: number;
+    oceanSegments?: number;
   }
 ): {
   decorGroup: THREE.Group;
@@ -8622,7 +8623,8 @@ export function buildFantasyArenaDecor(
   });
 
   // Vast animated ocean surface surrounding the grand beach island
-  const oceanGeo = new THREE.PlaneGeometry(540, 540, 58, 58);
+  const oceanSegs = arenaBounds?.oceanSegments ?? 58;
+  const oceanGeo = new THREE.PlaneGeometry(540, 540, oceanSegs, oceanSegs);
   const oceanMat = new THREE.MeshStandardMaterial({
     color: 0x0ea5e9,
     emissive: 0x0369a1,
