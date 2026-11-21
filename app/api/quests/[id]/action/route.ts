@@ -56,9 +56,9 @@ export async function POST(
     // 1. SPONSOR: Add Gacha coins to quest reward pool (10–500 per user/quest)
     // -----------------------------------------------------------------------
     if (action === 'sponsor') {
-      if (qStatus !== 'open' && qStatus !== 'active') {
+      if (qStatus !== 'open') {
         return NextResponse.json(
-          { error: 'ไม่สามารถลงรางวัลเพิ่มในเควสที่กำลังโหวตหรือจบแล้วได้' },
+          { error: 'ไม่สามารถลงรางวัลเพิ่มได้ เนื่องจากมีผู้รับเควสนี้ไปแล้ว' },
           { status: 400 }
         );
       }
@@ -101,14 +101,14 @@ export async function POST(
       const updatedUser = await turso.execute({ sql: `SELECT points FROM users WHERE id = ?`, args: [userId] });
       const quests = await fetchAllQuests();
       return NextResponse.json({
-        message: `ลงกองกลางรางวัล +${addAmount} 💰 เรียบร้อย! (ถ้าเควสสำเร็จรับคืน 2 เท่า!)`,
+        message: `สมทบรางวัล +${addAmount} 💰 เรียบร้อย! (ถ้าเควสสำเร็จรับคืน 2 เท่า!)`,
         userPoints: Number(updatedUser.rows[0]?.points ?? 0),
         quests,
       });
     }
 
     // -----------------------------------------------------------------------
-    // 2. ACCEPT: Accept an open quest with startDate/endDate (>= 30 days) & invites
+    // 2. ACCEPT: Accept an open quest with user-chosen startDate/endDate & invites
     // -----------------------------------------------------------------------
     if (action === 'accept') {
       if (qStatus !== 'open') {
@@ -117,8 +117,7 @@ export async function POST(
 
       const startDate = String(body.startDate ?? '').trim();
       const endDate = String(body.endDate ?? '').trim();
-      const minRequired = Math.max(QUEST_MIN_DURATION_DAYS, Number(q.duration_days ?? QUEST_MIN_DURATION_DAYS));
-      const rangeCheck = validateQuestDateRange(startDate, endDate, minRequired);
+      const rangeCheck = validateQuestDateRange(startDate, endDate, QUEST_MIN_DURATION_DAYS);
       if (!rangeCheck.ok) {
         return NextResponse.json({ error: rangeCheck.error }, { status: 400 });
       }
@@ -230,11 +229,19 @@ export async function POST(
       const accept = Boolean(body.accept);
 
       const invRes = await turso.execute({
-        sql: `SELECT id, invite_status FROM quest_party WHERE quest_id = ? AND user_id = ?`,
+        sql: `SELECT id, role, invite_status FROM quest_party WHERE quest_id = ? AND user_id = ?`,
         args: [questId, userId],
       });
       if (invRes.rows.length === 0) {
         return NextResponse.json({ error: 'ไม่พบคำเชิญของคุณในเควสนี้' }, { status: 404 });
+      }
+      const invRole = String(invRes.rows[0].role ?? '');
+      const invStatus = String(invRes.rows[0].invite_status ?? '');
+      if (invRole !== 'member' || invStatus !== 'invited') {
+        return NextResponse.json(
+          { error: 'ไม่สามารถเปลี่ยนสถานะคำเชิญได้ (คุณเข้าร่วมปาร์ตี้หรือดำเนินการไปแล้ว)' },
+          { status: 400 }
+        );
       }
 
       if (accept) {
@@ -250,10 +257,13 @@ export async function POST(
         }
       }
 
-      await turso.execute({
-        sql: `UPDATE quest_party SET invite_status = ? WHERE quest_id = ? AND user_id = ?`,
+      const updInvRes = await turso.execute({
+        sql: `UPDATE quest_party SET invite_status = ? WHERE quest_id = ? AND user_id = ? AND role = 'member' AND invite_status = 'invited'`,
         args: [accept ? 'accepted' : 'declined', questId, userId],
       });
+      if ((updInvRes.rowsAffected ?? 0) === 0) {
+        return NextResponse.json({ error: 'คำเชิญนี้ถูกดำเนินการไปแล้ว' }, { status: 409 });
+      }
 
       const quests = await fetchAllQuests();
       return NextResponse.json({
@@ -524,12 +534,13 @@ export async function POST(
 
       const totalSponsorPool = sponsorsRes.rows.reduce((s, r) => s + Number(r.amount ?? 0), 0);
 
-      // Accumulate total credits per userId
+      // Accumulate total credits per userId & build atomic settlement batch
       const userCredits = new Map<number, number>();
       const addCredit = (uid: number, amt: number) => {
         if (amt <= 0) return;
         userCredits.set(uid, (userCredits.get(uid) ?? 0) + amt);
       };
+      const settlementBatch: Array<{ sql: string; args: Array<number | string> }> = [];
 
       // A) Sponsor payouts: 200% on success, 0 on fail
       for (const s of sponsorsRes.rows) {
@@ -537,7 +548,7 @@ export async function POST(
         const sUid = Number(s.user_id);
         const sAmt = Number(s.amount ?? 0);
         const payout = computeSponsorPayout(sAmt, succeeded);
-        await turso.execute({
+        settlementBatch.push({
           sql: `UPDATE quest_sponsors SET payout_amount = ? WHERE id = ?`,
           args: [payout, sId],
         });
@@ -549,7 +560,7 @@ export async function POST(
         ? computePerMemberQuestReward(totalSponsorPool, acceptedParty.length)
         : 0;
       for (const m of acceptedParty) {
-        await turso.execute({
+        settlementBatch.push({
           sql: `UPDATE quest_party SET payout_amount = ? WHERE quest_id = ? AND user_id = ?`,
           args: [perMemberReward, questId, m.userId],
         });
@@ -566,19 +577,23 @@ export async function POST(
       for (let i = 0; i < betsRes.rows.length; i++) {
         const bId = Number(betsRes.rows[i].id);
         const res = betResults[i];
-        await turso.execute({
+        settlementBatch.push({
           sql: `UPDATE quest_bets SET payout_amount = ? WHERE id = ?`,
           args: [res.payout, bId],
         });
         addCredit(res.userId, res.payout);
       }
 
-      // Credit all winning users
+      // Credit all winning users inside the same write transaction
       for (const [uid, credit] of userCredits.entries()) {
-        await turso.execute({
+        settlementBatch.push({
           sql: `UPDATE users SET points = points + ? WHERE id = ?`,
           args: [credit, uid],
         });
+      }
+
+      if (settlementBatch.length > 0) {
+        await turso.batch(settlementBatch, 'write');
       }
 
       const updatedUser = await turso.execute({ sql: `SELECT points FROM users WHERE id = ?`, args: [userId] });

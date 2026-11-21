@@ -157,6 +157,12 @@ export function comparePokDeng(
     }
     return { outcome: 'lose', multiplier: dealerEval.deng, playerEval, dealerEval };
   }
+  if (playerEval.deng !== dealerEval.deng) {
+    if (playerEval.deng > dealerEval.deng) {
+      return { outcome: 'win', multiplier: playerEval.deng, playerEval, dealerEval };
+    }
+    return { outcome: 'lose', multiplier: dealerEval.deng, playerEval, dealerEval };
+  }
   return { outcome: 'tie', multiplier: 0, playerEval, dealerEval };
 }
 

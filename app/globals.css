@@ -395,3 +395,131 @@ body {
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
 ::-webkit-scrollbar-thumb { background: #d97706; border-radius: 9999px; }
+
+/* ============================================================================
+   Ragnarok Mobile Wooden Mission Board UI
+   ============================================================================ */
+.ro-wood-board {
+  padding: 12px;
+  background: linear-gradient(180deg, #9a6335 0%, #6d401c 14%, #532c11 50%, #7a4822 88%, #47230c 100%);
+  border: 3px solid #381b09;
+  box-shadow:
+    inset 0 2px 1px rgba(255, 224, 178, 0.45),
+    inset 0 -3px 2px rgba(28, 12, 3, 0.75),
+    0 20px 55px rgba(0, 0, 0, 0.8);
+}
+
+.ro-wood-planks {
+  background-color: #4b2a13;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(32, 16, 6, 0.55) 0px,
+      rgba(32, 16, 6, 0.55) 3px,
+      rgba(122, 74, 36, 0.16) 3px,
+      rgba(92, 52, 23, 0.25) 46px,
+      rgba(55, 30, 12, 0.45) 68px
+    ),
+    linear-gradient(180deg, rgba(24, 11, 4, 0.55) 0%, rgba(75, 42, 19, 0.15) 14%, rgba(75, 42, 19, 0.1) 86%, rgba(24, 11, 4, 0.65) 100%);
+  border: 2px solid #2b1406;
+  box-shadow:
+    inset 0 8px 18px rgba(0, 0, 0, 0.65),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.55);
+}
+
+.ro-gold-ribbon {
+  background: linear-gradient(180deg, #ffdf6b 0%, #f5a623 52%, #d47b0c 100%);
+  border: 2px solid #914c06;
+  box-shadow:
+    inset 0 2px 1px rgba(255, 252, 224, 0.75),
+    inset 0 -2px 2px rgba(133, 66, 6, 0.6),
+    0 5px 12px rgba(0, 0, 0, 0.55);
+}
+
+.ro-ribbon-tail-left,
+.ro-ribbon-tail-right {
+  width: 24px;
+  height: 30px;
+  background: linear-gradient(180deg, #e08d14 0%, #b35c07 100%);
+  border: 2px solid #7d3e04;
+  margin-top: 6px;
+}
+.ro-ribbon-tail-left {
+  margin-right: -8px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 35% 50%);
+}
+.ro-ribbon-tail-right {
+  margin-left: -8px;
+  clip-path: polygon(0 0, 100% 0, 65% 50%, 100% 100%, 0 100%);
+}
+
+.ro-close-btn {
+  background: linear-gradient(180deg, #f85f3e 0%, #d92d18 55%, #9e1b0b 100%);
+  border: 2.5px solid #ffd0a6;
+  box-shadow:
+    inset 0 2px 1px rgba(255, 255, 255, 0.45),
+    inset 0 -3px 2px rgba(102, 14, 5, 0.7),
+    0 4px 10px rgba(0, 0, 0, 0.65);
+  text-shadow: 0 2px 2px rgba(80, 10, 0, 0.8);
+}
+
+.ro-parchment-card {
+  background: linear-gradient(180deg, #f8ebd0 0%, #f2ddb8 58%, #e8cc9c 100%);
+  border-radius: 14px 10px 4px 10px;
+  border: 2px solid #c39e68;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 250, 236, 0.65),
+    inset 0 -10px 18px rgba(168, 121, 61, 0.28),
+    0 10px 22px rgba(0, 0, 0, 0.55);
+}
+
+.ro-scroll-curl-tl {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 34px;
+  height: 16px;
+  border-radius: 10px 12px 12px 4px;
+  background: linear-gradient(180deg, #fff5df 0%, #d9b57d 70%, #a97f46 100%);
+  border: 1.5px solid #a8804a;
+  box-shadow: 2px 3px 5px rgba(66, 36, 12, 0.35);
+  pointer-events: none;
+}
+
+.ro-scroll-curl-br {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  background: linear-gradient(135deg, #d7b278 0%, #b5894d 48%, rgba(75, 42, 19, 0.9) 52%);
+  border-top-left-radius: 8px;
+  pointer-events: none;
+}
+
+.ro-parchment-sheet {
+  background: linear-gradient(180deg, #f9eed7 0%, #f1dcba 100%);
+  border: 2.5px solid #be965d;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 250, 238, 0.65),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ro-gold-btn {
+  background: linear-gradient(180deg, #ffe066 0%, #ffad24 52%, #e67d00 100%);
+  color: #ffffff;
+  text-shadow: 0 1.5px 2px rgba(122, 54, 0, 0.9);
+  border: 2px solid #fff2b2;
+  box-shadow:
+    inset 0 2px 1px rgba(255, 255, 255, 0.65),
+    inset 0 -2px 2px rgba(161, 74, 0, 0.55),
+    0 3px 0 #9e4d00,
+    0 5px 10px rgba(72, 34, 4, 0.45);
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+.ro-gold-btn:hover {
+  filter: brightness(1.07);
+}
+.ro-gold-btn:active {
+  transform: translateY(2px);
+}

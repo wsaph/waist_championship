@@ -12,6 +12,8 @@ export interface CafePetOption {
   icon: string;
   modelUrl: string;
   photoUrl?: string;
+  photoFlatOnFloor?: boolean;
+  isRealCatSfx?: boolean;
   voicePitch: number;
   spicyThreshold: number;
   treatLabel: string;
@@ -29,6 +31,29 @@ export interface CafePetOption {
 
 const CAFE_PETS: CafePetOption[] = [
   {
+    id: 'belly_cat',
+    name: 'น้องแมวหงายพุง (กับดักพุง!)',
+    speciesLabel: 'แมวหงายพุง',
+    icon: '🐱',
+    modelUrl: '/models/cat_pet.glb',
+    photoUrl: '/images/belly_cat.png',
+    photoFlatOnFloor: true,
+    isRealCatSfx: true,
+    voicePitch: 660,
+    spicyThreshold: 18,
+    treatLabel: 'ป้อนแมวเลีย',
+    treatIcon: '🐟',
+    homePos: [-0.85, 1.32],
+    moveSpeed: 0,
+    scaleHeight: 1.05,
+    idleQuote: 'ครืดดด... นอนหงายพุงล่อมนุษย์... กล้าเกามั้ยล่ะ zZz',
+    petQuote: 'ครืดดดดด~ เกาคางเบาๆ แบบนี้ฟินจนเคลิ้มเลยเหมียว~ 🎵',
+    bellyQuote: 'ครืดด... พุงนุ่มใช่มั้ยล่ะ... ระวังกับดักพุงแมวนะ! 🐾',
+    spicyQuote: 'ฟ่อ!! กับดักพุงแมวทำงาน! กางเล็บงั่มมือซะเลย!! 😾💢',
+    eatQuote: 'เหมียววว~ ขนมแมวเลียอร่อยสุดๆ เลียปากแผล็บ! 🐟💖',
+    napQuote: 'ครืด... หายใจพุงกระเพื่อม หลับปุ๋ยแล้ว zZz 💤',
+  },
+  {
     id: 'husky',
     name: 'น้องข้าวคั่ว',
     speciesLabel: 'ข้าวคั่ว ฮัสกี้',
@@ -39,10 +64,10 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 34,
     treatLabel: 'ป้อนหมูย่าง',
     treatIcon: '🍖',
-    homePos: [0, -0.25],
+    homePos: [0.55, -0.25],
     moveSpeed: 0,
     scaleHeight: 1.95,
-    idleQuote: 'โฮ่ง! ข้าวคั่วเป็นลูกสาวนะ มานั่งเล่นบนพรมสิ!',
+    idleQuote: 'โฮ่ง! ข้าวคั่วเป็นลูกสาวนะ นอนรอให้เกาพุงบนเบาะอยู่!',
     petQuote: 'วู้ววว~ เกาคางหน่อย ชอบมากกก!',
     bellyQuote: 'แฮ่กๆ เกาพุงแรงๆ เลยมนุษย์ ชอบๆ!',
     spicyQuote: 'บรู้ววว!! จั๊กจี้โว้ยยย พอก่อน! 🐺💢',
@@ -242,7 +267,7 @@ export function PetCafeModal({
   qualityMode = 'auto',
   playerName = 'ผู้กล้า',
 }: PetCafeModalProps) {
-  const [selectedPetId, setSelectedPetId] = useState<string>('husky');
+  const [selectedPetId, setSelectedPetId] = useState<string>('belly_cat');
   const [activeTool, setActiveTool] = useState<CafeTool>('pet');
   const [moodText, setMoodText] = useState<string>(CAFE_PETS[0].idleQuote);
   const [moodState, setMoodState] = useState<'chill' | 'happy' | 'spicy' | 'play' | 'eating'>('chill');
@@ -254,7 +279,7 @@ export function PetCafeModal({
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const activeToolRef = useRef<CafeTool>('pet');
-  const selectedPetIdRef = useRef<string>('husky');
+  const selectedPetIdRef = useRef<string>('belly_cat');
   const isPointerDownRef = useRef<boolean>(false);
   const activeRubPetIdRef = useRef<string | null>(null);
   const lastParticleAtRef = useRef<number>(0);
@@ -309,66 +334,170 @@ export function PetCafeModal({
     }
   }, []);
 
-  const playPetSfx = useCallback((kind: 'purr' | 'spicy' | 'eat' | 'bell', voicePitch?: number) => {
-    const now = performance.now();
-    if (kind === 'purr' && now - lastSfxAtRef.current < 320) return;
-    lastSfxAtRef.current = now;
-    try {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const t = ctx.currentTime;
-      const base = voicePitch ?? 500;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      if (kind === 'bell') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1046, t);
-        osc.frequency.exponentialRampToValueAtTime(1318, t + 0.12);
-        gain.gain.setValueAtTime(0.12, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.26);
-      } else if (kind === 'purr') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(base * 0.65, t);
-        osc.frequency.exponentialRampToValueAtTime(base * 0.85, t + 0.14);
-        gain.gain.setValueAtTime(0.08, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.17);
-      } else if (kind === 'spicy') {
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(base * 1.15, t);
-        osc.frequency.exponentialRampToValueAtTime(base * 0.5, t + 0.22);
-        gain.gain.setValueAtTime(0.12, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.25);
-      } else {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(base * 0.8, t);
-        osc.frequency.exponentialRampToValueAtTime(base * 1.25, t + 0.14);
-        gain.gain.setValueAtTime(0.11, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.19);
+  const playPetSfx = useCallback(
+    (kind: 'purr' | 'spicy' | 'eat' | 'bell', voicePitch?: number, isRealCat?: boolean) => {
+      const now = performance.now();
+      if (kind === 'purr' && now - lastSfxAtRef.current < (isRealCat ? 380 : 320)) return;
+      lastSfxAtRef.current = now;
+      try {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const t = ctx.currentTime;
+        const base = voicePitch ?? 500;
+
+        if (isRealCat && kind === 'purr') {
+          // เสียงครางแมวจริง 26Hz (Real Cat Purr Motor Rumble!)
+          const osc = ctx.createOscillator();
+          const lfo = ctx.createOscillator();
+          const lfoGain = ctx.createGain();
+          const filter = ctx.createBiquadFilter();
+          const gain = ctx.createGain();
+
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(26, t);
+          lfo.type = 'sine';
+          lfo.frequency.setValueAtTime(5.5, t);
+          lfoGain.gain.setValueAtTime(0.06, t);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(145, t);
+
+          gain.gain.setValueAtTime(0.001, t);
+          gain.gain.linearRampToValueAtTime(0.14, t + 0.08);
+          gain.gain.linearRampToValueAtTime(0.11, t + 0.28);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+
+          lfo.connect(lfoGain);
+          lfoGain.connect(gain.gain);
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(ctx.destination);
+
+          osc.start(t);
+          lfo.start(t);
+          osc.stop(t + 0.44);
+          lfo.stop(t + 0.44);
+          setTimeout(() => ctx.close().catch(() => { }), 550);
+          return;
+        }
+
+        if (isRealCat && kind === 'spicy') {
+          // เสียงขู่ฟ่อของแมวจริง (Filtered White-Noise Cat Hiss + Quick Yowl!)
+          const bufLen = Math.floor(ctx.sampleRate * 0.32);
+          const noiseBuf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+          const ch = noiseBuf.getChannelData(0);
+          for (let i = 0; i < bufLen; i++) ch[i] = Math.random() * 2 - 1;
+          const noise = ctx.createBufferSource();
+          noise.buffer = noiseBuf;
+
+          const band = ctx.createBiquadFilter();
+          band.type = 'bandpass';
+          band.frequency.setValueAtTime(3200, t);
+          band.Q.setValueAtTime(1.4, t);
+
+          const nGain = ctx.createGain();
+          nGain.gain.setValueAtTime(0.001, t);
+          nGain.gain.linearRampToValueAtTime(0.22, t + 0.03);
+          nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.31);
+
+          noise.connect(band);
+          band.connect(nGain);
+          nGain.connect(ctx.destination);
+          noise.start(t);
+
+          const yowl = ctx.createOscillator();
+          const yGain = ctx.createGain();
+          yowl.type = 'sawtooth';
+          yowl.frequency.setValueAtTime(760, t);
+          yowl.frequency.exponentialRampToValueAtTime(420, t + 0.22);
+          yGain.gain.setValueAtTime(0.09, t);
+          yGain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+          yowl.connect(yGain);
+          yGain.connect(ctx.destination);
+          yowl.start(t);
+          yowl.stop(t + 0.25);
+
+          setTimeout(() => ctx.close().catch(() => { }), 450);
+          return;
+        }
+
+        if (isRealCat && kind === 'eat') {
+          // เสียงเหมียวอ้อนหวานๆ (Formant-curved Meow!)
+          const osc = ctx.createOscillator();
+          const filter = ctx.createBiquadFilter();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(520, t);
+          osc.frequency.exponentialRampToValueAtTime(880, t + 0.14);
+          osc.frequency.exponentialRampToValueAtTime(490, t + 0.34);
+          filter.type = 'bandpass';
+          filter.frequency.setValueAtTime(1250, t);
+          filter.Q.setValueAtTime(1.8, t);
+          gain.gain.setValueAtTime(0.001, t);
+          gain.gain.linearRampToValueAtTime(0.16, t + 0.06);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.36);
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.38);
+          setTimeout(() => ctx.close().catch(() => { }), 500);
+          return;
+        }
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        if (kind === 'bell') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1046, t);
+          osc.frequency.exponentialRampToValueAtTime(1318, t + 0.12);
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.26);
+        } else if (kind === 'purr') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(base * 0.65, t);
+          osc.frequency.exponentialRampToValueAtTime(base * 0.85, t + 0.14);
+          gain.gain.setValueAtTime(0.08, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.17);
+        } else if (kind === 'spicy') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(base * 1.15, t);
+          osc.frequency.exponentialRampToValueAtTime(base * 0.5, t + 0.22);
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.25);
+        } else {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(base * 0.8, t);
+          osc.frequency.exponentialRampToValueAtTime(base * 1.25, t + 0.14);
+          gain.gain.setValueAtTime(0.11, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.19);
+        }
+        setTimeout(() => ctx.close().catch(() => { }), 420);
+      } catch {
+        // ignore
       }
-      setTimeout(() => ctx.close().catch(() => {}), 420);
-    } catch {
-      // ignore
-    }
-  }, []);
+    },
+    []
+  );
 
   const spawnParticle = useCallback((clientX: number, clientY: number, emoji: string) => {
     const now = performance.now();
@@ -407,7 +536,7 @@ export function PetCafeModal({
       setMoodText(`${pet.eatQuote} (แก๊งน้องๆ วิ่งมารุมกินด้วย!)`);
       setHappiness((h) => Math.min(100, h + 12));
       addBond(pet.id, 15);
-      playPetSfx('eat', pet.voicePitch);
+      playPetSfx('eat', pet.voicePitch, pet.isRealCatSfx);
     },
     [addBond, playPetSfx]
   );
@@ -497,17 +626,18 @@ export function PetCafeModal({
     rugTrim.position.y = 0.06;
     scene.add(rugTrim);
 
-    // Cozy Pet Cushions around the room
-    const cushionSpecs: Array<[number, number, number]> = [
-      [-2.8, -1.65, 0xbfdbfe],
-      [2.8, -1.6, 0xbbf7d0],
+    // Cozy Pet Cushions around the room (including plush cushion right under Kaokua!)
+    const cushionSpecs: Array<[number, number, number, number]> = [
+      [0.55, -0.25, 0xfde68a, 1.15],
+      [-2.8, -1.65, 0xbfdbfe, 0.85],
+      [2.8, -1.6, 0xbbf7d0, 0.85],
     ];
-    cushionSpecs.forEach(([cx, cz, hex]) => {
+    cushionSpecs.forEach(([cx, cz, hex, rad]) => {
       const cush = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.85, 0.95, 0.16, 20),
+        new THREE.CylinderGeometry(rad, rad + 0.1, 0.14, 24),
         new THREE.MeshStandardMaterial({ color: hex, roughness: 0.9 })
       );
-      cush.position.set(cx, 0.08, cz);
+      cush.position.set(cx, 0.07, cz);
       cush.receiveShadow = true;
       scene.add(cush);
     });
@@ -676,21 +806,27 @@ export function PetCafeModal({
                 side: THREE.DoubleSide,
               })
             );
-            photoMesh.position.set(0, planeH / 2 - 0.04, 0);
+            if (meta.photoFlatOnFloor) {
+              // แมวหงายพุงนอนแผ่ราบบนพรมคาเฟ่ เอียงรับมุมกล้องเล็กน้อยให้ดูสมจริงสุดๆ!
+              photoMesh.rotation.x = -Math.PI * 0.34;
+              photoMesh.position.set(0, 0.26, 0);
+            } else {
+              photoMesh.position.set(0, planeH / 2 - 0.04, 0);
+            }
             photoMesh.userData.cafePetId = meta.id;
             bodyPivot.add(photoMesh);
 
             const shadowOval = new THREE.Mesh(
-              new THREE.CircleGeometry(planeW * 0.42, 24),
+              new THREE.CircleGeometry(planeW * (meta.photoFlatOnFloor ? 0.48 : 0.42), 24),
               new THREE.MeshBasicMaterial({
                 color: 0x000000,
                 transparent: true,
-                opacity: 0.22,
+                opacity: meta.photoFlatOnFloor ? 0.28 : 0.22,
                 depthWrite: false,
               })
             );
             shadowOval.rotation.x = -Math.PI / 2;
-            shadowOval.scale.set(1, 0.55, 1);
+            shadowOval.scale.set(1, meta.photoFlatOnFloor ? 0.48 : 0.55, 1);
             shadowOval.position.y = 0.02;
             petRoot.add(shadowOval);
 
@@ -832,8 +968,8 @@ export function PetCafeModal({
         setMoodText(pet.petQuote);
         setHappiness((h) => Math.min(100, h + 0.6));
         addBond(pet.id, 1);
-        playPetSfx('purr', pet.voicePitch);
-        spawnParticle(e.clientX, e.clientY, Math.random() < 0.5 ? '💖' : '✨');
+        playPetSfx('purr', pet.voicePitch, pet.isRealCatSfx);
+        spawnParticle(e.clientX, e.clientY, pet.isRealCatSfx ? (Math.random() < 0.5 ? '💖' : '🎵') : (Math.random() < 0.5 ? '💖' : '✨'));
       } else if (tool === 'belly') {
         hitRt.bellyHeat += 1;
         if (hitRt.bellyHeat >= pet.spicyThreshold) {
@@ -843,12 +979,12 @@ export function PetCafeModal({
           setMoodState('spicy');
           setMoodText(pet.spicyQuote);
           setScratchFlash(true);
-          setTimeout(() => setScratchFlash(false), 320);
-          playPetSfx('spicy', pet.voicePitch);
+          setTimeout(() => setScratchFlash(false), 380);
+          playPetSfx('spicy', pet.voicePitch, pet.isRealCatSfx);
           spawnParticle(e.clientX, e.clientY, '💢');
           if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
             try {
-              navigator.vibrate(110);
+              navigator.vibrate(pet.isRealCatSfx ? [80, 30, 120] : 110);
             } catch {
               // ignore
             }
@@ -860,7 +996,7 @@ export function PetCafeModal({
           setMoodText(pet.bellyQuote);
           setHappiness((h) => Math.min(100, h + 0.8));
           addBond(pet.id, 1);
-          playPetSfx('purr', pet.voicePitch);
+          playPetSfx('purr', pet.voicePitch, pet.isRealCatSfx);
           spawnParticle(e.clientX, e.clientY, Math.random() < 0.5 ? '💕' : '🐾');
         }
       }
@@ -1026,12 +1162,22 @@ export function PetCafeModal({
           rt.bodyPivot.scale.x = 1;
         }
 
-        // Natural breathing + napping squat
+        // Natural breathing + realistic belly-cat dream twitch & purr squirm
         const isNapping = !isPhoto && !isMovingNow && rt.aiMode === 'nap' && now >= rt.happyHopUntil && now >= rt.eatUntil;
-        const breath = isNapping
-          ? 0.84 + Math.sin(elapsed * 1.9 + idx) * 0.03
-          : 1 + Math.sin(elapsed * 2.8 + idx) * 0.022;
+        const isBellyCat = Boolean(rt.meta.photoFlatOnFloor);
+        const breath = isBellyCat
+          ? 1 + Math.sin(elapsed * 2.1) * 0.048 // พุงกระเพื่อมหายใจชัดแบบแมวหลับลึก!
+          : isNapping
+            ? 0.84 + Math.sin(elapsed * 1.9 + idx) * 0.03
+            : 1 + Math.sin(elapsed * 2.8 + idx) * 0.022;
         rt.bodyPivot.scale.y = breath;
+        if (isBellyCat) {
+          // เอฟเฟกต์กระตุกตัวเบาๆ เหมือนแมวละเมอฝัน + สั่นครืดๆ ตอนโดนลูบ
+          const dreamTwitch = Math.sin(elapsed * 1.3) > 0.96 ? Math.sin(elapsed * 38) * 0.04 : 0;
+          const purrVibe = now < rt.happyHopUntil ? Math.sin(elapsed * 45) * 0.018 : 0;
+          rt.bodyPivot.scale.x = 1 + (breath - 1) * 0.5 + purrVibe;
+          rt.root.rotation.y = dreamTwitch;
+        }
 
         // Smooth tilt & belly roll
         const curiousTilt =
@@ -1099,10 +1245,14 @@ export function PetCafeModal({
         className="fixed inset-0 w-full h-full z-0 touch-none cursor-pointer"
       />
 
-      {/* Spicy Claw Scratch Flash */}
+      {/* Spicy Cat Claw Slash Scratch Flash (3 diagonal claw marks!) */}
       {scratchFlash && (
-        <div className="fixed inset-0 z-30 pointer-events-none bg-rose-500/35 flex items-center justify-center">
-          <div className="text-7xl animate-ping">💢</div>
+        <div className="fixed inset-0 z-30 pointer-events-none bg-rose-500/30 flex items-center justify-center">
+          <svg viewBox="0 0 240 240" className="w-64 h-64 drop-shadow-[0_0_18px_rgba(244,63,94,0.95)] animate-ping">
+            <path d="M35 195 Q105 110 195 30" stroke="#ef4444" strokeWidth="14" strokeLinecap="round" fill="none" />
+            <path d="M55 215 Q125 130 215 50" stroke="#ffffff" strokeWidth="10" strokeLinecap="round" fill="none" />
+            <path d="M20 170 Q90 85 170 15" stroke="#ef4444" strokeWidth="11" strokeLinecap="round" fill="none" />
+          </svg>
         </div>
       )}
 
@@ -1166,13 +1316,12 @@ export function PetCafeModal({
       {/* Speech Bubble */}
       <div className="relative z-20 flex justify-center px-3 pointer-events-none">
         <div
-          className={`px-4 py-1.5 rounded-full border-2 shadow-lg text-xs sm:text-sm font-extrabold transition ${
-            moodState === 'spicy'
-              ? 'bg-rose-600 text-white border-amber-200 animate-bounce'
-              : moodState === 'happy' || moodState === 'eating'
+          className={`px-4 py-1.5 rounded-full border-2 shadow-lg text-xs sm:text-sm font-extrabold transition ${moodState === 'spicy'
+            ? 'bg-rose-600 text-white border-amber-200 animate-bounce'
+            : moodState === 'happy' || moodState === 'eating'
               ? 'bg-pink-100 text-rose-900 border-pink-400'
               : 'bg-white/95 text-stone-800 border-amber-400'
-          }`}
+            }`}
         >
           {loadingCount > 0
             ? `⏳ กำลังเปิดประตูคาเฟ่เรียกแก๊งสัตว์เลี้ยงออกมาต้อนรับ ${playerName}...`
@@ -1193,11 +1342,10 @@ export function PetCafeModal({
                 setMoodState('chill');
                 setMoodText(pet.idleQuote);
               }}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition whitespace-nowrap shrink-0 ${
-                selectedPetId === pet.id
-                  ? 'bg-amber-300 text-stone-950 shadow'
-                  : 'bg-amber-900/60 text-amber-100 hover:bg-amber-800/80'
-              }`}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition whitespace-nowrap shrink-0 ${selectedPetId === pet.id
+                ? 'bg-amber-300 text-stone-950 shadow'
+                : 'bg-amber-900/60 text-amber-100 hover:bg-amber-800/80'
+                }`}
             >
               <span>{pet.icon}</span>
               <span>{pet.speciesLabel}</span>
@@ -1210,11 +1358,10 @@ export function PetCafeModal({
           <button
             type="button"
             onClick={() => setActiveTool('pet')}
-            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${
-              activeTool === 'pet'
-                ? 'bg-pink-400 text-black border-white shadow'
-                : 'bg-slate-900 text-pink-200 border-slate-700 hover:border-pink-400'
-            }`}
+            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${activeTool === 'pet'
+              ? 'bg-pink-400 text-black border-white shadow'
+              : 'bg-slate-900 text-pink-200 border-slate-700 hover:border-pink-400'
+              }`}
           >
             <span className="text-lg leading-none">✋</span>
             <span className="text-[10.5px] font-extrabold">ลูบหัว</span>
@@ -1223,11 +1370,10 @@ export function PetCafeModal({
           <button
             type="button"
             onClick={() => setActiveTool('belly')}
-            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${
-              activeTool === 'belly'
-                ? 'bg-amber-400 text-black border-white shadow'
-                : 'bg-slate-900 text-amber-200 border-slate-700 hover:border-amber-400'
-            }`}
+            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${activeTool === 'belly'
+              ? 'bg-amber-400 text-black border-white shadow'
+              : 'bg-slate-900 text-amber-200 border-slate-700 hover:border-amber-400'
+              }`}
           >
             <span className="text-lg leading-none">🐾</span>
             <span className="text-[10.5px] font-extrabold">เกาพุง</span>
@@ -1236,11 +1382,10 @@ export function PetCafeModal({
           <button
             type="button"
             onClick={() => setActiveTool('laser')}
-            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${
-              activeTool === 'laser'
-                ? 'bg-rose-500 text-white border-white shadow'
-                : 'bg-slate-900 text-rose-200 border-slate-700 hover:border-rose-400'
-            }`}
+            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${activeTool === 'laser'
+              ? 'bg-rose-500 text-white border-white shadow'
+              : 'bg-slate-900 text-rose-200 border-slate-700 hover:border-rose-400'
+              }`}
           >
             <span className="text-lg leading-none">🔴</span>
             <span className="text-[10.5px] font-extrabold">เลเซอร์</span>
@@ -1252,11 +1397,10 @@ export function PetCafeModal({
               setActiveTool('treat');
               handleFeedTreat();
             }}
-            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${
-              activeTool === 'treat'
-                ? 'bg-emerald-400 text-black border-white shadow'
-                : 'bg-slate-900 text-emerald-200 border-slate-700 hover:border-emerald-400'
-            }`}
+            className={`rounded-xl py-2 px-1.5 flex flex-col items-center gap-0.5 cursor-pointer transition border-2 ${activeTool === 'treat'
+              ? 'bg-emerald-400 text-black border-white shadow'
+              : 'bg-slate-900 text-emerald-200 border-slate-700 hover:border-emerald-400'
+              }`}
           >
             <span className="text-lg leading-none">{selectedPet.treatIcon}</span>
             <span className="text-[10.5px] font-extrabold truncate max-w-full">

@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { fetchAllQuests } from '@/lib/quest_board_db';
 import {
-  QUEST_MIN_DURATION_DAYS,
   QUEST_MIN_STAKE,
   QUEST_MAX_STAKE,
-  buildFallbackQuestSummary,
 } from '@/lib/quest_board';
 
 export const dynamic = 'force-dynamic';
@@ -47,9 +45,9 @@ export async function POST(req: Request) {
     const templateKey = String(body.templateKey ?? '').trim();
     const targetValue = Number(body.targetValue ?? 0) || 0;
     const targetUnit = String(body.targetUnit ?? '').trim();
-    const durationDays = Math.floor(Number(body.durationDays ?? QUEST_MIN_DURATION_DAYS));
+    const durationDays = Math.max(0, Math.floor(Number(body.durationDays ?? 0) || 0));
     const initialSponsorAmount = Math.floor(Number(body.initialSponsorAmount ?? 0)) || 0;
-    let aiSummary = String(body.aiSummary ?? '').trim();
+    const aiSummary = String(body.aiSummary ?? '').trim();
 
     if (!Number.isFinite(creatorId) || creatorId <= 0) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนสร้างเควส' }, { status: 400 });
@@ -60,18 +58,13 @@ export async function POST(req: Request) {
     if (!description || description.length < 5) {
       return NextResponse.json({ error: 'กรุณาอธิบายรายละเอียด/เงื่อนไขเควสให้ชัดเจน' }, { status: 400 });
     }
-    if (!Number.isFinite(durationDays) || durationDays < QUEST_MIN_DURATION_DAYS) {
-      return NextResponse.json(
-        { error: `ระยะเวลาเควสขั้นต่ำคือ ${QUEST_MIN_DURATION_DAYS} วัน (1 เดือน)` },
-        { status: 400 }
-      );
-    }
     if (
-      initialSponsorAmount > 0 &&
-      (initialSponsorAmount < QUEST_MIN_STAKE || initialSponsorAmount > QUEST_MAX_STAKE)
+      initialSponsorAmount < 0 ||
+      (initialSponsorAmount > 0 &&
+        (initialSponsorAmount < QUEST_MIN_STAKE || initialSponsorAmount > QUEST_MAX_STAKE))
     ) {
       return NextResponse.json(
-        { error: `ลงกองกลางรางวัลได้ตั้งแต่ ${QUEST_MIN_STAKE} – ${QUEST_MAX_STAKE} 💰 ต่อคน/เควส` },
+        { error: `สมทบรางวัลได้ 0 หรือ ${QUEST_MIN_STAKE} – ${QUEST_MAX_STAKE} 💰 ต่อคน/เควส` },
         { status: 400 }
       );
     }
@@ -92,17 +85,13 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!aiSummary) {
-      aiSummary = buildFallbackQuestSummary(title, description, durationDays).summary;
-    }
-
     if (initialSponsorAmount > 0) {
       const deductRes = await turso.execute({
         sql: `UPDATE users SET points = points - ? WHERE id = ? AND points >= ?`,
         args: [initialSponsorAmount, creatorId, initialSponsorAmount],
       });
       if ((deductRes.rowsAffected ?? 0) === 0) {
-        return NextResponse.json({ error: 'เหรียญ Gacha ไม่พอสำหรับลงกองกลางรางวัล' }, { status: 400 });
+        return NextResponse.json({ error: 'เหรียญ Gacha ไม่พอสำหรับสมทบรางวัล' }, { status: 400 });
       }
     }
 

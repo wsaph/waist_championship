@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
-import { Trophy, Scale, UserPlus, Menu } from 'lucide-react';
+import { Trophy, Scale, UserPlus, Menu, LogOut } from 'lucide-react';
 import {
   buildCharacterMesh,
   animateCharacterMotion,
@@ -94,6 +94,11 @@ const CasinoCardModal = dynamic(
   () => import('@/components/CasinoCardModal').then((m) => m.CasinoCardModal),
   { ssr: false }
 );
+const QuestBoardModal = dynamic(
+  () => import('@/components/QuestBoardModal').then((m) => m.QuestBoardModal),
+  { ssr: false }
+);
+import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
 
 interface Player {
   id: number;
@@ -340,7 +345,36 @@ export default function Arena3DPage() {
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isNearGuard, setIsNearGuard] = useState(false);
   const [isNearCafe, setIsNearCafe] = useState(false);
+  const [isNearQuestBoard, setIsNearQuestBoard] = useState(false);
   const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
+  const [isQuestBoardOpen, setIsQuestBoardOpen] = useState(false);
+  const [questBoardFocusId, setQuestBoardFocusId] = useState<number | null>(null);
+  const [quests, setQuests] = useState<QuestBoardItem[]>([]);
+  const activeQuestTagByUserId = React.useMemo(() => {
+    const map: Record<number, string> = {};
+    const countMap: Record<number, number> = {};
+    for (const q of quests) {
+      if (q.status !== 'active' && q.status !== 'voting') continue;
+      for (const m of q.party) {
+        if (m.inviteStatus !== 'accepted') continue;
+        countMap[m.userId] = (countMap[m.userId] || 0) + 1;
+        if (!map[m.userId]) {
+          const clean = q.title.trim();
+          map[m.userId] = clean.length > 20 ? `${clean.slice(0, 19)}…` : clean;
+        }
+      }
+    }
+    for (const uidStr of Object.keys(countMap)) {
+      const uid = Number(uidStr);
+      if (countMap[uid] > 1) {
+        map[uid] = `${map[uid]} (+${countMap[uid] - 1})`;
+      }
+    }
+    return map;
+  }, [quests]);
+  const activeQuestTagByUserIdRef = useRef<Record<number, string>>(activeQuestTagByUserId);
+  activeQuestTagByUserIdRef.current = activeQuestTagByUserId;
+  const [betBannerDismissed, setBetBannerDismissed] = useState(false);
   const [isNearOcean, setIsNearOcean] = useState(false);
   const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
   const [fishingResult, setFishingResult] = useState<{
@@ -368,6 +402,7 @@ export default function Arena3DPage() {
   const nearbySpectatorIdRef = useRef<number | null>(null);
   const isNearGuardRef = useRef<boolean>(false);
   const isNearCafeRef = useRef<boolean>(false);
+  const isNearQuestBoardRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
   const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
   const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
@@ -447,7 +482,7 @@ export default function Arena3DPage() {
   const localBroadcastRef = useRef<BroadcastChannel | null>(null);
   const playersRef = useRef<Player[]>([]);
   const fetchArenaDataRef = useRef<(opts?: { force?: boolean; viewerId?: number | null }) => Promise<void>>(
-    async () => {}
+    async () => { }
   );
   const lastDataSignatureRef = useRef<string>('');
   const clientInstanceIdRef = useRef<string>(
@@ -456,13 +491,19 @@ export default function Arena3DPage() {
   const remoteSpectatorStateRef = useRef<
     Record<number, { x: number; y: number; z: number; rotY: number; isWalking: boolean; updatedAt: number }>
   >({});
+  const remoteFishingStateRef = useRef<
+    Record<number, { phase: 'idle' | 'waiting' | 'bite' | 'reeling'; dx: number; dz: number; updatedAt: number }>
+  >({});
+  const remoteBusyStatusRef = useRef<Record<number, { label: string; updatedAt: number }>>({});
+  const myBusyLabelRef = useRef<string>('');
+  const lastRubBroadcastRef = useRef<Record<number, number>>({});
   const lastMoveBroadcastAtRef = useRef<number>(0);
   const lastLocalEjectAtRef = useRef<number>(0);
   const wasWalkingRef = useRef<boolean>(false);
   const currentUserIdRef = useRef<number | null>(null);
   const pauseArenaRenderRef = useRef<boolean>(false);
   const claimingCoinRef = useRef<boolean>(false);
-  const claimBeachCoinRef = useRef<(slotId: number, spawnToken: string) => Promise<void>>(async () => {});
+  const claimBeachCoinRef = useRef<(slotId: number, spawnToken: string) => Promise<void>>(async () => { });
   const lunchCoinsRef = useRef<Array<{ slotId: number; spawnToken: string; x: number; z: number }>>([]);
   const claimedTokensRef = useRef<Set<string>>(new Set());
   const [isLunchRush, setIsLunchRush] = useState<boolean>(false);
@@ -584,9 +625,58 @@ export default function Arena3DPage() {
 
   useEffect(() => {
     pauseArenaRenderRef.current = Boolean(
-      isJoinOpen || isVolleyballOpen || isShabuOpen || isCardOpen || (authChecked && currentUserId === null)
+      isJoinOpen ||
+      isVolleyballOpen ||
+      isShabuOpen ||
+      isCardOpen ||
+      isQuestBoardOpen ||
+      (authChecked && currentUserId === null)
     );
-  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, authChecked, currentUserId]);
+  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, isQuestBoardOpen, authChecked, currentUserId]);
+
+  const fetchQuests = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quests', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.quests)) {
+        setQuests(data.quests);
+      }
+    } catch {
+      // ignore transient network errors
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchQuests();
+    const iv = setInterval(fetchQuests, 30_000);
+    return () => clearInterval(iv);
+  }, [fetchQuests]);
+
+  const openQuestBoard = useCallback(
+    (focusQuestId: number | null = null) => {
+      setQuestBoardFocusId(focusQuestId);
+      setIsQuestBoardOpen(true);
+      fetchQuests();
+    },
+    [fetchQuests]
+  );
+  const openQuestBoardRef = useRef(openQuestBoard);
+  useEffect(() => {
+    openQuestBoardRef.current = openQuestBoard;
+  }, [openQuestBoard]);
+
+  const handleQuestsUpdated = useCallback(
+    (nextQuests: QuestBoardItem[], nextUserPoints?: number) => {
+      setQuests(nextQuests);
+      if (typeof nextUserPoints === 'number' && currentUserId !== null) {
+        setPlayers((prev) =>
+          prev.map((p) => (p.id === currentUserId ? { ...p, points: nextUserPoints } : p))
+        );
+      }
+    },
+    [currentUserId]
+  );
 
   useEffect(() => {
     playersRef.current = players;
@@ -784,6 +874,36 @@ export default function Arena3DPage() {
     }
   }, []);
 
+  // ซิงก์สถานะว่าผู้เล่นกำลังทำกิจกรรมหน้าต่างไหนอยู่ ให้เพื่อนเห็นป้ายบนหัวแบบเรียลไทม์!
+  useEffect(() => {
+    const label = isCardOpen
+      ? '🃏 กำลังเล่นไพ่คาสิโน...'
+      : isShabuOpen
+        ? '🍲 กำลังต้มชาบู...'
+        : isVolleyballOpen
+          ? '🏐 กำลังตีวอลเลย์บอล...'
+          : isPetCafeOpen
+            ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
+            : isQuestBoardOpen
+              ? '📋 กำลังดูกระดานภารกิจ...'
+              : isJoinOpen
+                ? '👗 กำลังแต่งตัว...'
+                : '';
+    myBusyLabelRef.current = label;
+    if (currentUserId && currentUserId > 0) {
+      broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
+    }
+  }, [
+    isCardOpen,
+    isShabuOpen,
+    isVolleyballOpen,
+    isPetCafeOpen,
+    isQuestBoardOpen,
+    isJoinOpen,
+    currentUserId,
+    broadcastRealtimeEvent,
+  ]);
+
   const broadcastArenaSync = useCallback(
     (
       reason: 'user_created' | 'user_updated' | 'weight_logged' | 'shop_updated' | 'roam_toggled' | 'gift_sent',
@@ -872,7 +992,7 @@ export default function Arena3DPage() {
         playTone(784, 1046, 0.18, 0.18, 0.16);
       }
       setTimeout(() => {
-        ctx.close().catch(() => {});
+        ctx.close().catch(() => { });
       }, 600);
     } catch {
       // ignore autoplay/audio restrictions
@@ -893,9 +1013,18 @@ export default function Arena3DPage() {
       fishingTimersRef.current.missTimer = undefined;
     }
     fishingNibbleUntilRef.current = 0;
+    const wasFishing = fishingPhaseRef.current !== 'idle';
     fishingPhaseRef.current = 'idle';
     setFishingPhase('idle');
-  }, []);
+    if (wasFishing && walkingSpectatorIdRef.current !== null) {
+      broadcastRealtimeEvent('fishing', {
+        userId: walkingSpectatorIdRef.current,
+        phase: 'idle',
+        dx: oceanDirRef.current.dx,
+        dz: oceanDirRef.current.dz,
+      });
+    }
+  }, [broadcastRealtimeEvent]);
 
   const startFishing = useCallback(() => {
     cancelFishing();
@@ -904,6 +1033,14 @@ export default function Arena3DPage() {
     fishingPhaseRef.current = 'waiting';
     setFishingPhase('waiting');
     playFishingSfx('cast');
+    if (walkingSpectatorIdRef.current !== null) {
+      broadcastRealtimeEvent('fishing', {
+        userId: walkingSpectatorIdRef.current,
+        phase: 'waiting',
+        dx: oceanDirRef.current.dx,
+        dz: oceanDirRef.current.dz,
+      });
+    }
 
     // สไตล์ Harvest Moon: Back to Nature แท้ๆ — ถ้าสั่นแล้วไม่กดดึง เบ็ดจะยังแช่อยู่ในน้ำและรอปลามากินรอบใหม่ไปเรื่อยๆ!
     const scheduleNextBite = () => {
@@ -930,10 +1067,10 @@ export default function Arena3DPage() {
         rollSpeed < 0.15
           ? 350 + Math.floor(Math.random() * 100) // โหมดนรก: 350–450ms!
           : rollSpeed < 0.35
-          ? 460 + Math.floor(Math.random() * 140) // โหมดโหด: 460–600ms
-          : rollSpeed < 0.75
-          ? 620 + Math.floor(Math.random() * 260) // โหมดกลาง: 620–880ms
-          : 900 + Math.floor(Math.random() * 250); // โหมดชิล: 900–1150ms
+            ? 460 + Math.floor(Math.random() * 140) // โหมดโหด: 460–600ms
+            : rollSpeed < 0.75
+              ? 620 + Math.floor(Math.random() * 260) // โหมดกลาง: 620–880ms
+              : 900 + Math.floor(Math.random() * 250); // โหมดชิล: 900–1150ms
 
       fishingTimersRef.current.biteTimer = setTimeout(() => {
         if (fishingPhaseRef.current !== 'waiting') return;
@@ -941,6 +1078,14 @@ export default function Arena3DPage() {
         fishingPhaseRef.current = 'bite';
         setFishingPhase('bite');
         playFishingSfx('bite');
+        if (walkingSpectatorIdRef.current !== null) {
+          broadcastRealtimeEvent('fishing', {
+            userId: walkingSpectatorIdRef.current,
+            phase: 'bite',
+            dx: oceanDirRef.current.dx,
+            dz: oceanDirRef.current.dz,
+          });
+        }
         if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
           try {
             navigator.vibrate([90, 35, 90]);
@@ -953,13 +1098,21 @@ export default function Arena3DPage() {
           // ไม่กดดึง → หยุดสั่น กลับไปแช่เบ็ดรอปลามากินรอบถัดไปเรื่อยๆ (ไม่ตัดจบเหมือน BTN!)
           fishingPhaseRef.current = 'waiting';
           setFishingPhase('waiting');
+          if (walkingSpectatorIdRef.current !== null) {
+            broadcastRealtimeEvent('fishing', {
+              userId: walkingSpectatorIdRef.current,
+              phase: 'waiting',
+              dx: oceanDirRef.current.dx,
+              dz: oceanDirRef.current.dz,
+            });
+          }
           scheduleNextBite();
         }, biteWindowMs);
       }, biteDelay);
     };
 
     scheduleNextBite();
-  }, [cancelFishing, playFishingSfx]);
+  }, [cancelFishing, playFishingSfx, broadcastRealtimeEvent]);
 
   const reelInFish = useCallback(async () => {
     // กดดึงเร็วเกินไปก่อนขึ้น ! (สไตล์ Harvest Moon BTN)
@@ -977,6 +1130,14 @@ export default function Arena3DPage() {
     fishingPhaseRef.current = 'reeling';
     setFishingPhase('reeling');
     playFishingSfx('catch');
+    if (walkingSpectatorIdRef.current !== null) {
+      broadcastRealtimeEvent('fishing', {
+        userId: walkingSpectatorIdRef.current,
+        phase: 'reeling',
+        dx: oceanDirRef.current.dx,
+        dz: oceanDirRef.current.dz,
+      });
+    }
 
     try {
       const res = await fetch('/api/fishing', {
@@ -1001,23 +1162,31 @@ export default function Arena3DPage() {
         );
       }
 
-      // Trigger 3D water splash / rarity light pillar / Guard Sea Pop FX at bobber position
+      // Trigger 3D water splash / rarity light pillar / Guard Sea Pop FX at bobber position (and broadcast to friends!)
       const bPos = fishingBobberPosRef.current;
+      const fxDurationMs =
+        caught.rarity === 'legendary' || caught.rarity === 'guard_troll'
+          ? 3400
+          : caught.rarity === 'rare'
+            ? 2500
+            : caught.rarity === 'uncommon'
+              ? 1700
+              : 1200;
       fishingFxRef.current = {
         rarity: caught.rarity,
         caughtId: caught.id,
         startedAt: performance.now(),
-        durationMs:
-          caught.rarity === 'legendary' || caught.rarity === 'guard_troll'
-            ? 3400
-            : caught.rarity === 'rare'
-            ? 2500
-            : caught.rarity === 'uncommon'
-            ? 1700
-            : 1200,
+        durationMs: fxDurationMs,
         bobberX: bPos.x,
         bobberZ: bPos.z,
       };
+      broadcastRealtimeEvent('fishing_fx', {
+        rarity: caught.rarity,
+        caughtId: caught.id,
+        durationMs: fxDurationMs,
+        bobberX: Number(bPos.x.toFixed(2)),
+        bobberZ: Number(bPos.z.toFixed(2)),
+      });
 
       // Tier-specific celebration effects
       if (caught.rarity === 'guard_troll') {
@@ -1091,6 +1260,14 @@ export default function Arena3DPage() {
     } finally {
       fishingPhaseRef.current = 'idle';
       setFishingPhase('idle');
+      if (walkingSpectatorIdRef.current !== null) {
+        broadcastRealtimeEvent('fishing', {
+          userId: walkingSpectatorIdRef.current,
+          phase: 'idle',
+          dx: oceanDirRef.current.dx,
+          dz: oceanDirRef.current.dz,
+        });
+      }
     }
   }, [currentUserId, showToast, broadcastRealtimeEvent, cancelFishing, playFishingSfx]);
 
@@ -1119,6 +1296,8 @@ export default function Arena3DPage() {
       setIsNearOcean(false);
       isNearCafeRef.current = false;
       setIsNearCafe(false);
+      isNearQuestBoardRef.current = false;
+      setIsNearQuestBoard(false);
       setFishingResult(null);
       cancelFishing();
     }
@@ -1305,8 +1484,7 @@ export default function Arena3DPage() {
               showToast(
                 '⚡',
                 'อัปเดตผลภารกิจสด!',
-                `${payload.actorEmoji || ''} ${payload.actorName} ส่งผลภารกิจใหม่ในสนามแล้ว!${
-                  divs.length > 0 ? ` (แจกปันผล ${divs.length} คน!)` : ''
+                `${payload.actorEmoji || ''} ${payload.actorName} ส่งผลภารกิจใหม่ในสนามแล้ว!${divs.length > 0 ? ` (แจกปันผล ${divs.length} คน!)` : ''
                 }`
               );
             }
@@ -1361,6 +1539,53 @@ export default function Arena3DPage() {
           setLiveShabuLobby((prev) =>
             prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
           );
+        }
+      } else if (event === 'fishing') {
+        if (typeof payload.userId !== 'number') return;
+        if (payload.userId === walkingSpectatorIdRef.current) return;
+        const ph = payload.phase;
+        if (ph === 'waiting' || ph === 'bite' || ph === 'reeling') {
+          remoteFishingStateRef.current[payload.userId] = {
+            phase: ph,
+            dx: Number(payload.dx ?? 0),
+            dz: Number(payload.dz ?? 1),
+            updatedAt: performance.now(),
+          };
+        } else {
+          delete remoteFishingStateRef.current[payload.userId];
+        }
+      } else if (event === 'fishing_fx') {
+        if (payload.rarity && typeof payload.bobberX === 'number' && typeof payload.bobberZ === 'number') {
+          fishingFxRef.current = {
+            rarity: payload.rarity as FishingRarity,
+            caughtId: payload.caughtId ? String(payload.caughtId) : undefined,
+            startedAt: performance.now(),
+            durationMs: Math.min(4000, Math.max(800, Number(payload.durationMs || 1800))),
+            bobberX: payload.bobberX,
+            bobberZ: payload.bobberZ,
+          };
+        }
+      } else if (event === 'belly_rub') {
+        const targetId = Number(payload.targetUserId);
+        if (!targetId) return;
+        const targetMesh = charMeshesRef.current.find((m) => m.id === targetId);
+        if (targetMesh) {
+          targetMesh.rubbedUntil = performance.now() + 950;
+        }
+        if (targetId === currentUserIdRef.current && Number(payload.actorId) !== currentUserIdRef.current) {
+          const actorLabel = payload.actorName
+            ? `${payload.actorEmoji || '🤚'} ${payload.actorName}`
+            : 'เพื่อนในสนาม';
+          showToast('🤚', `${actorLabel} แอบมาลูบพุงคุณ!`, 'จั๊กจี้เลยทีเดียว~ 😄');
+        }
+      } else if (event === 'busy_status') {
+        const uid = Number(payload.userId);
+        if (!uid) return;
+        const lbl = typeof payload.label === 'string' ? payload.label.trim() : '';
+        if (lbl) {
+          remoteBusyStatusRef.current[uid] = { label: lbl, updatedAt: performance.now() };
+        } else {
+          delete remoteBusyStatusRef.current[uid];
         }
       } else if (event === 'card_lobby') {
         if (payload.status === 'waiting' && payload.roomCode) {
@@ -1517,6 +1742,18 @@ export default function Arena3DPage() {
         .on('broadcast', { event: 'card_lobby' }, ({ payload }) =>
           handleIncomingRealtimeEvent('card_lobby', payload)
         )
+        .on('broadcast', { event: 'fishing' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('fishing', payload)
+        )
+        .on('broadcast', { event: 'fishing_fx' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('fishing_fx', payload)
+        )
+        .on('broadcast', { event: 'belly_rub' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('belly_rub', payload)
+        )
+        .on('broadcast', { event: 'busy_status' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('busy_status', payload)
+        )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
           if (myId === null || !channel) return;
@@ -1543,6 +1780,28 @@ export default function Arena3DPage() {
                 label: myMesh.activityLabel,
               },
             });
+            if (fishingPhaseRef.current !== 'idle') {
+              channel.send({
+                type: 'broadcast',
+                event: 'fishing',
+                payload: {
+                  userId: myId,
+                  phase: fishingPhaseRef.current,
+                  dx: oceanDirRef.current.dx,
+                  dz: oceanDirRef.current.dz,
+                },
+              });
+            }
+            if (myBusyLabelRef.current && currentUserIdRef.current && currentUserIdRef.current > 0) {
+              channel.send({
+                type: 'broadcast',
+                event: 'busy_status',
+                payload: {
+                  userId: currentUserIdRef.current,
+                  label: myBusyLabelRef.current,
+                },
+              });
+            }
           }
         })
         .subscribe((status) => {
@@ -1686,10 +1945,10 @@ export default function Arena3DPage() {
         const { pct: sidePct, diffLabel, isInFoodStall } = hasOwnVals
           ? computeGoalProgress(gType, sVal, cVal, tVal)
           : {
-              pct: p.sideGoalProgressPct ?? 0,
-              diffLabel: p.diffLabel ?? '',
-              isInFoodStall: Boolean(p.isInFoodStall),
-            };
+            pct: p.sideGoalProgressPct ?? 0,
+            diffLabel: p.diffLabel ?? '',
+            isInFoodStall: Boolean(p.isInFoodStall),
+          };
 
         const stepCount = Math.max(0, Number(p.stepCount ?? 0));
         const stepTarget = Math.max(1000, Number(p.stepTarget ?? seasonStepTarget));
@@ -1710,8 +1969,8 @@ export default function Arena3DPage() {
           bellyScale = hasBmiScale
             ? Math.max(0.88, Math.min(1.45, p.bmiBellyScale! * 0.94 + (isInFoodStall ? 0.1 : 0)))
             : isInFoodStall
-            ? 1.18
-            : 1.04;
+              ? 1.18
+              : 1.04;
           muscleScale = Math.max(0.92, 1.05 + sideRatio * 0.65 - negRatio * 0.12);
         } else if (hasBmiScale) {
           bellyScale = Math.max(
@@ -2593,6 +2852,117 @@ export default function Arena3DPage() {
     `;
     labelsContainer.appendChild(cafeTagEl);
 
+    // 3D Ragnarok Mobile Style Wooden Quest Board (วางไว้ใกล้พี่ยามแบบมีระยะห่างกำลังดี — กดเปิดกระดานเควสได้ทันที!)
+    const rawBoardPos = guardPostPos
+      .clone()
+      .addScaledVector(crosswalkTan, 6.2)
+      .addScaledVector(crosswalkNorm, -1.2);
+    const questBoardPos = new THREE.Vector3(
+      Math.max(islandCenterX - islandW / 2 + 3.8, Math.min(islandCenterX + islandW / 2 - 3.8, rawBoardPos.x)),
+      0.2,
+      Math.max(-(islandD / 2 - 3.8), Math.min(islandD / 2 - 3.8, rawBoardPos.z))
+    );
+    const questBoardGroup = new THREE.Group();
+    questBoardGroup.position.copy(questBoardPos);
+    questBoardGroup.rotation.y = -0.18;
+
+    const roWoodDarkMat = new THREE.MeshStandardMaterial({ color: 0x5c3317, roughness: 0.82 });
+    const roWoodMidMat = new THREE.MeshStandardMaterial({ color: 0x7c4821, roughness: 0.78 });
+    const roWoodRoofMat = new THREE.MeshStandardMaterial({ color: 0x8d5524, roughness: 0.72 });
+    const roCorkMat = new THREE.MeshStandardMaterial({ color: 0x4a2912, roughness: 0.92 });
+
+    // Stone base plinth
+    const boardPlinth = new THREE.Mesh(
+      new THREE.BoxGeometry(3.4, 0.16, 1.3),
+      new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.9 })
+    );
+    boardPlinth.position.y = 0.08;
+    boardPlinth.receiveShadow = true;
+    questBoardGroup.add(boardPlinth);
+
+    // Curved/angled sturdy wooden side posts (RO Mobile silhouette)
+    [-1.32, 1.32].forEach((px) => {
+      const lowerPost = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 1.35, 8), roWoodDarkMat);
+      lowerPost.position.set(px, 0.72, 0.1);
+      lowerPost.rotation.x = -0.14;
+      lowerPost.castShadow = true;
+      const upperPost = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 1.45, 8), roWoodDarkMat);
+      upperPost.position.set(px, 1.98, 0.02);
+      upperPost.rotation.x = 0.1;
+      upperPost.castShadow = true;
+      questBoardGroup.add(lowerPost, upperPost);
+    });
+
+    // Main wooden bulletin frame & recessed corkboard
+    const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(2.68, 1.72, 0.22), roWoodMidMat);
+    boardFrame.position.set(0, 1.78, 0);
+    boardFrame.castShadow = true;
+    boardFrame.receiveShadow = true;
+    const boardBack = new THREE.Mesh(new THREE.BoxGeometry(2.34, 1.42, 0.25), roCorkMat);
+    boardBack.position.set(0, 1.78, 0.01);
+    questBoardGroup.add(boardFrame, boardBack);
+
+    // Sloped shingled wooden roof + carved crest on top
+    const roofLeft = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.16, 1.15), roWoodRoofMat);
+    roofLeft.position.set(-0.76, 2.86, 0.06);
+    roofLeft.rotation.z = 0.28;
+    roofLeft.castShadow = true;
+    const roofRight = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.16, 1.15), roWoodRoofMat);
+    roofRight.position.set(0.76, 2.86, 0.06);
+    roofRight.rotation.z = -0.28;
+    roofRight.castShadow = true;
+    const roofCrest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.42, 0.26), roWoodMidMat);
+    roofCrest.position.set(0, 3.22, 0.06);
+    roofCrest.castShadow = true;
+    questBoardGroup.add(roofLeft, roofRight, roofCrest);
+
+    // Pinned parchment quest notices (cream, gold, mint green) with red/gold pushpins
+    const pinnedNotices = [
+      { x: -0.78, y: 2.02, w: 0.48, h: 0.6, rot: 0.08, color: 0xf7e7c4, pin: 0xef4444 },
+      { x: -0.22, y: 2.06, w: 0.44, h: 0.56, rot: -0.06, color: 0x6ee7b7, pin: 0xfacc15 },
+      { x: 0.34, y: 1.98, w: 0.5, h: 0.62, rot: 0.05, color: 0xfef08a, pin: 0xef4444 },
+      { x: 0.84, y: 1.88, w: 0.46, h: 0.55, rot: -0.1, color: 0xf3dfb6, pin: 0xf97316 },
+      { x: -0.52, y: 1.42, w: 0.52, h: 0.46, rot: -0.05, color: 0xfde68a, pin: 0xef4444 },
+      { x: 0.16, y: 1.38, w: 0.5, h: 0.44, rot: 0.09, color: 0xf7e7c4, pin: 0xef4444 },
+    ];
+    pinnedNotices.forEach((n) => {
+      const paper = new THREE.Mesh(
+        new THREE.BoxGeometry(n.w, n.h, 0.03),
+        new THREE.MeshStandardMaterial({ color: n.color, roughness: 0.7 })
+      );
+      paper.position.set(n.x, n.y, 0.155);
+      paper.rotation.z = n.rot;
+      const pin = new THREE.Mesh(
+        new THREE.SphereGeometry(0.045, 8, 8),
+        new THREE.MeshStandardMaterial({ color: n.pin, roughness: 0.35 })
+      );
+      pin.position.set(n.x, n.y + n.h * 0.38, 0.185);
+      questBoardGroup.add(paper, pin);
+    });
+
+    questBoardGroup.traverse((obj) => {
+      obj.userData.isQuestBoard = true;
+    });
+    scene.add(questBoardGroup);
+
+    const questBoardTagEl = document.createElement('div');
+    questBoardTagEl.className = 'player-tag cursor-pointer';
+    questBoardTagEl.onclick = () => {
+      cameraLookAtRef.current.set(questBoardPos.x, 1.8, questBoardPos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(questBoardPos.x + 2.4, 3.8, questBoardPos.z + 5.8);
+      if (isNearQuestBoardRef.current) {
+        openQuestBoardRef.current(null);
+      } else {
+        showToast('📜', 'เดินเข้ามาใกล้กระดานเควสก่อนนะ!', 'ปักป้ายเดินเล่นแล้วเดินมาหน้ากระดานเควสเพื่อเปิดดูได้เลย!');
+      }
+    };
+    questBoardTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-[#ffdf6b] via-[#f5a623] to-[#d97706] text-[#3d1b06] border-2 border-[#fff7d6] rounded-xl px-2.5 py-0.5 shadow-[0_3px_0_#5c2d0c,0_4px_10px_rgba(0,0,0,0.5)] text-[10.5px] font-black whitespace-nowrap hover:scale-105 transition">
+        📜 กระดานเควส • Mission Board
+      </div>
+    `;
+    labelsContainer.appendChild(questBoardTagEl);
+
     // 3D Fishing Rig (คันเบ็ด + สายเบ็ด + ทุ่นลอยน้ำ + วงคลื่น + เสาแสงตามระดับความแรร์!)
     const fishingRigGroup = new THREE.Group();
     fishingRigGroup.visible = false;
@@ -2644,6 +3014,90 @@ export default function Arena3DPage() {
     splashRingMesh.rotation.x = -Math.PI / 2;
     splashRingMesh.visible = false;
     fishingRigGroup.add(splashRingMesh);
+
+    // Lazy 3D Fishing Rigs for Remote Players so everyone sees friends fishing in real time!
+    interface RemoteFishingRig {
+      group: THREE.Group;
+      rodPivot: THREE.Group;
+      bobberGroup: THREE.Group;
+      lineGeo: THREE.BufferGeometry;
+      splashRing: THREE.Mesh;
+      splashMat: THREE.MeshBasicMaterial;
+      biteSprite: THREE.Sprite;
+    }
+    const remoteFishingRigs = new Map<number, RemoteFishingRig>();
+    const getOrCreateRemoteFishingRig = (uid: number): RemoteFishingRig => {
+      const existing = remoteFishingRigs.get(uid);
+      if (existing) return existing;
+      const group = new THREE.Group();
+      const rPivot = new THREE.Group();
+      const rShaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.055, 2.9, 8),
+        new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.65 })
+      );
+      rShaft.rotation.z = -Math.PI / 3.2;
+      rShaft.position.set(1.15, 0.85, 0);
+      const rGrip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.065, 0.065, 0.45, 8),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+      );
+      rGrip.rotation.z = -Math.PI / 3.2;
+      rGrip.position.set(0.12, 0.14, 0);
+      rPivot.add(rShaft, rGrip);
+      group.add(rPivot);
+
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, -1, 0),
+      ]);
+      const lineMesh = new THREE.Line(
+        lineGeo,
+        new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.85 })
+      );
+      group.add(lineMesh);
+
+      const bGroup = new THREE.Group();
+      const bTop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
+      );
+      const bBot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 10, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+      );
+      bGroup.add(bTop, bBot);
+      group.add(bGroup);
+
+      const sMat = new THREE.MeshBasicMaterial({
+        color: 0xe0f2fe,
+        transparent: true,
+        opacity: 0.75,
+        side: THREE.DoubleSide,
+      });
+      const sRing = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.42, 20), sMat);
+      sRing.rotation.x = -Math.PI / 2;
+      sRing.visible = false;
+      group.add(sRing);
+
+      const bSprite = new THREE.Sprite(biteAlertSprite.material);
+      bSprite.scale.set(1.1, 1.1, 1);
+      bSprite.visible = false;
+      group.add(bSprite);
+
+      group.visible = false;
+      scene.add(group);
+      const rig: RemoteFishingRig = {
+        group,
+        rodPivot: rPivot,
+        bobberGroup: bGroup,
+        lineGeo,
+        splashRing: sRing,
+        splashMat: sMat,
+        biteSprite: bSprite,
+      };
+      remoteFishingRigs.set(uid, rig);
+      return rig;
+    };
 
     // Harvest Moon BTN Iconic "!" Exclamation Mark Sprite above character head
     const biteAlertCanvas = document.createElement('canvas');
@@ -2856,12 +3310,12 @@ export default function Arena3DPage() {
       const customPair = isBeachWalker ? pairedActivities[p.id] : undefined;
       const dailyAct = isBeachWalker
         ? customPair ||
-          getDailySpectatorActivity(
-            p.id,
-            p.workoutType,
-            Math.max(1, roamingList.length),
-            indexInRoamers
-          )
+        getDailySpectatorActivity(
+          p.id,
+          p.workoutType,
+          Math.max(1, roamingList.length),
+          indexInRoamers
+        )
         : null;
 
       let slackerAct: ReturnType<typeof getFoodStallSlackerActivity> | null = null;
@@ -2931,8 +3385,8 @@ export default function Arena3DPage() {
           rankIndex === 0
             ? '👑 #1'
             : rankIndex === rankedPlayers.length - 1 && rankedPlayers.length > 1
-            ? '💀 รั้งท้าย'
-            : `#${rankIndex + 1}`;
+              ? '💀 รั้งท้าย'
+              : `#${rankIndex + 1}`;
         const pctVal = rankedInfo?.progressPct ?? 0;
         const pctColorClass = pctVal < 0 ? 'text-rose-300' : 'text-emerald-300';
 
@@ -2978,9 +3432,9 @@ export default function Arena3DPage() {
         const defaultT = isRoamingCompetitor
           ? Math.max(0.06, Math.min(0.94, laneTrackT))
           : Math.min(
-              0.95,
-              0.05 + staggerT + (rowTotal > 1 ? idxInRow / (rowTotal - 1) : 0.5) * 0.88
-            );
+            0.95,
+            0.05 + staggerT + (rowTotal > 1 ? idxInRow / (rowTotal - 1) : 0.5) * 0.88
+          );
         const pt = trackCurve.getPointAt(defaultT);
         const tan = trackCurve.getTangentAt(defaultT);
         const normal = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
@@ -2994,8 +3448,8 @@ export default function Arena3DPage() {
       const activePropType = dailyAct
         ? dailyAct.animType
         : slackerAct
-        ? slackerAct.animType
-        : '';
+          ? slackerAct.animType
+          : '';
       const initialBellyScale = rankedInfo?.bellyScale ?? p.bmiBellyScale ?? 1;
       const initialMuscleScale = rankedInfo?.muscleScale ?? 1;
       const powerMeta = !isLegacySpectator
@@ -3039,8 +3493,8 @@ export default function Arena3DPage() {
         p.equipPetGear && p.equipPetGear !== 'pet_none'
           ? p.equipPetGear
           : !isLegacySpectator
-          ? p.petType || 'none'
-          : 'none';
+            ? p.petType || 'none'
+            : 'none';
       const petParts = buildPetMesh(petType, p.propColors?.pet);
       if (petParts) {
         rootGroup.add(petParts.petGroup);
@@ -3092,7 +3546,7 @@ export default function Arena3DPage() {
       };
 
       const trimmedStatus = (p.statusText || '').trim();
-      const speechHtml = `<div data-speech-bubble class="mb-1 bg-[#FFFDF7] border-2 border-amber-500 rounded-2xl px-3 py-1 shadow-[0_3px_0_#422006] text-xs font-extrabold text-black max-w-[200px] truncate ${trimmedStatus ? '' : 'hidden'}">💬 ${escapeHtml(trimmedStatus)}</div>`;
+      const speechHtml = `<div data-busy-badge class="hidden mb-1 bg-slate-950/90 border border-cyan-300 text-cyan-200 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold shadow whitespace-nowrap"></div><div data-speech-bubble class="mb-1 bg-[#FFFDF7] border-2 border-amber-500 rounded-2xl px-3 py-1 shadow-[0_3px_0_#422006] text-xs font-extrabold text-black max-w-[200px] truncate ${trimmedStatus ? '' : 'hidden'}">💬 ${escapeHtml(trimmedStatus)}</div>`;
 
       if (isLegacySpectator) {
         const workoutLabel = dailyAct?.label || '📣 เชียร์สุดใจ';
@@ -3124,18 +3578,35 @@ export default function Arena3DPage() {
         const slackerHtml = isRoamingCompetitor
           ? `<div class="mt-1 px-2 py-0.5 rounded-full bg-cyan-900/95 border border-cyan-300 text-[10px] font-extrabold text-cyan-100 shadow-sm">🚩 เดินเล่น • ${escapeHtml(workoutLabel)}</div>`
           : isInFoodStall && slackerAct
-          ? `<div class="mt-1 px-2 py-0.5 rounded-full bg-rose-600/95 border border-amber-300 text-[10px] font-extrabold text-amber-100 shadow-sm">${escapeHtml(slackerAct.statusBadge)} • ${escapeHtml(slackerAct.label)}</div>`
-          : '';
+            ? `<div class="mt-1 px-2 py-0.5 rounded-full bg-rose-600/95 border border-amber-300 text-[10px] font-extrabold text-amber-100 shadow-sm">${escapeHtml(slackerAct.statusBadge)} • ${escapeHtml(slackerAct.label)}</div>`
+            : '';
 
         const isCompactMiniTag = isMiniRank && !isRoamingCompetitor && !isInFoodStall;
-        if (isCompactMiniTag) {
+        if (isRoamingCompetitor) {
+          // ป้ายชื่อแบบแคปซูลกะทัดรัด 1 แถวสำหรับคนเดินเล่นนอกลู่ (ไม่บังตัวละครและไม่ทับเพื่อน!)
+          const isMe = p.id === currentUserId;
+          const actBadge = dailyAct?.label
+            ? `<span class="text-[9.5px] text-cyan-200/95 font-bold truncate max-w-[90px]">• ${escapeHtml(dailyAct.label)}</span>`
+            : '';
+          tagEl.innerHTML = `
+            ${speechHtml}
+            <div class="rounded-full px-2.5 py-0.5 text-center whitespace-nowrap border shadow-md backdrop-blur-xs transition ${isMe
+              ? 'bg-amber-950/92 border-amber-300 ring-2 ring-amber-300/65'
+              : 'bg-slate-950/82 border-cyan-400/75 hover:border-amber-300'
+            }">
+              <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-[11px] text-amber-100">
+                <span>${p.emoji} ${escapeHtml(p.name)}</span>
+                ${actBadge}
+              </div>
+            </div>
+          `;
+        } else if (isCompactMiniTag) {
           const isMe = p.id === currentUserId;
           tagEl.innerHTML = `
             ${speechHtml}
-            <div class="rounded-full px-2 py-0.5 text-center whitespace-nowrap border shadow-md transition ${
-              isMe
-                ? 'bg-amber-950/95 border-amber-300 ring-2 ring-amber-300/70'
-                : 'bg-slate-950/82 border-slate-500/80 hover:border-amber-300'
+            <div class="rounded-full px-2 py-0.5 text-center whitespace-nowrap border shadow-md transition ${isMe
+              ? 'bg-amber-950/95 border-amber-300 ring-2 ring-amber-300/70'
+              : 'bg-slate-950/82 border-slate-500/80 hover:border-amber-300'
             }">
               <div class="flex items-center justify-center gap-1 font-[family-name:var(--font-kanit)] font-extrabold text-[10px] text-amber-100">
                 <span class="text-slate-300">${rankLabel}</span>
@@ -3145,6 +3616,14 @@ export default function Arena3DPage() {
             </div>
           `;
         } else {
+          const activeQTag = activeQuestTagByUserIdRef.current[p.id] || '';
+          const subRowHtml =
+            activeQTag || powerPillHtml
+              ? `<div class="flex items-center justify-center gap-1 text-[10px] font-bold text-amber-100/90 mt-0.5">
+                  ${activeQTag ? `<span class="px-1.5 py-0.2 rounded bg-black/50 border border-amber-500/50">📜 ${escapeHtml(activeQTag)}</span>` : ''}
+                  ${powerPillHtml}
+                </div>`
+              : '';
           tagEl.innerHTML = `
             ${speechHtml}
             <div class="rpg-banner rounded-xl px-3 py-1 text-center whitespace-nowrap">
@@ -3153,10 +3632,7 @@ export default function Arena3DPage() {
                 <span>${p.emoji} ${escapeHtml(p.name)}</span>
                 <span class="${pctColorClass}">(${pctVal}%)</span>
               </div>
-              <div class="flex items-center justify-center gap-1 text-[10px] font-bold text-amber-100/90 mt-0.5">
-                <span class="px-1.5 py-0.2 rounded bg-black/50 border border-amber-500/50">${gMeta.shortTag}</span>
-                ${powerPillHtml}
-              </div>
+              ${subRowHtml}
               ${slackerHtml}
             </div>
             <div class="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-amber-400 mx-auto"></div>
@@ -3429,6 +3905,16 @@ export default function Arena3DPage() {
       const activeWalkerId = walkingSpectatorIdRef.current;
       let foundCurrentUserMesh = false;
 
+      const visibleTags: Array<{
+        mesh: (typeof meshes)[number];
+        x: number;
+        y: number;
+        z: number;
+        w: number;
+        h: number;
+        isMe: boolean;
+      }> = [];
+
       meshes.forEach((c, idx) => {
         const hScale = c.charParts?.formHeightScale ?? 1;
         if (c.charParts) {
@@ -3606,6 +4092,13 @@ export default function Arena3DPage() {
             setIsNearCafe(nearCafeNow);
           }
 
+          const distToBoard = c.rootGroup.position.distanceTo(questBoardPos);
+          const nearBoardNow = distToBoard < 5.0;
+          if (nearBoardNow !== isNearQuestBoardRef.current) {
+            isNearQuestBoardRef.current = nearBoardNow;
+            setIsNearQuestBoard(nearBoardNow);
+          }
+
           // ตรวจระยะใกล้ขอบทะเล (ริมเกาะ) เพื่อเปิดกิจกรรมตกปลา 🎣
           const edgeMinX = islandCenterX - islandW / 2 + 1.8;
           const edgeMaxX = islandCenterX + islandW / 2 - 1.8;
@@ -3654,10 +4147,10 @@ export default function Arena3DPage() {
               fPhase === 'bite'
                 ? Math.sin(elapsed * 42) * 0.22
                 : fPhase === 'reeling'
-                ? 0.52
-                : isNibbling
-                ? Math.sin(elapsed * 24) * 0.07
-                : Math.sin(elapsed * 2.2) * 0.025;
+                  ? 0.52
+                  : isNibbling
+                    ? Math.sin(elapsed * 24) * 0.07
+                    : Math.sin(elapsed * 2.2) * 0.025;
             rodPivot.rotation.set(0, targetFacing, rodTilt);
 
             // สไตล์ Harvest Moon BTN: ตัวละครสั่นแรง + เครื่องหมาย ! เด้งบนหัวตอนปลากินเบ็ด!
@@ -3683,8 +4176,8 @@ export default function Arena3DPage() {
               fPhase === 'bite'
                 ? -0.62 + Math.sin(elapsed * 36) * 0.18
                 : isNibbling
-                ? -0.46 + Math.sin(elapsed * 22) * 0.06
-                : -0.34 + Math.sin(elapsed * 3.5) * 0.06;
+                  ? -0.46 + Math.sin(elapsed * 22) * 0.06
+                  : -0.34 + Math.sin(elapsed * 3.5) * 0.06;
 
             bobberGroup.position.set(bobX, bobY, bobZ);
             fishingBobberPosRef.current = { x: bobX, z: bobZ };
@@ -3714,6 +4207,87 @@ export default function Arena3DPage() {
             biteAlertSprite.visible = false;
           }
         } else {
+          const remoteFish = remoteFishingStateRef.current[c.id];
+          const isRemoteFishing =
+            Boolean(remoteFish) &&
+            remoteFish.phase !== 'idle' &&
+            now - remoteFish.updatedAt < 45000;
+          if (isRemoteFishing && remoteFish) {
+            const rig = getOrCreateRemoteFishingRig(c.id);
+            const targetFacing = Math.atan2(-remoteFish.dz, remoteFish.dx);
+            c.rootGroup.rotation.y = targetFacing;
+            rig.group.visible = true;
+
+            const px = c.rootGroup.position.x;
+            const py = c.rootGroup.position.y;
+            const pz = c.rootGroup.position.z;
+            const rTilt =
+              remoteFish.phase === 'bite'
+                ? Math.sin(elapsed * 42) * 0.22
+                : remoteFish.phase === 'reeling'
+                  ? 0.52
+                  : Math.sin(elapsed * 2.2) * 0.025;
+            rig.rodPivot.position.set(px + remoteFish.dx * 0.45, py + 1.05, pz + remoteFish.dz * 0.45);
+            rig.rodPivot.rotation.set(0, targetFacing, rTilt);
+
+            const tipX = px + remoteFish.dx * 2.75;
+            const tipY = py + 2.45 + rTilt * 1.1;
+            const tipZ = pz + remoteFish.dz * 2.75;
+            const bobX = px + remoteFish.dx * 5.6;
+            const bobZ = pz + remoteFish.dz * 5.6;
+            const bobY =
+              remoteFish.phase === 'bite'
+                ? -0.62 + Math.sin(elapsed * 36) * 0.18
+                : -0.34 + Math.sin(elapsed * 3.5) * 0.06;
+            rig.bobberGroup.position.set(bobX, bobY, bobZ);
+
+            const lAttr = rig.lineGeo.attributes.position as THREE.BufferAttribute;
+            lAttr.setXYZ(0, tipX, tipY, tipZ);
+            lAttr.setXYZ(1, bobX, bobY + 0.14, bobZ);
+            lAttr.needsUpdate = true;
+
+            if (remoteFish.phase === 'bite') {
+              rig.splashRing.visible = true;
+              const pulse = (elapsed * 3.6) % 1;
+              rig.splashRing.position.set(bobX, -0.36, bobZ);
+              rig.splashRing.scale.setScalar(1 + pulse * 3.6);
+              rig.splashMat.opacity = (1 - pulse) * 0.9;
+              c.bounceGroup.position.x = Math.sin(elapsed * 55) * 0.08;
+              rig.biteSprite.visible = true;
+              rig.biteSprite.position.set(px, py + 3.15 + Math.abs(Math.sin(elapsed * 16)) * 0.25, pz);
+              const popSc = 1.05 + Math.sin(elapsed * 22) * 0.14;
+              rig.biteSprite.scale.set(popSc, popSc, 1);
+            } else {
+              rig.splashRing.visible = false;
+              rig.biteSprite.visible = false;
+              c.bounceGroup.position.x = 0;
+            }
+          } else {
+            const existingRig = remoteFishingRigs.get(c.id);
+            if (existingRig) {
+              existingRig.group.visible = false;
+              existingRig.biteSprite.visible = false;
+            }
+          }
+
+          // Update Busy Status Badge above remote player's head (แต่งตัว / คาเฟ่ / วอลเลย์บอล / ชาบู / ไพ่)
+          if (c.tagEl) {
+            const busyEl = c.tagEl.querySelector('[data-busy-badge]') as HTMLElement | null;
+            if (busyEl) {
+              const bInfo = remoteBusyStatusRef.current[c.id];
+              const nextBusy = bInfo && now - bInfo.updatedAt < 180000 ? bInfo.label : '';
+              if (busyEl.dataset.lastBusy !== nextBusy) {
+                busyEl.dataset.lastBusy = nextBusy;
+                if (nextBusy) {
+                  busyEl.textContent = nextBusy;
+                  busyEl.classList.remove('hidden');
+                } else {
+                  busyEl.classList.add('hidden');
+                }
+              }
+            }
+          }
+
           const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
           if (remoteState) {
             c.targetPos.set(remoteState.x, remoteState.y, remoteState.z);
@@ -3806,23 +4380,60 @@ export default function Arena3DPage() {
           const x = (tempProjVec.x * 0.5 + 0.5) * cachedVw;
           const rawY = (-tempProjVec.y * 0.5 + 0.5) * cachedVh;
           const minBottomY = cachedHeaderBottom + 12 + cachedMyTagHeight;
-          const y = c.id === currentUserId ? Math.max(minBottomY, rawY) : rawY;
-          c.tagEl.style.setProperty('--tag-x', `${x.toFixed(1)}px`);
-          c.tagEl.style.setProperty('--tag-y', `${y.toFixed(1)}px`);
-          if (c.lastVisible !== true) {
-            c.tagEl.style.opacity = '1';
-            c.lastVisible = true;
-          }
-          const nextZ = Math.round((1 - tempProjVec.z) * 100);
-          if (c.lastZIndex !== nextZ) {
-            c.tagEl.style.zIndex = String(nextZ);
-            c.lastZIndex = nextZ;
-          }
+          const isMe = c.id === currentUserId;
+          const y = isMe ? Math.max(minBottomY, rawY) : rawY;
+          visibleTags.push({
+            mesh: c,
+            x,
+            y,
+            z: tempProjVec.z,
+            w: c.isSpectator ? 118 : 150,
+            h: c.isSpectator ? 32 : 54,
+            isMe,
+          });
         } else if (c.lastVisible !== false) {
           c.tagEl.style.opacity = '0';
           c.lastVisible = false;
         }
       });
+
+      // 2D Anti-Overlap Pass: ดันป้ายขึ้นเบาๆ ไม่เกิน 22px (กันป้ายลอยขึ้นฟ้าเมื่อยืนรวมกันเยอะๆ!)
+      visibleTags.sort((a, b) => {
+        if (a.isMe !== b.isMe) return a.isMe ? -1 : 1;
+        return a.z - b.z;
+      });
+      const MAX_LIFT_PX = 22;
+      for (let i = 0; i < visibleTags.length; i++) {
+        const cur = visibleTags[i];
+        const origY = cur.y;
+        if (!cur.isMe) {
+          for (let j = 0; j < i; j++) {
+            const other = visibleTags[j];
+            const minDx = (cur.w + other.w) * 0.4;
+            const minDy = Math.min(cur.h, other.h) * 0.75;
+            if (Math.abs(cur.x - other.x) < minDx && Math.abs(cur.y - other.y) < minDy) {
+              const candidateY = other.y - minDy - 2;
+              // Allow only a gentle lift close to the character's head; if too crowded, keep anchored on head!
+              if (origY - candidateY <= MAX_LIFT_PX) {
+                cur.y = candidateY;
+              }
+            }
+          }
+          cur.y = Math.max(origY - MAX_LIFT_PX, cur.y);
+        }
+        const m = cur.mesh;
+        m.tagEl.style.setProperty('--tag-x', `${cur.x.toFixed(1)}px`);
+        m.tagEl.style.setProperty('--tag-y', `${cur.y.toFixed(1)}px`);
+        if (m.lastVisible !== true) {
+          m.tagEl.style.opacity = '1';
+          m.lastVisible = true;
+        }
+        const nextZ = cur.isMe ? 180 : Math.round((1 - cur.z) * 100);
+        if (m.lastZIndex !== nextZ) {
+          m.tagEl.style.zIndex = String(nextZ);
+          m.lastZIndex = nextZ;
+        }
+      }
       if (!foundCurrentUserMesh) plumbobMesh.visible = false;
 
       const delivery = pendingDeliveryRef.current;
@@ -3910,7 +4521,7 @@ export default function Arena3DPage() {
         const sideSign =
           (targetMesh.rootGroup.position.x - tInfo.pt.x) * normal.x +
             (targetMesh.rootGroup.position.z - tInfo.pt.z) * normal.z >=
-          0
+            0
             ? 1
             : -1;
         const ejected = tInfo.pt.clone().addScaledVector(normal, sideSign * (trackWidth / 2 + 2.5));
@@ -4007,10 +4618,10 @@ export default function Arena3DPage() {
             rarity === 'legendary'
               ? 1 + p * 7.5
               : rarity === 'rare'
-              ? 1 + p * 5.2
-              : rarity === 'uncommon'
-              ? 1 + p * 3.6
-              : 1 + p * 2.2;
+                ? 1 + p * 5.2
+                : rarity === 'uncommon'
+                  ? 1 + p * 3.6
+                  : 1 + p * 2.2;
           catchRingMesh.scale.setScalar(ringScale);
           catchRingMat.opacity = (1 - p) * 0.9;
 
@@ -4023,8 +4634,8 @@ export default function Arena3DPage() {
                 ? p < 0.22
                   ? 0xfacc15
                   : Math.floor(elapsed * 12) % 2 === 0
-                  ? 0xef4444
-                  : 0xfacc15
+                    ? 0xef4444
+                    : 0xfacc15
                 : beamHex;
             catchBeamMat.color.setHex(effectiveBeamHex);
             const widthBoost = rarity === 'legendary' || rarity === 'guard_troll' ? 1.55 : 0.95;
@@ -4051,8 +4662,8 @@ export default function Arena3DPage() {
               popP < 0.2
                 ? -1.8 + (popP / 0.2) * 3.2
                 : popP < 0.82
-                ? 1.4 + Math.sin(elapsed * 10) * 0.16
-                : 1.4 - ((popP - 0.82) / 0.18) * 3.4;
+                  ? 1.4 + Math.sin(elapsed * 10) * 0.16
+                  : 1.4 - ((popP - 0.82) / 0.18) * 3.4;
             seaGuardPopParts.rootGroup.position.set(0, riseY, 0);
             seaGuardPopParts.rootGroup.rotation.y = elapsed * 2.8;
             seaGuardPopParts.armL.rotation.z = 1.1 + Math.sin(elapsed * 22) * 0.6;
@@ -4104,169 +4715,169 @@ export default function Arena3DPage() {
           guardParts.rootGroup.rotation.z = 0;
           gPos.y = guardPostPos.y;
         }
-      if (trespassers.length >= 2) {
-        // โหมดหลายคน: พี่ยามหยุดวิ่งไล่ แล้วหันไปหยิบอาหารในจานปาใส่รัวๆ จนกระเด็นออกจากสนามทุกคน!
-        setCharacterExpression(guardParts, 'angry');
-        const nextKey = `barrage-${trespassers.length}`;
-        if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
-          currentGuardBadgeKey = nextKey;
-          guardBadgeEl.className =
-            'bg-rose-600 text-amber-100 border-2 border-amber-300 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
-          guardBadgeEl.textContent = `🍖 พี่ยามของขึ้น! ปาอาหารในมือไล่แก๊งบุกสนาม (${trespassers.length} คน)!!`;
-        }
-
-        if (
-          activeWalkerId !== null &&
-          trespassers.some((t) => t.mesh.id === activeWalkerId) &&
-          now - lastGuardWarnAt > 2500
-        ) {
-          lastGuardWarnAt = now;
-          showToast('🍖', 'พี่ยามหยิบของกินขึ้นปาแล้ว!', 'ลงสนามพร้อมกันหลายคนระวังหมูกรอบบินอัดหน้านะ!');
-        }
-
-        // หันหน้าเล็งไปทางจุดกึ่งกลางของกลุ่มผู้บุกรุก พร้อมท่าควักของกินจากจานขว้างรัวๆ
-        let avgX = 0;
-        let avgZ = 0;
-        trespassers.forEach((tr) => {
-          avgX += tr.mesh.rootGroup.position.x;
-          avgZ += tr.mesh.rootGroup.position.z;
-        });
-        avgX /= trespassers.length;
-        avgZ /= trespassers.length;
-
-        guardParts.rootGroup.rotation.y = Math.atan2(-(avgZ - gPos.z), avgX - gPos.x);
-        guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 16)) * 0.16;
-        guardParts.legL.rotation.z = Math.sin(elapsed * 16) * 0.22;
-        guardParts.legR.rotation.z = -Math.sin(elapsed * 16) * 0.22;
-        guardParts.armL.rotation.z = 0.38 + Math.sin(elapsed * 10) * 0.12;
-        guardParts.armR.rotation.z = 0.65 + Math.sin(elapsed * 22) * 0.85;
-
-        // ปล่อยกระสุนอาหารจากจานในมือพุ่งโค้งเข้าใส่ผู้บุกรุกทุกคนเป็นชุดๆ
-        if (now - lastFoodVolleyAt > 290) {
-          lastFoodVolleyAt = now;
-          trespassers.forEach((tr) => {
-            const alreadyFlying = guardProjectiles.some(
-              (p) => p.active && p.targetUserId === tr.mesh.id
-            );
-            if (alreadyFlying) return;
-            const slotProj = guardProjectiles.find((p) => !p.active);
-            if (!slotProj) return;
-            slotProj.active = true;
-            slotProj.targetUserId = tr.mesh.id;
-            slotProj.startPos.set(gPos.x, gPos.y + 1.95, gPos.z);
-            slotProj.launchedAt = now;
-            const dist = Math.hypot(
-              tr.mesh.rootGroup.position.x - gPos.x,
-              tr.mesh.rootGroup.position.z - gPos.z
-            );
-            slotProj.durationMs = Math.max(280, Math.min(560, dist * 34));
-            slotProj.mesh.position.copy(slotProj.startPos);
-            slotProj.mesh.visible = true;
-          });
-        }
-      } else if (trespassers.length === 1) {
-        // โหมดคนเดียว: ทุกคนในห้องเห็นพี่ยามวิ่งหน้าตั้งถือส้อมเงินไล่กวดผู้บุกรุก!
-        const single = trespassers[0];
-        setCharacterExpression(guardParts, 'angry');
-        const nextKey = `chase-${single.mesh.id}`;
-        if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
-          currentGuardBadgeKey = nextKey;
-          guardBadgeEl.className =
-            'bg-amber-500 text-black border-2 border-black rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
-          guardBadgeEl.textContent = `🚨 พี่ยามวิ่งไล่ตะเพิด ${single.mesh.player.name}!`;
-        }
-
-        if (single.mesh.id === activeWalkerId && now - lastGuardWarnAt > 2500) {
-          lastGuardWarnAt = now;
-          showToast('🚨', 'พี่ยามเป่านกหวีด!', 'ห้ามเดินลงลู่วิ่ง! ให้ไปข้ามตรงทางม้าลายกลางสนาม!');
-        }
-
-        const toWalkerX = single.mesh.rootGroup.position.x - gPos.x;
-        const toWalkerZ = single.mesh.rootGroup.position.z - gPos.z;
-        const distToWalker = Math.hypot(toWalkerX, toWalkerZ);
-
-        if (distToWalker > 1.72) {
-          const gSpeed = 0.25;
-          gPos.x += (toWalkerX / distToWalker) * gSpeed;
-          gPos.z += (toWalkerZ / distToWalker) * gSpeed;
-          guardParts.rootGroup.rotation.y = Math.atan2(-toWalkerZ, toWalkerX);
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.24;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 14) * 0.72;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 14) * 0.72;
-          guardParts.armR.rotation.z = 0.52 + Math.sin(elapsed * 18) * 0.55;
-          guardParts.armL.rotation.z = -Math.sin(elapsed * 14) * 0.22;
-        } else {
-          ejectSpectatorOffTrack(single.mesh, single.info, 'fork');
-        }
-      } else {
-        // ค่อยๆ สงบลงตามเวลา แต่ถ้าเกรี้ยวกราดหนัก (>= 5) จะพาลขว้างอาหารใส่คนรอบข้างแม้ไม่ได้ข้ามสนาม!
-        guardRageRef.current = Math.max(0, guardRageRef.current - 0.0012);
-        const isFurious = guardRageRef.current >= 5;
-
-        setCharacterExpression(guardParts, isFurious ? 'angry' : 'normal');
-        const nextIdleKey = isFurious ? 'furious' : 'idle';
-        if (guardBadgeEl && currentGuardBadgeKey !== nextIdleKey) {
-          currentGuardBadgeKey = nextIdleKey;
-          if (isFurious) {
+        if (trespassers.length >= 2) {
+          // โหมดหลายคน: พี่ยามหยุดวิ่งไล่ แล้วหันไปหยิบอาหารในจานปาใส่รัวๆ จนกระเด็นออกจากสนามทุกคน!
+          setCharacterExpression(guardParts, 'angry');
+          const nextKey = `barrage-${trespassers.length}`;
+          if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
+            currentGuardBadgeKey = nextKey;
             guardBadgeEl.className =
               'bg-rose-600 text-amber-100 border-2 border-amber-300 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
-            guardBadgeEl.textContent = '🤬 พี่ยามเกรี้ยวกราด! ระวังหมูกรอบปลิวว่อน!!';
-          } else {
-            guardBadgeEl.className =
-              'bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap hover:scale-105 transition';
-            guardBadgeEl.textContent = '🍴 พี่ยามคุมลู่สายกิน (ข้ามเฉพาะทางม้าลาย!)';
+            guardBadgeEl.textContent = `🍖 พี่ยามของขึ้น! ปาอาหารในมือไล่แก๊งบุกสนาม (${trespassers.length} คน)!!`;
           }
-        }
 
-        if (isFurious) {
-          const throwInterval = guardRageRef.current >= 8 ? 15000 : 16000;
-          if (now - guardLastRageThrowRef.current > throwInterval) {
-            const nearbyTargets = meshes.filter(
-              (m) => m.rootGroup.position.distanceTo(gPos) < 18
-            );
-            if (nearbyTargets.length > 0) {
-              const victim = nearbyTargets[Math.floor(Math.random() * nearbyTargets.length)];
+          if (
+            activeWalkerId !== null &&
+            trespassers.some((t) => t.mesh.id === activeWalkerId) &&
+            now - lastGuardWarnAt > 2500
+          ) {
+            lastGuardWarnAt = now;
+            showToast('🍖', 'พี่ยามหยิบของกินขึ้นปาแล้ว!', 'ลงสนามพร้อมกันหลายคนระวังหมูกรอบบินอัดหน้านะ!');
+          }
+
+          // หันหน้าเล็งไปทางจุดกึ่งกลางของกลุ่มผู้บุกรุก พร้อมท่าควักของกินจากจานขว้างรัวๆ
+          let avgX = 0;
+          let avgZ = 0;
+          trespassers.forEach((tr) => {
+            avgX += tr.mesh.rootGroup.position.x;
+            avgZ += tr.mesh.rootGroup.position.z;
+          });
+          avgX /= trespassers.length;
+          avgZ /= trespassers.length;
+
+          guardParts.rootGroup.rotation.y = Math.atan2(-(avgZ - gPos.z), avgX - gPos.x);
+          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 16)) * 0.16;
+          guardParts.legL.rotation.z = Math.sin(elapsed * 16) * 0.22;
+          guardParts.legR.rotation.z = -Math.sin(elapsed * 16) * 0.22;
+          guardParts.armL.rotation.z = 0.38 + Math.sin(elapsed * 10) * 0.12;
+          guardParts.armR.rotation.z = 0.65 + Math.sin(elapsed * 22) * 0.85;
+
+          // ปล่อยกระสุนอาหารจากจานในมือพุ่งโค้งเข้าใส่ผู้บุกรุกทุกคนเป็นชุดๆ
+          if (now - lastFoodVolleyAt > 290) {
+            lastFoodVolleyAt = now;
+            trespassers.forEach((tr) => {
+              const alreadyFlying = guardProjectiles.some(
+                (p) => p.active && p.targetUserId === tr.mesh.id
+              );
+              if (alreadyFlying) return;
               const slotProj = guardProjectiles.find((p) => !p.active);
-              if (slotProj) {
-                guardLastRageThrowRef.current = now;
-                slotProj.active = true;
-                slotProj.targetUserId = victim.id;
-                slotProj.launchedAt = now;
-                slotProj.durationMs = 780;
-                slotProj.startPos.set(gPos.x, gPos.y + 1.55, gPos.z);
-                slotProj.mesh.position.copy(slotProj.startPos);
-                slotProj.mesh.visible = true;
-                guardParts.rootGroup.rotation.y = Math.atan2(
-                  -(victim.rootGroup.position.z - gPos.z),
-                  victim.rootGroup.position.x - gPos.x
-                );
+              if (!slotProj) return;
+              slotProj.active = true;
+              slotProj.targetUserId = tr.mesh.id;
+              slotProj.startPos.set(gPos.x, gPos.y + 1.95, gPos.z);
+              slotProj.launchedAt = now;
+              const dist = Math.hypot(
+                tr.mesh.rootGroup.position.x - gPos.x,
+                tr.mesh.rootGroup.position.z - gPos.z
+              );
+              slotProj.durationMs = Math.max(280, Math.min(560, dist * 34));
+              slotProj.mesh.position.copy(slotProj.startPos);
+              slotProj.mesh.visible = true;
+            });
+          }
+        } else if (trespassers.length === 1) {
+          // โหมดคนเดียว: ทุกคนในห้องเห็นพี่ยามวิ่งหน้าตั้งถือส้อมเงินไล่กวดผู้บุกรุก!
+          const single = trespassers[0];
+          setCharacterExpression(guardParts, 'angry');
+          const nextKey = `chase-${single.mesh.id}`;
+          if (guardBadgeEl && currentGuardBadgeKey !== nextKey) {
+            currentGuardBadgeKey = nextKey;
+            guardBadgeEl.className =
+              'bg-amber-500 text-black border-2 border-black rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
+            guardBadgeEl.textContent = `🚨 พี่ยามวิ่งไล่ตะเพิด ${single.mesh.player.name}!`;
+          }
+
+          if (single.mesh.id === activeWalkerId && now - lastGuardWarnAt > 2500) {
+            lastGuardWarnAt = now;
+            showToast('🚨', 'พี่ยามเป่านกหวีด!', 'ห้ามเดินลงลู่วิ่ง! ให้ไปข้ามตรงทางม้าลายกลางสนาม!');
+          }
+
+          const toWalkerX = single.mesh.rootGroup.position.x - gPos.x;
+          const toWalkerZ = single.mesh.rootGroup.position.z - gPos.z;
+          const distToWalker = Math.hypot(toWalkerX, toWalkerZ);
+
+          if (distToWalker > 1.72) {
+            const gSpeed = 0.25;
+            gPos.x += (toWalkerX / distToWalker) * gSpeed;
+            gPos.z += (toWalkerZ / distToWalker) * gSpeed;
+            guardParts.rootGroup.rotation.y = Math.atan2(-toWalkerZ, toWalkerX);
+            guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.24;
+            guardParts.legL.rotation.z = Math.sin(elapsed * 14) * 0.72;
+            guardParts.legR.rotation.z = -Math.sin(elapsed * 14) * 0.72;
+            guardParts.armR.rotation.z = 0.52 + Math.sin(elapsed * 18) * 0.55;
+            guardParts.armL.rotation.z = -Math.sin(elapsed * 14) * 0.22;
+          } else {
+            ejectSpectatorOffTrack(single.mesh, single.info, 'fork');
+          }
+        } else {
+          // ค่อยๆ สงบลงตามเวลา แต่ถ้าเกรี้ยวกราดหนัก (>= 5) จะพาลขว้างอาหารใส่คนรอบข้างแม้ไม่ได้ข้ามสนาม!
+          guardRageRef.current = Math.max(0, guardRageRef.current - 0.0012);
+          const isFurious = guardRageRef.current >= 5;
+
+          setCharacterExpression(guardParts, isFurious ? 'angry' : 'normal');
+          const nextIdleKey = isFurious ? 'furious' : 'idle';
+          if (guardBadgeEl && currentGuardBadgeKey !== nextIdleKey) {
+            currentGuardBadgeKey = nextIdleKey;
+            if (isFurious) {
+              guardBadgeEl.className =
+                'bg-rose-600 text-amber-100 border-2 border-amber-300 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap';
+              guardBadgeEl.textContent = '🤬 พี่ยามเกรี้ยวกราด! ระวังหมูกรอบปลิวว่อน!!';
+            } else {
+              guardBadgeEl.className =
+                'bg-[#18181B] text-[#FFE600] border-2 border-[#FFE600] rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10px] font-extrabold whitespace-nowrap hover:scale-105 transition';
+              guardBadgeEl.textContent = '🍴 พี่ยามคุมลู่สายกิน (ข้ามเฉพาะทางม้าลาย!)';
+            }
+          }
+
+          if (isFurious) {
+            const throwInterval = guardRageRef.current >= 8 ? 15000 : 16000;
+            if (now - guardLastRageThrowRef.current > throwInterval) {
+              const nearbyTargets = meshes.filter(
+                (m) => m.rootGroup.position.distanceTo(gPos) < 18
+              );
+              if (nearbyTargets.length > 0) {
+                const victim = nearbyTargets[Math.floor(Math.random() * nearbyTargets.length)];
+                const slotProj = guardProjectiles.find((p) => !p.active);
+                if (slotProj) {
+                  guardLastRageThrowRef.current = now;
+                  slotProj.active = true;
+                  slotProj.targetUserId = victim.id;
+                  slotProj.launchedAt = now;
+                  slotProj.durationMs = 780;
+                  slotProj.startPos.set(gPos.x, gPos.y + 1.55, gPos.z);
+                  slotProj.mesh.position.copy(slotProj.startPos);
+                  slotProj.mesh.visible = true;
+                  guardParts.rootGroup.rotation.y = Math.atan2(
+                    -(victim.rootGroup.position.z - gPos.z),
+                    victim.rootGroup.position.x - gPos.x
+                  );
+                }
               }
             }
           }
-        }
 
-        const backX = guardPostPos.x - gPos.x;
-        const backZ = guardPostPos.z - gPos.z;
-        const backDist = Math.hypot(backX, backZ);
-        if (backDist > 0.2) {
-          gPos.x += (backX / backDist) * 0.12;
-          gPos.z += (backZ / backDist) * 0.12;
-          guardParts.rootGroup.rotation.y = Math.atan2(-backZ, backX);
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 8)) * 0.15;
-          guardParts.legL.rotation.z = Math.sin(elapsed * 8) * 0.5;
-          guardParts.legR.rotation.z = -Math.sin(elapsed * 8) * 0.5;
-          guardParts.armR.rotation.z = 0;
-          guardParts.armL.rotation.z = 0;
-        } else {
-          guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 2.2)) * 0.03;
-          guardParts.legL.rotation.z = 0;
-          guardParts.legR.rotation.z = 0;
-          guardParts.armR.rotation.z = Math.max(0, Math.sin(elapsed * 1.8)) * 0.26;
-          guardParts.armL.rotation.z = 0;
-          guardParts.rootGroup.rotation.y =
-            Math.atan2(-crosswalkNorm.z, crosswalkNorm.x) + Math.sin(elapsed * 0.9) * 0.12;
+          const backX = guardPostPos.x - gPos.x;
+          const backZ = guardPostPos.z - gPos.z;
+          const backDist = Math.hypot(backX, backZ);
+          if (backDist > 0.2) {
+            gPos.x += (backX / backDist) * 0.12;
+            gPos.z += (backZ / backDist) * 0.12;
+            guardParts.rootGroup.rotation.y = Math.atan2(-backZ, backX);
+            guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 8)) * 0.15;
+            guardParts.legL.rotation.z = Math.sin(elapsed * 8) * 0.5;
+            guardParts.legR.rotation.z = -Math.sin(elapsed * 8) * 0.5;
+            guardParts.armR.rotation.z = 0;
+            guardParts.armL.rotation.z = 0;
+          } else {
+            guardParts.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 2.2)) * 0.03;
+            guardParts.legL.rotation.z = 0;
+            guardParts.legR.rotation.z = 0;
+            guardParts.armR.rotation.z = Math.max(0, Math.sin(elapsed * 1.8)) * 0.26;
+            guardParts.armL.rotation.z = 0;
+            guardParts.rootGroup.rotation.y =
+              Math.atan2(-crosswalkNorm.z, crosswalkNorm.x) + Math.sin(elapsed * 0.9) * 0.12;
+          }
         }
-      }
       }
 
       // อัปเดตวิถีโค้งของอาหารที่พี่ยามปาออกไปทุกเฟรม (ทุกคนในสนามเห็นอาหารลอยไปชนเป้าหมายพร้อมกัน!)
@@ -4349,6 +4960,16 @@ export default function Arena3DPage() {
         cafeTagEl.style.opacity = '0';
       }
 
+      tempProjVec.set(questBoardPos.x, questBoardPos.y + 3.85, questBoardPos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        questBoardTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        questBoardTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        questBoardTagEl.style.opacity = '1';
+      } else {
+        questBoardTagEl.style.opacity = '0';
+      }
+
       if (cameraTargetPosRef.current) {
         camera.position.lerp(cameraTargetPosRef.current, 0.06);
         controls.target.lerp(cameraLookAtRef.current, 0.08);
@@ -4381,9 +5002,8 @@ export default function Arena3DPage() {
       const list = charObj.isCloseToFinish ? FIERCE_THOUGHTS : FOOD_THOUGHTS;
       const text = list[Math.floor(Math.random() * list.length)];
       const el = document.createElement('div');
-      el.className = `thought-bubble border-2 border-black rounded-full px-2.5 py-1 text-xs font-extrabold shadow-[2px_2px_0px_#18181B] whitespace-nowrap ${
-        charObj.isCloseToFinish ? 'bg-[#FF4D8D] text-white' : 'bg-[#FFFDF7] text-black'
-      }`;
+      el.className = `thought-bubble border-2 border-black rounded-full px-2.5 py-1 text-xs font-extrabold shadow-[2px_2px_0px_#18181B] whitespace-nowrap ${charObj.isCloseToFinish ? 'bg-[#FF4D8D] text-white' : 'bg-[#FFFDF7] text-black'
+        }`;
       el.style.left = `${sx}px`;
       el.style.top = `${sy}px`;
       el.textContent = text;
@@ -4449,6 +5069,17 @@ export default function Arena3DPage() {
         hitChar.lastBubbleAt = now;
         spawnThoughtBubble(hitChar);
       }
+      const lastRubSent = lastRubBroadcastRef.current[hitChar.id] || 0;
+      if (now - lastRubSent > 1400) {
+        lastRubBroadcastRef.current[hitChar.id] = now;
+        const meActor = playersRef.current.find((pl) => pl.id === currentUserIdRef.current);
+        broadcastRealtimeEvent('belly_rub', {
+          targetUserId: hitChar.id,
+          actorId: currentUserIdRef.current,
+          actorName: meActor?.name || '',
+          actorEmoji: meActor?.emoji || '🤚',
+        });
+      }
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -4462,6 +5093,19 @@ export default function Arena3DPage() {
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
+
+      // คลิกกระดานเควสไม้ 3D: เปิดได้เฉพาะตอนเดินมาอยู่ใกล้กระดานแล้วเท่านั้น!
+      const questBoardHits = raycaster.intersectObject(questBoardGroup, true);
+      if (questBoardHits.length > 0) {
+        if (isNearQuestBoardRef.current) {
+          openQuestBoardRef.current(null);
+        } else {
+          cameraLookAtRef.current.set(questBoardPos.x, 1.8, questBoardPos.z);
+          cameraTargetPosRef.current = new THREE.Vector3(questBoardPos.x + 2.4, 3.8, questBoardPos.z + 5.8);
+          showToast('📜', 'อยู่ไกลจากกระดานเควสเกินไป!', 'เดินมาใกล้ๆ กระดานเควสก่อนแล้วปุ่มเปิดกระดานจะเด้งขึ้นครับ');
+        }
+        return;
+      }
 
       // คลิกเก็บเหรียญทองนำโชค 3D บนชายหาด! (+10 💰)
       const visibleCoins = beachCoins.filter((bc) => bc.group.visible).map((bc) => bc.group);
@@ -5023,7 +5667,7 @@ export default function Arena3DPage() {
       if (!res.ok || !data?.success) {
         setModalError(
           (typeof data?.error === 'string' && data.error) ||
-            'อ่านตัวเลขก้าวจากรูปไม่สำเร็จ กรุณาลองรูปอื่นหรือพิมพ์ตัวเลขเอง'
+          'อ่านตัวเลขก้าวจากรูปไม่สำเร็จ กรุณาลองรูปอื่นหรือพิมพ์ตัวเลขเอง'
         );
         return;
       }
@@ -5063,27 +5707,27 @@ export default function Arena3DPage() {
     try {
       const payload = isStepSubmission
         ? {
-            userId: activeUserId,
-            isSelf: true,
-            logType: 'steps',
-            steps: trimmedStepStr,
-            stepMode: stepInputMode,
-            syncSource:
-              stepInputMode === 'daily_sync'
-                ? stepSyncSource
-                : stepInputMode === 'set'
+          userId: activeUserId,
+          isSelf: true,
+          logType: 'steps',
+          steps: trimmedStepStr,
+          stepMode: stepInputMode,
+          syncSource:
+            stepInputMode === 'daily_sync'
+              ? stepSyncSource
+              : stepInputMode === 'set'
                 ? 'manual_set'
                 : 'manual_add',
-            excuseTag: '',
-          }
+          excuseTag: '',
+        }
         : {
-            userId: activeUserId,
-            isSelf: true,
-            logType: 'side_goal',
-            weight: parseFloat(newWeightInput),
-            value: parseFloat(newWeightInput),
-            excuseTag: '',
-          };
+          userId: activeUserId,
+          isSelf: true,
+          logType: 'side_goal',
+          weight: parseFloat(newWeightInput),
+          value: parseFloat(newWeightInput),
+          excuseTag: '',
+        };
 
       const res = await fetch('/api/weights', {
         method: 'POST',
@@ -5210,8 +5854,8 @@ export default function Arena3DPage() {
       Array.isArray(data.results)
         ? data.results
         : data.wonItem
-        ? [{ item: data.wonItem, isDuplicate: false, refundPoints: 0 }]
-        : [];
+          ? [{ item: data.wonItem, isDuplicate: false, refundPoints: 0 }]
+          : [];
     await fetchArenaData({ force: true });
     broadcastArenaSync('shop_updated', {
       actorId: targetUid,
@@ -5402,15 +6046,15 @@ export default function Arena3DPage() {
         body: JSON.stringify(
           isEdit
             ? {
-                ...payloadCommon,
-                userId: editingPlayerId,
-                isSelf,
-                pinCode: joinPin,
-              }
+              ...payloadCommon,
+              userId: editingPlayerId,
+              isSelf,
+              pinCode: joinPin,
+            }
             : {
-                ...payloadCommon,
-                pinCode: joinPin || '1234',
-              }
+              ...payloadCommon,
+              pinCode: joinPin || '1234',
+            }
         ),
       });
       const data = await res.json();
@@ -5431,8 +6075,8 @@ export default function Arena3DPage() {
           isEdit
             ? `บันทึกข้อมูลของ ${joinEmoji} ${joinName} เรียบร้อยแล้ว!`
             : joinRole === 'spectator'
-            ? `ยินดีต้อนรับผู้ชม ${joinEmoji} ${joinName} สู่ขอบสนาม!`
-            : `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`
+              ? `ยินดีต้อนรับผู้ชม ${joinEmoji} ${joinName} สู่ขอบสนาม!`
+              : `ยินดีต้อนรับ ${joinEmoji} ${joinName} เข้าสู่สนาม 3D!`
         );
         const submittedName = joinName;
         const submittedEmoji = joinEmoji;
@@ -5458,10 +6102,10 @@ export default function Arena3DPage() {
               ? 'เข้าร่วมเป็นผู้ชมขอบสนามแล้ว!'
               : 'ลงสนามเป็นผู้เข้าแข่งขันคนใหม่!'
             : roleSwitched
-            ? submittedRole === 'spectator'
-              ? 'สลับบทบาทเป็นผู้ชมขอบสนาม!'
-              : 'เปลี่ยนบทบาทลงลู่เป็นผู้เข้าแข่งขัน!'
-            : 'อัปเดตชุดและตัวละครใหม่แล้ว!',
+              ? submittedRole === 'spectator'
+                ? 'สลับบทบาทเป็นผู้ชมขอบสนาม!'
+                : 'เปลี่ยนบทบาทลงลู่เป็นผู้เข้าแข่งขัน!'
+              : 'อัปเดตชุดและตัวละครใหม่แล้ว!',
         });
       }
     } catch {
@@ -5478,8 +6122,8 @@ export default function Arena3DPage() {
       currentUserId && currentUserId > 0
         ? currentUserId
         : boardSenderId
-        ? Number(boardSenderId)
-        : null;
+          ? Number(boardSenderId)
+          : null;
     if (effectiveSenderId && effectiveSenderId === boardTargetId) {
       showToast('🚫', 'ส่งให้ตัวเองไม่ได้นะ!', 'เลือกคลิกตัวละครเพื่อนคนอื่นเพื่อเติมไฟหรือแกล้งเพื่อน 🔥');
       return;
@@ -5716,10 +6360,10 @@ export default function Arena3DPage() {
                       setIsLogOpen(true);
                     }}
                     className="neo-btn rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                    title={`บันทึกก้าวเดิน Step Challenge & ภารกิจรอง (${gMeta.shortTag})`}
+                    title="บันทึกก้าวเดิน Step Challenge"
                   >
                     <Scale className="w-4 h-4 stroke-[2.5]" />
-                    <span>+ ส่งก้าว / ภารกิจ</span>
+                    <span>+ ส่งก้าวเดิน</span>
                   </button>
                 )}
                 <button
@@ -5735,7 +6379,6 @@ export default function Arena3DPage() {
                   className="neo-btn rpg-btn-blue font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
                   title="เปิดหน้าต่างแต่งตัว 3D & ร้านค้า Gacha"
                 >
-                  <span>{currentUser.emoji}</span>
                   <span>{currentUser.name}</span>
                   <span className="text-[10px] bg-black/50 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400">
                     💰 {currentUser.points ?? 100} GP
@@ -5748,11 +6391,10 @@ export default function Arena3DPage() {
           <div className="rpg-panel rounded-xl p-1 flex items-center gap-0.5 relative">
             <button
               onClick={() => setIsDrawerOpen((v) => !v)}
-              className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1 ${
-                isDrawerOpen
+              className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1 ${isDrawerOpen
                   ? 'bg-amber-400/25 text-amber-200'
                   : 'text-amber-100 hover:bg-amber-400 hover:text-black'
-              }`}
+                }`}
               title="เปิด/ปิดกระดานอันดับ"
             >
               <Trophy className="w-3.5 h-3.5 text-amber-400" />
@@ -5783,11 +6425,10 @@ export default function Arena3DPage() {
             </button>
             <button
               onClick={toggleMusic}
-              className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
-                isMusicOn
+              className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${isMusicOn
                   ? 'bg-amber-400 text-black'
                   : 'text-amber-100 hover:bg-amber-400 hover:text-black'
-              }`}
+                }`}
               title="เปิด/ปิดเพลงประกอบ"
             >
               <span>{isMusicOn ? '🔊' : '🔇'}</span>
@@ -5795,10 +6436,11 @@ export default function Arena3DPage() {
             {players.some((pl) => pl.id === currentUserId) && (
               <button
                 onClick={handleSignOut}
-                className="px-2 py-1.5 rounded-lg text-xs font-extrabold text-amber-200 hover:bg-rose-500 hover:text-white transition cursor-pointer"
-                title="สลับบัญชีผู้ใช้"
+                className="px-2 py-1.5 rounded-lg text-xs font-extrabold text-amber-200 hover:bg-rose-500 hover:text-white transition cursor-pointer flex items-center justify-center"
+                title="ออกจากตัวละคร / สลับบัญชี"
+                aria-label="ออกจากตัวละคร / สลับบัญชี"
               >
-                🔄
+                <LogOut className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -5812,9 +6454,8 @@ export default function Arena3DPage() {
               setIsMobileMenuOpen(false);
               setIsDrawerOpen((v) => !v);
             }}
-            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center gap-1 cursor-pointer ${
-              isDrawerOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
-            }`}
+            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center gap-1 cursor-pointer ${isDrawerOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
+              }`}
             aria-label="เปิด/ปิดกระดานอันดับ"
           >
             <Trophy className="w-4 h-4 text-amber-400" />
@@ -5822,9 +6463,8 @@ export default function Arena3DPage() {
           <button
             type="button"
             onClick={() => setIsMobileMenuOpen((v) => !v)}
-            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center cursor-pointer ${
-              isMobileMenuOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
-            }`}
+            className={`rpg-panel rounded-xl px-2.5 py-2 text-xs font-extrabold flex items-center cursor-pointer ${isMobileMenuOpen ? 'ring-2 ring-amber-300 text-amber-300' : 'text-amber-100'
+              }`}
             aria-label="เมนูเพิ่มเติม"
           >
             <Menu className="w-4 h-4" />
@@ -5844,11 +6484,10 @@ export default function Arena3DPage() {
                       handleChangeQualityMode(opt.id);
                       showToast('⚡', `โหมดกราฟิก: ${opt.label}`, 'ปรับความละเอียดและเอฟเฟกต์ 3D เรียบร้อย');
                     }}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${
-                      qualityMode === opt.id
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${qualityMode === opt.id
                         ? 'bg-amber-400 text-black border-white'
                         : 'bg-slate-900/90 text-amber-100 border-slate-700'
-                    }`}
+                      }`}
                   >
                     {opt.short}
                   </button>
@@ -5885,8 +6524,8 @@ export default function Arena3DPage() {
                   }}
                   className="w-full text-left px-2.5 py-2 rounded-xl bg-rose-950/80 text-rose-200 text-xs font-extrabold flex items-center gap-2 cursor-pointer"
                 >
-                  <span>🔄</span>
-                  <span>สลับบัญชีผู้ใช้</span>
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span>ออกจากตัวละคร / สลับบัญชี</span>
                 </button>
               )}
             </div>
@@ -5894,10 +6533,45 @@ export default function Arena3DPage() {
         </div>
       </header>
 
+      {/* Main Screen Alert Banner: 7-Day Quest Betting Window */}
+      {(() => {
+        const activeBetting = quests.filter((q) => q.isBettingOpen);
+        if (activeBetting.length === 0 || betBannerDismissed || isQuestBoardOpen) return null;
+        const featured = activeBetting[0];
+        return (
+          <div className="fixed top-[62px] md:top-[76px] left-1/2 -translate-x-1/2 z-20 max-w-[94vw] pointer-events-auto">
+            <div className="flex items-center gap-2 bg-gradient-to-r from-[#5a2e0f] via-[#8b4d1d] to-[#5a2e0f] border-2 border-[#ffd86b] text-[#fff6dc] rounded-full pl-3 pr-2 py-1.5 shadow-[0_4px_16px_rgba(0,0,0,0.6)]">
+              <button
+                type="button"
+                onClick={() => openQuestBoard(featured.id)}
+                className="flex items-center gap-2 text-left cursor-pointer hover:brightness-110 transition min-w-0"
+              >
+                <span className="text-base shrink-0 animate-bounce">🎲</span>
+                <span className="text-[11px] sm:text-xs font-extrabold truncate max-w-[58vw] sm:max-w-[440px]">
+                  <span className="text-amber-300">ช่วงวางเดิมพันเปิดแล้ว!</span> เควส &ldquo;{featured.title}&rdquo;
+                  {activeBetting.length > 1 ? ` (+${activeBetting.length - 1} เควส)` : ''} • เหลือ{' '}
+                  {formatCountdownTh(featured.bettingMsRemaining)}
+                </span>
+                <span className="hidden sm:inline-block bg-amber-300 text-amber-950 text-[10.5px] font-black px-2.5 py-0.5 rounded-full shrink-0">
+                  วางเดิมพันเลย →
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBetBannerDismissed(true)}
+                className="w-5 h-5 rounded-full bg-black/35 hover:bg-black/60 text-amber-200 text-[10px] font-bold flex items-center justify-center cursor-pointer shrink-0"
+                title="ซ่อนแถบแจ้งเตือนชั่วคราว"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       <aside
-        className={`fixed top-16 md:top-20 right-2 sm:right-3 bottom-24 md:bottom-3 w-[345px] max-w-[calc(100vw-16px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${
-          isDrawerOpen ? 'translate-x-0' : 'translate-x-[120%]'
-        }`}
+        className={`fixed top-16 md:top-20 right-2 sm:right-3 bottom-24 md:bottom-3 w-[345px] max-w-[calc(100vw-16px)] z-20 flex flex-col gap-3 transition-transform duration-300 pointer-events-none ${isDrawerOpen ? 'translate-x-0' : 'translate-x-[120%]'
+          }`}
       >
         <div className="rpg-panel rounded-2xl p-3.5 pointer-events-auto flex flex-col max-h-[52%]">
           <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-amber-500/40 shrink-0 gap-1">
@@ -5946,13 +6620,12 @@ export default function Arena3DPage() {
                       focusOnCharacter(p.id);
                       if (window.innerWidth < 768) setIsDrawerOpen(false);
                     }}
-                    className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${
-                      isFirst
+                    className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${isFirst
                         ? 'bg-amber-500/25 border-amber-300'
                         : p.isInFoodStall || isLast
-                        ? 'bg-rose-900/40 border-rose-500/60'
-                        : 'bg-slate-900/80 border-slate-700'
-                    }`}
+                          ? 'bg-rose-900/40 border-rose-500/60'
+                          : 'bg-slate-900/80 border-slate-700'
+                      }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-lg bg-amber-400 text-black font-[family-name:var(--font-kanit)] font-extrabold text-xs flex items-center justify-center shrink-0">
@@ -5978,9 +6651,11 @@ export default function Arena3DPage() {
                           <span className="px-1 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 font-bold">
                             👟 {(p.stepCount ?? 0).toLocaleString()} ก้าว
                           </span>
-                          <span className="px-1 rounded bg-black/50 border border-amber-500/40">
-                            {gMeta.shortTag} {p.sideGoalProgressPct ?? 0}%
-                          </span>
+                          {activeQuestTagByUserId[p.id] && (
+                            <span className="px-1 rounded bg-amber-950/75 text-amber-200 border border-amber-500/40 truncate max-w-[140px]">
+                              📜 {activeQuestTagByUserId[p.id]}
+                            </span>
+                          )}
                           {pBoost.netPower !== 0 && (
                             <span
                               className={`px-1.5 rounded-full border text-[9px] font-extrabold ${pBoost.badgeBgClass}`}
@@ -5993,9 +6668,8 @@ export default function Arena3DPage() {
                     </div>
                     <div className="text-right shrink-0">
                       <div
-                        className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${
-                          pctVal < 0 ? 'text-rose-400' : 'text-emerald-400'
-                        }`}
+                        className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${pctVal < 0 ? 'text-rose-400' : 'text-emerald-400'
+                          }`}
                       >
                         {pctVal}%
                       </div>
@@ -6033,11 +6707,10 @@ export default function Arena3DPage() {
           <div
             onClick={() => setActionTargetPlayer(me)}
             title="คลิกเพื่อดูเกจพลัง +/- ประจำวันของคุณ"
-            className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 cursor-pointer hover:brightness-110 transition ${
-              walkingSpectatorId !== null
+            className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 cursor-pointer hover:brightness-110 transition ${walkingSpectatorId !== null
                 ? 'hidden xl:flex bottom-20'
                 : 'hidden lg:flex bottom-3'
-            }`}
+              }`}
           >
             <div className="flex items-center justify-between text-xs font-extrabold text-amber-200">
               <span>
@@ -6053,9 +6726,11 @@ export default function Arena3DPage() {
             </div>
             <div className="flex items-center justify-between text-[10px] font-bold text-amber-100/85">
               <span>👟 {(me.stepCount ?? 0).toLocaleString()} / {(me.stepTarget ?? activeSeason?.stepTarget ?? 300000).toLocaleString()} ก้าว</span>
-              <span className="text-amber-300">
-                {gMeta.shortTag} {me.sideGoalProgressPct ?? 0}%
-              </span>
+              {activeQuestTagByUserId[me.id] && (
+                <span className="text-amber-300 truncate max-w-[180px]">
+                  📜 {activeQuestTagByUserId[me.id]}
+                </span>
+              )}
             </div>
           </div>
         );
@@ -6087,11 +6762,10 @@ export default function Arena3DPage() {
               <button
                 type="button"
                 onClick={() => setFeedbackTab('submit')}
-                className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${
-                  feedbackTab === 'submit'
+                className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${feedbackTab === 'submit'
                     ? 'bg-amber-400 text-black border-white'
                     : 'bg-slate-900/80 text-amber-100 border-slate-700'
-                }`}
+                  }`}
               >
                 ✍️ ส่งเรื่อง (+5 💰/วัน)
               </button>
@@ -6101,11 +6775,10 @@ export default function Arena3DPage() {
                   setFeedbackTab('board');
                   void loadFeedbackItems();
                 }}
-                className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${
-                  feedbackTab === 'board'
+                className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${feedbackTab === 'board'
                     ? 'bg-cyan-400 text-black border-white'
                     : 'bg-slate-900/80 text-amber-100 border-slate-700'
-                }`}
+                  }`}
               >
                 📋 กระดานติดตาม ({feedbackItems.length})
               </button>
@@ -6129,11 +6802,10 @@ export default function Arena3DPage() {
                         key={cat.id}
                         type="button"
                         onClick={() => setFeedbackCategory(cat.id)}
-                        className={`py-2 px-2 rounded-xl border-2 text-[11px] font-extrabold cursor-pointer transition ${
-                          feedbackCategory === cat.id
+                        className={`py-2 px-2 rounded-xl border-2 text-[11px] font-extrabold cursor-pointer transition ${feedbackCategory === cat.id
                             ? 'bg-amber-400 text-black border-white'
                             : 'bg-slate-900 text-amber-100 border-slate-700'
-                        }`}
+                          }`}
                       >
                         {cat.label}
                       </button>
@@ -6194,16 +6866,15 @@ export default function Arena3DPage() {
                       it.category === 'idea'
                         ? { text: '💡 ไอเดีย', cls: 'bg-sky-600/90 text-white border-sky-300' }
                         : it.category === 'cosmetic'
-                        ? { text: '🎨 พรอพ/สัตว์ขี่', cls: 'bg-fuchsia-600/90 text-white border-fuchsia-300' }
-                        : { text: '🐛 บั๊ก/กระตุก', cls: 'bg-rose-600/90 text-white border-rose-300' };
+                          ? { text: '🎨 พรอพ/สัตว์ขี่', cls: 'bg-fuchsia-600/90 text-white border-fuchsia-300' }
+                          : { text: '🐛 บั๊ก/กระตุก', cls: 'bg-rose-600/90 text-white border-rose-300' };
                     return (
                       <div
                         key={it.id}
-                        className={`rounded-xl p-3 border-2 space-y-1.5 ${
-                          it.status === 'resolved'
+                        className={`rounded-xl p-3 border-2 space-y-1.5 ${it.status === 'resolved'
                             ? 'bg-emerald-950/45 border-emerald-500/60'
                             : 'bg-slate-900/85 border-slate-700'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between gap-2 flex-wrap">
                           <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-200">
@@ -6217,11 +6888,10 @@ export default function Arena3DPage() {
                             <button
                               type="button"
                               onClick={() => handleToggleFeedbackStatus(it.id, it.status)}
-                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border cursor-pointer ${
-                                it.status === 'resolved'
+                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border cursor-pointer ${it.status === 'resolved'
                                   ? 'bg-emerald-500 text-black border-white'
                                   : 'bg-amber-500/20 text-amber-200 border-amber-400/70 hover:bg-amber-400 hover:text-black'
-                              }`}
+                                }`}
                               title="คลิกเพื่อสลับสถานะ รอตรวจสอบ / แก้ไขแล้ว"
                             >
                               {it.status === 'resolved' ? '✅ แก้ไขแล้ว' : '⏳ รอตรวจสอบ'}
@@ -6291,39 +6961,32 @@ export default function Arena3DPage() {
                     </div>
                   </div>
 
-                  {/* สลับแท็บเป้าหลัก (ก้าวเดิน) vs ภารกิจรอง (แสดงเฉพาะเมื่อผู้เล่นเลือกภารกิจเสริมไว้) */}
-                  {selectedPlayerObj?.goalType && selectedPlayerObj.goalType !== 'none' && (
-                    <div className="grid grid-cols-2 gap-2 mb-3.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLogTab('steps');
-                          setModalError('');
-                        }}
-                        className={`border-2 border-black rounded-xl py-2 px-2 text-xs font-extrabold cursor-pointer transition ${
-                          logTab === 'steps'
-                            ? 'bg-gradient-to-r from-lime-400 to-emerald-400 text-black shadow-[2px_2px_0px_#000]'
-                            : 'bg-slate-900 text-amber-100/75'
+                  {/* สลับแท็บเป้าหลัก (ก้าวเดิน) vs กระดานบอร์ดเควส (แทนที่ภารกิจรองเดิม) */}
+                  <div className="grid grid-cols-2 gap-2 mb-3.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLogTab('steps');
+                        setModalError('');
+                      }}
+                      className={`border-2 border-black rounded-xl py-2 px-2 text-xs font-extrabold cursor-pointer transition ${logTab === 'steps'
+                          ? 'bg-gradient-to-r from-lime-400 to-emerald-400 text-black shadow-[2px_2px_0px_#000]'
+                          : 'bg-slate-900 text-amber-100/75'
                         }`}
-                      >
-                        👟 ก้าวเดิน (เป้าหลัก)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLogTab('side_goal');
-                          setModalError('');
-                        }}
-                        className={`border-2 border-black rounded-xl py-2 px-2 text-xs font-extrabold cursor-pointer transition ${
-                          logTab === 'side_goal'
-                            ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-black shadow-[2px_2px_0px_#000]'
-                            : 'bg-slate-900 text-amber-100/75'
-                        }`}
-                      >
-                        {gMeta.shortTag} (รอง)
-                      </button>
-                    </div>
-                  )}
+                    >
+                      👟 ก้าวเดิน (เป้าหลัก)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsLogOpen(false);
+                        openQuestBoard(null);
+                      }}
+                      className="border-2 border-[#ffd86b] rounded-xl py-2 px-2 text-xs font-extrabold cursor-pointer transition bg-gradient-to-b from-[#9c5d29] to-[#5a2d0d] text-[#ffefc8] hover:brightness-110 shadow-[2px_2px_0px_#000]"
+                    >
+                      📜 เปิดกระดานเควส
+                    </button>
+                  </div>
 
                   <form onSubmit={handleWeightSubmit} className="space-y-3.5">
                     {selectedPlayerObj && (
@@ -6427,8 +7090,8 @@ export default function Arena3DPage() {
                                     <div className="text-[11px] font-bold text-amber-200 leading-snug">
                                       {ocrResult.steps > effectiveSyncedToday
                                         ? `บวกส่วนต่างเข้าสนาม +${(
-                                            ocrResult.steps - effectiveSyncedToday
-                                          ).toLocaleString()} ก้าว (จากเดิมวันนี้ ${effectiveSyncedToday.toLocaleString()})`
+                                          ocrResult.steps - effectiveSyncedToday
+                                        ).toLocaleString()} ก้าว (จากเดิมวันนี้ ${effectiveSyncedToday.toLocaleString()})`
                                         : `ซิงก์ยอดวันนี้ครบ ${effectiveSyncedToday.toLocaleString()} ก้าวแล้ว (ไม่มีส่วนต่างเพิ่ม)`}
                                     </div>
                                   </div>
@@ -6483,17 +7146,16 @@ export default function Arena3DPage() {
                                           type="button"
                                           disabled={!syncKey || rotatingSyncKey}
                                           onClick={handleRotateSyncKey}
-                                          className={`rounded-lg py-1 text-[10.5px] font-bold border cursor-pointer disabled:opacity-50 ${
-                                            confirmRotateKey
+                                          className={`rounded-lg py-1 text-[10.5px] font-bold border cursor-pointer disabled:opacity-50 ${confirmRotateKey
                                               ? 'bg-rose-600 text-white border-amber-300'
                                               : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
-                                          }`}
+                                            }`}
                                         >
                                           {rotatingSyncKey
                                             ? 'กำลังสุ่ม...'
                                             : confirmRotateKey
-                                            ? '⚠️ กดยืนยันสุ่ม'
-                                            : '🔄 สุ่มใหม่'}
+                                              ? '⚠️ กดยืนยันสุ่ม'
+                                              : '🔄 สุ่มใหม่'}
                                         </button>
                                       </div>
 
@@ -6558,33 +7220,30 @@ export default function Arena3DPage() {
                               <button
                                 type="button"
                                 onClick={() => setStepInputMode('daily_sync')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
-                                  stepInputMode === 'daily_sync'
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'daily_sync'
                                     ? 'bg-amber-300 text-black border-white'
                                     : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                }`}
+                                  }`}
                               >
                                 🔄 ยอดวันนี้ (กันเบิ้ล)
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setStepInputMode('add')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
-                                  stepInputMode === 'add'
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'add'
                                     ? 'bg-emerald-400 text-black border-white'
                                     : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                }`}
+                                  }`}
                               >
                                 ➕ บวกเพิ่มเอง
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setStepInputMode('set')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
-                                  stepInputMode === 'set'
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'set'
                                     ? 'bg-sky-400 text-black border-white'
                                     : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                }`}
+                                  }`}
                               >
                                 📝 รวมทั้งซีซั่น
                               </button>
@@ -6595,8 +7254,8 @@ export default function Arena3DPage() {
                                 {stepInputMode === 'daily_sync'
                                   ? 'ยอดก้าวเดินรวมของวันนี้จากแอปสุขภาพ (ระบบหักส่วนที่ซิงก์ไปแล้วให้อัตโนมัติ)'
                                   : stepInputMode === 'add'
-                                  ? 'จำนวนก้าวที่เดินเพิ่มในครั้งนี้ (+ก้าว)'
-                                  : 'ยอดก้าวเดินสะสมรวมทั้งซีซั่น (ก้าว)'}
+                                    ? 'จำนวนก้าวที่เดินเพิ่มในครั้งนี้ (+ก้าว)'
+                                    : 'ยอดก้าวเดินสะสมรวมทั้งซีซั่น (ก้าว)'}
                               </label>
                               <input
                                 type="text"
@@ -6622,17 +7281,16 @@ export default function Arena3DPage() {
                                   stepInputMode === 'daily_sync'
                                     ? 'เช่น 8500 (ยอดก้าวของวันนี้)'
                                     : stepInputMode === 'add'
-                                    ? 'เช่น 3500'
-                                    : 'เช่น 45000'
+                                      ? 'เช่น 3500'
+                                      : 'เช่น 45000'
                                 }
                                 className="w-full bg-slate-900 text-emerald-300 placeholder:text-slate-500 border-2 border-emerald-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
                               />
 
                               {stepInputMode === 'daily_sync' && parsedTypedSteps !== null && (
                                 <p
-                                  className={`mt-1 text-[11px] font-bold text-center ${
-                                    liveDelta && liveDelta > 0 ? 'text-emerald-300' : 'text-amber-200/80'
-                                  }`}
+                                  className={`mt-1 text-[11px] font-bold text-center ${liveDelta && liveDelta > 0 ? 'text-emerald-300' : 'text-amber-200/80'
+                                    }`}
                                 >
                                   {liveDelta && liveDelta > 0
                                     ? `✨ จะบวกเข้าสนามเฉพาะส่วนต่าง +${liveDelta.toLocaleString()} ก้าว (ซิงก์วันนี้ไปแล้ว ${effectiveSyncedToday.toLocaleString()} ก้าว)`
@@ -6677,17 +7335,17 @@ export default function Arena3DPage() {
                       {submitting
                         ? 'กำลังอัปเดต...'
                         : ocrScanning
-                        ? 'กำลังอ่านรูปด้วย AI...'
-                        : logTab === 'steps'
-                        ? stepInputMode === 'daily_sync' &&
-                          stepInput.trim() !== '' &&
-                          !Number.isNaN(Number(stepInput)) &&
-                          Math.round(Number(stepInput)) > todaySyncedSteps
-                          ? `👟 ซิงก์ก้าววันนี้ (+${(
-                              Math.round(Number(stepInput)) - todaySyncedSteps
-                            ).toLocaleString()} ก้าว) เข้าสนาม!`
-                          : '👟 บันทึกก้าวเดิน & วิ่งเข้าเส้นชัย!'
-                        : '🚀 ส่งผลภารกิจรอง & รับโบนัส!'}
+                          ? 'กำลังอ่านรูปด้วย AI...'
+                          : logTab === 'steps'
+                            ? stepInputMode === 'daily_sync' &&
+                              stepInput.trim() !== '' &&
+                              !Number.isNaN(Number(stepInput)) &&
+                              Math.round(Number(stepInput)) > todaySyncedSteps
+                              ? `👟 ซิงก์ก้าววันนี้ (+${(
+                                Math.round(Number(stepInput)) - todaySyncedSteps
+                              ).toLocaleString()} ก้าว) เข้าสนาม!`
+                              : '👟 บันทึกก้าวเดิน & วิ่งเข้าเส้นชัย!'
+                            : '🚀 ส่งผลภารกิจรอง & รับโบนัส!'}
                     </button>
                   </form>
                 </>
@@ -6849,222 +7507,232 @@ export default function Arena3DPage() {
           pBoost.netPower > 0 ? `+${pBoost.netPower}` : String(pBoost.netPower);
 
         return (
-        <div
-          onClick={() => setActionTargetPlayer(null)}
-          className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-        >
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="rpg-panel rounded-2xl max-w-sm w-full p-5 relative"
+            onClick={() => setActionTargetPlayer(null)}
+            className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-4"
           >
-            <button
-              onClick={() => setActionTargetPlayer(null)}
-              className="absolute top-3 right-3 w-8 h-8 bg-rose-600 text-white rounded-lg flex items-center justify-center font-bold cursor-pointer"
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="rpg-panel rounded-2xl max-w-sm w-full p-5 relative"
             >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-3 mb-3">
-              <div
-                className="w-12 h-12 rounded-2xl border-2 border-amber-400 flex items-center justify-center text-2xl shrink-0"
-                style={{ backgroundColor: liveTarget.colorHex }}
-              >
-                {liveTarget.emoji}
-              </div>
-              <div className="min-w-0">
-                <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold text-amber-300 truncate">
-                  {liveTarget.name}
-                </h3>
-                <p className="text-xs text-emerald-300 font-bold">
-                  👟 {(liveTarget.stepCount ?? 0).toLocaleString()} / {(liveTarget.stepTarget ?? activeSeason?.stepTarget ?? 300000).toLocaleString()} ก้าว ({liveTarget.stepProgressPct ?? liveTarget.progressPct ?? 0}%)
-                </p>
-                {liveTarget.goalType && liveTarget.goalType !== 'none' && (
-                  <p className="text-[11px] text-amber-100/80 font-semibold">
-                    🎯 ภารกิจรอง: {getGoalTypeMeta(liveTarget.goalType).shortTag} • {liveTarget.sideGoalProgressPct ?? 0}%
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* บาร์สมดุลพลัง +/- รายวัน: มารผจญ (คาบิก้อน/จอมมารบู) vs เติมไฟ (ไฟบูสต์/Super Saiyan) */}
-            <div className="bg-slate-950/90 border-2 border-amber-500/60 rounded-xl p-3 mb-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={`px-2 py-0.5 rounded-full border text-[11px] font-extrabold ${pBoost.badgeBgClass}`}
-                >
-                  {pBoost.title}
-                </span>
-                <span
-                  className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${
-                    pBoost.netPower > 0
-                      ? 'text-amber-300'
-                      : pBoost.netPower < 0
-                      ? 'text-pink-400'
-                      : 'text-slate-300'
-                  }`}
-                >
-                  เกจรวม: {netLabel}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] font-bold">
-                <span className="text-pink-300">😈 มารผจญ (-{pBoost.temptCount})</span>
-                <span className="text-slate-400">ชักเย่อ +/-</span>
-                <span className="text-amber-300">🔥 เติมไฟ (+{pBoost.cheerCount})</span>
-              </div>
-
-              {/* Bi-directional Tug-of-War Gauge (-10 .. 0 .. +10) */}
-              <div className="relative w-full h-4 bg-slate-900 border-2 border-black rounded-full overflow-visible shadow-inner">
-                {/* Left Negative Fill (Food Coma / Giant Kabigon) */}
-                {pBoost.netPower < 0 && (
-                  <div
-                    className="absolute top-0 bottom-0 rounded-l-full bg-gradient-to-l from-sky-400 via-cyan-500 to-teal-300 transition-all duration-300"
-                    style={{
-                      right: '50%',
-                      width: `${fillPct}%`,
-                    }}
-                  />
-                )}
-                {/* Right Positive Fill (Fire Boost / Super Saiyan) */}
-                {pBoost.netPower > 0 && (
-                  <div
-                    className="absolute top-0 bottom-0 rounded-r-full bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-200 transition-all duration-300"
-                    style={{
-                      left: '50%',
-                      width: `${fillPct}%`,
-                    }}
-                  />
-                )}
-
-                {/* Milestone Ticks: -5 (25%), 0 (50%), +5 (75%) */}
-                <div className="absolute top-0 bottom-0 left-1/4 w-[1.5px] bg-white/30" />
-                <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[2px] bg-white/85 z-10" />
-                <div className="absolute top-0 bottom-0 left-3/4 w-[1.5px] bg-white/30" />
-
-                {/* Thumb Indicator */}
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-2 border-black shadow z-20 transition-all duration-300"
-                  style={{ left: `${thumbLeftPct}%` }}
-                />
-              </div>
-
-              <div className="flex items-center justify-between text-[9px] font-extrabold text-amber-100/80 pt-0.5">
-                <span className="text-cyan-300">💤-10 คาบิก้อน</span>
-                <span className="text-sky-300">😴-5 จุกแน่น</span>
-                <span className="text-slate-300">0</span>
-                <span className="text-orange-300">🔥+5 บูสต์</span>
-                <span className="text-yellow-300">⚡+10 ไซย่า</span>
-              </div>
-
-              <div className="text-[10px] font-semibold text-amber-100/85 bg-black/40 rounded-lg px-2 py-1 leading-snug">
-                💡 {pBoost.nextHint}
-              </div>
-              <div className="text-[9px] font-bold text-amber-200/65 text-center">
-                ⏰ เกจพลัง +/- รีเซ็ตกลับเป็น 0 ใหม่ทุกวันเวลา 07:00 น. เช้า
-              </div>
-            </div>
-
-            {liveTarget.id === currentUserId ? (
-              <div className="rounded-xl border-2 border-black bg-amber-100/90 px-3 py-2 text-[11px] font-bold text-stone-800 text-center leading-snug">
-                💡 ไม่สามารถเติมไฟหรือแกล้งตัวเองได้ — คลิกที่ป้ายชื่อบนหัวเพื่อนในสนามเพื่อส่งไฟเชียร์ (+1) หรือแกล้งเพื่อน (-1) และรับโบนัสเหรียญ!
-              </div>
-            ) : (
-            <div className="space-y-3">
-              {currentUserId && currentUserId > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActionTargetPlayer(null);
-                    setGiftError('');
-                    setGiftMessage('');
-                    setGiftCategory('mount');
-                    setGiftTargetPlayer(liveTarget);
-                  }}
-                  className="w-full neo-btn bg-gradient-to-r from-fuchsia-500 via-pink-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs py-2 rounded-xl cursor-pointer shadow-[0_3px_0_#000] hover:brightness-110"
-                >
-                  🎁 ส่งพรอพ/สัตว์ขี่เป็นของขวัญให้ {liveTarget.name}!
-                </button>
-              )}
-            <form onSubmit={handleBoardSubmit} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBoardKind('cheer')}
-                  className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
-                    boardKind === 'cheer'
-                      ? 'bg-gradient-to-r from-[#A3E635] to-[#FACC15] text-black shadow-[2px_2px_0px_#000]'
-                      : 'bg-zinc-100 text-zinc-600'
-                  }`}
-                >
-                  🔥 เติมไฟบูสต์ (+1)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBoardKind('tempt')}
-                  className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${
-                    boardKind === 'tempt'
-                      ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]'
-                      : 'bg-zinc-100 text-zinc-600'
-                  }`}
-                >
-                  😈 มารผจญ/ขุนพุง (-1)
-                </button>
-              </div>
-
-              {/* กติกาวงแชร์ปันผลสายเชียร์ & สายมารแทงสวนรับทรัพย์ */}
-              <div
-                className={`rounded-xl border-2 border-black px-3 py-2 text-[11px] font-bold leading-snug ${
-                  boardKind === 'cheer'
-                    ? 'bg-amber-100 text-stone-900'
-                    : 'bg-rose-100 text-rose-950'
-                }`}
-              >
-                {boardKind === 'cheer' ? (
-                  <>
-                    <div>🤝 <strong>วงแชร์สายส่งไฟ:</strong> คนส่งได้ <strong>+2 💰</strong> &amp; <strong>คนได้รับไฟก็ได้ +2 💰</strong> ทันที! (สูงสุด 5 ครั้ง/วัน)</div>
-                    <div className="text-[10.5px] text-amber-900 mt-0.5">
-                      💰 ถ้าเพื่อนอัปเดตผลรอบถัดไปแล้ว<strong>พัฒนาขึ้น/ได้แต้ม</strong> คนส่งไฟรับปันผลอีก <strong>+8 💰/ดวง (สูงสุด 3 ดวง) + โบนัส 25% ของแต้มเพื่อน</strong> (รับปันผลรวมสูงสุด <strong>40 💰/วัน</strong>)
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>😈 <strong>สายมารแทงสวนขุนพุง:</strong> คนส่งแกล้งเพื่อนรับทันที <strong>+2 💰</strong> (สูงสุด 5 ครั้ง/วัน)</div>
-                    <div className="text-[10.5px] text-rose-900 mt-0.5">
-                      🍔 ถ้าเพื่อนตบะแตกอัปเดตผล<strong>ถอยหลัง</strong> รับรางวัลนำจับ <strong>+12 💰/ชิ้น</strong> (ร่วงซุ้มอาหาร <strong>+20 💰/ชิ้น</strong> • รับปันผลรวมสูงสุด <strong>40 💰/วัน</strong>)
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <input
-                type="text"
-                maxLength={120}
-                placeholder="พิมพ์ข้อความถึงเพื่อน (ไม่ใส่ก็ได้)"
-                value={boardMessage}
-                onChange={(e) => setBoardMessage(e.target.value)}
-                className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 text-xs font-semibold text-black placeholder:text-zinc-500"
-              />
-
               <button
-                type="submit"
-                disabled={sendingBoard}
-                className={`w-full neo-btn font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer ${
-                  boardKind === 'cheer'
-                    ? 'bg-[#FFE600] hover:bg-[#fef08a] text-black'
-                    : 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white'
-                }`}
+                onClick={() => setActionTargetPlayer(null)}
+                className="absolute top-3 right-3 w-8 h-8 bg-rose-600 text-white rounded-lg flex items-center justify-center font-bold cursor-pointer"
               >
-                {sendingBoard
-                  ? 'กำลังส่ง...'
-                  : boardKind === 'cheer'
-                  ? '🔥 ยิงลูกไฟเติมพลังให้เพื่อน! (+1)'
-                  : '🍔 ส่งไรเดอร์เอาของกินไปขุน! (-1)'}
+                ✕
               </button>
-            </form>
+
+              <div className="flex items-center gap-3 mb-3">
+                <div
+                  className="w-12 h-12 rounded-2xl border-2 border-amber-400 flex items-center justify-center text-2xl shrink-0"
+                  style={{ backgroundColor: liveTarget.colorHex }}
+                >
+                  {liveTarget.emoji}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-[family-name:var(--font-kanit)] text-lg font-extrabold text-amber-300 truncate">
+                    {liveTarget.name}
+                  </h3>
+                  <p className="text-xs text-emerald-300 font-bold">
+                    👟 {(liveTarget.stepCount ?? 0).toLocaleString()} / {(liveTarget.stepTarget ?? activeSeason?.stepTarget ?? 300000).toLocaleString()} ก้าว ({liveTarget.stepProgressPct ?? liveTarget.progressPct ?? 0}%)
+                  </p>
+                  {(() => {
+                    const activePlayerQuest = quests.find(
+                      (q) =>
+                        (q.status === 'active' || q.status === 'voting') &&
+                        q.party.some((m) => m.userId === liveTarget.id && m.inviteStatus === 'accepted')
+                    );
+                    if (!activePlayerQuest) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionTargetPlayer(null);
+                          openQuestBoard(activePlayerQuest.id);
+                        }}
+                        className="text-[11px] text-amber-200 hover:text-amber-100 font-bold underline decoration-amber-400/70 cursor-pointer text-left"
+                      >
+                        📜 กำลังทำเควส: {activePlayerQuest.title}
+                      </button>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* บาร์สมดุลพลัง +/- รายวัน: มารผจญ (คาบิก้อน/จอมมารบู) vs เติมไฟ (ไฟบูสต์/Super Saiyan) */}
+              <div className="bg-slate-950/90 border-2 border-amber-500/60 rounded-xl p-3 mb-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full border text-[11px] font-extrabold ${pBoost.badgeBgClass}`}
+                  >
+                    {pBoost.title}
+                  </span>
+                  <span
+                    className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${pBoost.netPower > 0
+                        ? 'text-amber-300'
+                        : pBoost.netPower < 0
+                          ? 'text-pink-400'
+                          : 'text-slate-300'
+                      }`}
+                  >
+                    เกจรวม: {netLabel}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] font-bold">
+                  <span className="text-pink-300">😈 มารผจญ (-{pBoost.temptCount})</span>
+                  <span className="text-slate-400">ชักเย่อ +/-</span>
+                  <span className="text-amber-300">🔥 เติมไฟ (+{pBoost.cheerCount})</span>
+                </div>
+
+                {/* Bi-directional Tug-of-War Gauge (-10 .. 0 .. +10) */}
+                <div className="relative w-full h-4 bg-slate-900 border-2 border-black rounded-full overflow-visible shadow-inner">
+                  {/* Left Negative Fill (Food Coma / Giant Kabigon) */}
+                  {pBoost.netPower < 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 rounded-l-full bg-gradient-to-l from-sky-400 via-cyan-500 to-teal-300 transition-all duration-300"
+                      style={{
+                        right: '50%',
+                        width: `${fillPct}%`,
+                      }}
+                    />
+                  )}
+                  {/* Right Positive Fill (Fire Boost / Super Saiyan) */}
+                  {pBoost.netPower > 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 rounded-r-full bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-200 transition-all duration-300"
+                      style={{
+                        left: '50%',
+                        width: `${fillPct}%`,
+                      }}
+                    />
+                  )}
+
+                  {/* Milestone Ticks: -5 (25%), 0 (50%), +5 (75%) */}
+                  <div className="absolute top-0 bottom-0 left-1/4 w-[1.5px] bg-white/30" />
+                  <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[2px] bg-white/85 z-10" />
+                  <div className="absolute top-0 bottom-0 left-3/4 w-[1.5px] bg-white/30" />
+
+                  {/* Thumb Indicator */}
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-2 border-black shadow z-20 transition-all duration-300"
+                    style={{ left: `${thumbLeftPct}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[9px] font-extrabold text-amber-100/80 pt-0.5">
+                  <span className="text-cyan-300">💤-10 คาบิก้อน</span>
+                  <span className="text-sky-300">😴-5 จุกแน่น</span>
+                  <span className="text-slate-300">0</span>
+                  <span className="text-orange-300">🔥+5 บูสต์</span>
+                  <span className="text-yellow-300">⚡+10 ไซย่า</span>
+                </div>
+
+                <div className="text-[10px] font-semibold text-amber-100/85 bg-black/40 rounded-lg px-2 py-1 leading-snug">
+                  💡 {pBoost.nextHint}
+                </div>
+                <div className="text-[9px] font-bold text-amber-200/65 text-center">
+                  ⏰ เกจพลัง +/- รีเซ็ตกลับเป็น 0 ใหม่ทุกวันเวลา 07:00 น. เช้า
+                </div>
+              </div>
+
+              {liveTarget.id === currentUserId ? (
+                <div className="rounded-xl border-2 border-black bg-amber-100/90 px-3 py-2 text-[11px] font-bold text-stone-800 text-center leading-snug">
+                  💡 ไม่สามารถเติมไฟหรือแกล้งตัวเองได้ — คลิกที่ป้ายชื่อบนหัวเพื่อนในสนามเพื่อส่งไฟเชียร์ (+1) หรือแกล้งเพื่อน (-1) และรับโบนัสเหรียญ!
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {currentUserId && currentUserId > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionTargetPlayer(null);
+                        setGiftError('');
+                        setGiftMessage('');
+                        setGiftCategory('mount');
+                        setGiftTargetPlayer(liveTarget);
+                      }}
+                      className="w-full neo-btn bg-gradient-to-r from-fuchsia-500 via-pink-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs py-2 rounded-xl cursor-pointer shadow-[0_3px_0_#000] hover:brightness-110"
+                    >
+                      🎁 ส่งพรอพ/สัตว์ขี่เป็นของขวัญให้ {liveTarget.name}!
+                    </button>
+                  )}
+                  <form onSubmit={handleBoardSubmit} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBoardKind('cheer')}
+                        className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${boardKind === 'cheer'
+                            ? 'bg-gradient-to-r from-[#A3E635] to-[#FACC15] text-black shadow-[2px_2px_0px_#000]'
+                            : 'bg-zinc-100 text-zinc-600'
+                          }`}
+                      >
+                        🔥 เติมไฟบูสต์ (+1)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBoardKind('tempt')}
+                        className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${boardKind === 'tempt'
+                            ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]'
+                            : 'bg-zinc-100 text-zinc-600'
+                          }`}
+                      >
+                        😈 มารผจญ/ขุนพุง (-1)
+                      </button>
+                    </div>
+
+                    {/* กติกาวงแชร์ปันผลสายเชียร์ & สายมารแทงสวนรับทรัพย์ */}
+                    <div
+                      className={`rounded-xl border-2 border-black px-3 py-2 text-[11px] font-bold leading-snug ${boardKind === 'cheer'
+                          ? 'bg-amber-100 text-stone-900'
+                          : 'bg-rose-100 text-rose-950'
+                        }`}
+                    >
+                      {boardKind === 'cheer' ? (
+                        <>
+                          <div>🤝 <strong>วงแชร์สายส่งไฟ:</strong> คนส่งได้ <strong>+2 💰</strong> &amp; <strong>คนได้รับไฟก็ได้ +2 💰</strong> ทันที! (สูงสุด 5 ครั้ง/วัน)</div>
+                          <div className="text-[10.5px] text-amber-900 mt-0.5">
+                            💰 ถ้าเพื่อนอัปเดตผลรอบถัดไปแล้ว<strong>พัฒนาขึ้น/ได้แต้ม</strong> คนส่งไฟรับปันผลอีก <strong>+8 💰/ดวง (สูงสุด 3 ดวง) + โบนัส 25% ของแต้มเพื่อน</strong> (รับปันผลรวมสูงสุด <strong>40 💰/วัน</strong>)
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>😈 <strong>สายมารแทงสวนขุนพุง:</strong> คนส่งแกล้งเพื่อนรับทันที <strong>+2 💰</strong> (สูงสุด 5 ครั้ง/วัน)</div>
+                          <div className="text-[10.5px] text-rose-900 mt-0.5">
+                            🍔 ถ้าเพื่อนตบะแตกอัปเดตผล<strong>ถอยหลัง</strong> รับรางวัลนำจับ <strong>+12 💰/ชิ้น</strong> (ร่วงซุ้มอาหาร <strong>+20 💰/ชิ้น</strong> • รับปันผลรวมสูงสุด <strong>40 💰/วัน</strong>)
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <input
+                      type="text"
+                      maxLength={120}
+                      placeholder="พิมพ์ข้อความถึงเพื่อน (ไม่ใส่ก็ได้)"
+                      value={boardMessage}
+                      onChange={(e) => setBoardMessage(e.target.value)}
+                      className="w-full bg-[#FFFDF7] border-2 border-black rounded-xl px-3 py-2 text-xs font-semibold text-black placeholder:text-zinc-500"
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={sendingBoard}
+                      className={`w-full neo-btn font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer ${boardKind === 'cheer'
+                          ? 'bg-[#FFE600] hover:bg-[#fef08a] text-black'
+                          : 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white'
+                        }`}
+                    >
+                      {sendingBoard
+                        ? 'กำลังส่ง...'
+                        : boardKind === 'cheer'
+                          ? '🔥 ยิงลูกไฟเติมพลังให้เพื่อน! (+1)'
+                          : '🍔 ส่งไรเดอร์เอาของกินไปขุน! (-1)'}
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
-            )}
           </div>
-        </div>
         );
       })()}
 
@@ -7141,11 +7809,10 @@ export default function Arena3DPage() {
                       setGiftCategory(cat.id);
                       setGiftError('');
                     }}
-                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border-2 whitespace-nowrap cursor-pointer transition shrink-0 ${
-                      giftCategory === cat.id
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border-2 whitespace-nowrap cursor-pointer transition shrink-0 ${giftCategory === cat.id
                         ? 'rpg-btn-gold'
                         : 'bg-slate-900/90 text-amber-100 border-slate-700 hover:border-amber-400'
-                    }`}
+                      }`}
                   >
                     {cat.label}
                   </button>
@@ -7166,11 +7833,10 @@ export default function Arena3DPage() {
                   return (
                     <div
                       key={item.id}
-                      className={`rounded-xl p-2.5 border-2 flex flex-col justify-between gap-2 ${
-                        friendHas
+                      className={`rounded-xl p-2.5 border-2 flex flex-col justify-between gap-2 ${friendHas
                           ? 'bg-slate-900/50 border-slate-700 opacity-65'
                           : 'bg-slate-900/90 border-amber-500/50 hover:border-amber-300'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="w-9 h-9 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center justify-center text-xl shrink-0">
@@ -7190,21 +7856,20 @@ export default function Arena3DPage() {
                         type="button"
                         disabled={friendHas || !canAfford || Boolean(sendingGiftId)}
                         onClick={() => handleSendGiftItem(item)}
-                        className={`w-full py-1.5 rounded-xl text-[11px] font-extrabold border cursor-pointer transition ${
-                          friendHas
+                        className={`w-full py-1.5 rounded-xl text-[11px] font-extrabold border cursor-pointer transition ${friendHas
                             ? 'bg-slate-800 text-slate-400 border-slate-600 cursor-not-allowed'
                             : !canAfford
-                            ? 'bg-slate-800 text-rose-300 border-rose-500/50 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-fuchsia-500 to-amber-400 text-black border-white hover:brightness-110'
-                        }`}
+                              ? 'bg-slate-800 text-rose-300 border-rose-500/50 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-fuchsia-500 to-amber-400 text-black border-white hover:brightness-110'
+                          }`}
                       >
                         {busy
                           ? 'กำลังส่ง...'
                           : friendHas
-                          ? '✓ เพื่อนมีแล้ว'
-                          : !canAfford
-                          ? `GP ไม่พอ (${item.cost})`
-                          : `🎁 ส่งให้เพื่อน (${item.cost} 💰)`}
+                            ? '✓ เพื่อนมีแล้ว'
+                            : !canAfford
+                              ? `GP ไม่พอ (${item.cost})`
+                              : `🎁 ส่งให้เพื่อน (${item.cost} 💰)`}
                       </button>
                     </div>
                   );
@@ -7348,12 +8013,9 @@ export default function Arena3DPage() {
                   onClick={() => openWardrobeModal(currentUser, 'armor')}
                   className="rpg-btn-blue rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer min-w-0"
                 >
-                  <div className="flex items-center gap-1 max-w-full">
-                    <span className="text-sm leading-none">{currentUser.emoji}</span>
-                    <span className="text-[10px] bg-black/50 text-amber-300 px-1 py-0.2 rounded border border-amber-400 font-extrabold">
-                      💰{currentUser.points ?? 100}
-                    </span>
-                  </div>
+                  <span className="text-[10px] bg-black/50 text-amber-300 px-1.5 py-0.2 rounded border border-amber-400 font-extrabold">
+                    💰 {currentUser.points ?? 100}
+                  </span>
                   <span className="text-[10.5px] font-extrabold leading-none truncate max-w-full">
                     แต่งตัว/ร้านค้า
                   </span>
@@ -7417,147 +8079,175 @@ export default function Arena3DPage() {
                   })()}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                     {GROUP_PAIR_ACTIVITIES.map((act) => (
-                    <button
-                      key={act.animType}
-                      type="button"
-                      onClick={() => {
-                        if (act.animType === 'volleyball') {
+                      <button
+                        key={act.animType}
+                        type="button"
+                        onClick={() => {
+                          if (act.animType === 'volleyball') {
+                            setIsPairMenuOpen(false);
+                            if (liveVbLobby && liveVbLobby.count < liveVbLobby.max) {
+                              setVbSession({
+                                roomCode: liveVbLobby.roomCode,
+                                mode: liveVbLobby.mode,
+                                isHost: false,
+                                targetName: liveVbLobby.hostName,
+                              });
+                            } else {
+                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                              setVbSession({
+                                roomCode: newCode,
+                                mode: '1v1',
+                                isHost: true,
+                                targetName: nearbySpectator.name,
+                              });
+                            }
+                            return;
+                          }
+                          if (act.animType === 'play_cards') {
+                            setIsPairMenuOpen(false);
+                            if (liveCardLobby && liveCardLobby.count < liveCardLobby.max) {
+                              setCardSession({
+                                roomCode: liveCardLobby.roomCode,
+                                isHost: false,
+                                targetName: liveCardLobby.hostName,
+                              });
+                            } else {
+                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                              setCardSession({
+                                roomCode: newCode,
+                                isHost: true,
+                                targetName: nearbySpectator.name,
+                              });
+                            }
+                            return;
+                          }
+                          if (act.animType === 'picnic_shabu') {
+                            setIsPairMenuOpen(false);
+                            if (liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max) {
+                              setShabuSession({
+                                roomCode: liveShabuLobby.roomCode,
+                                isHost: false,
+                                targetName: liveShabuLobby.hostName,
+                              });
+                            } else {
+                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
+                              setShabuSession({
+                                roomCode: newCode,
+                                isHost: true,
+                                targetName: nearbySpectator.name,
+                              });
+                            }
+                            return;
+                          }
+                          const walker = players.find((pl) => pl.id === walkingSpectatorId);
+                          setPairedActivities((prev) => {
+                            const next = {
+                              ...prev,
+                              [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                              [nearbySpectator.id]: { animType: act.animType, label: act.label },
+                            };
+                            try {
+                              localStorage.setItem(
+                                `waist_paired_activities_${getBangkok7AmDayKey()}`,
+                                JSON.stringify(next)
+                              );
+                            } catch {
+                              // ignore
+                            }
+                            return next;
+                          });
                           setIsPairMenuOpen(false);
-                          if (liveVbLobby && liveVbLobby.count < liveVbLobby.max) {
-                            setVbSession({
-                              roomCode: liveVbLobby.roomCode,
-                              mode: liveVbLobby.mode,
-                              isHost: false,
-                              targetName: liveVbLobby.hostName,
-                            });
-                          } else {
-                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                            setVbSession({
-                              roomCode: newCode,
-                              mode: '1v1',
-                              isHost: true,
-                              targetName: nearbySpectator.name,
-                            });
-                          }
-                          return;
-                        }
-                        if (act.animType === 'play_cards') {
-                          setIsPairMenuOpen(false);
-                          if (liveCardLobby && liveCardLobby.count < liveCardLobby.max) {
-                            setCardSession({
-                              roomCode: liveCardLobby.roomCode,
-                              isHost: false,
-                              targetName: liveCardLobby.hostName,
-                            });
-                          } else {
-                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                            setCardSession({
-                              roomCode: newCode,
-                              isHost: true,
-                              targetName: nearbySpectator.name,
-                            });
-                          }
-                          return;
-                        }
-                        if (act.animType === 'picnic_shabu') {
-                          setIsPairMenuOpen(false);
-                          if (liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max) {
-                            setShabuSession({
-                              roomCode: liveShabuLobby.roomCode,
-                              isHost: false,
-                              targetName: liveShabuLobby.hostName,
-                            });
-                          } else {
-                            const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                            setShabuSession({
-                              roomCode: newCode,
-                              isHost: true,
-                              targetName: nearbySpectator.name,
-                            });
-                          }
-                          return;
-                        }
-                        const walker = players.find((pl) => pl.id === walkingSpectatorId);
-                        setPairedActivities((prev) => {
-                          const next = {
-                            ...prev,
-                            [walkingSpectatorId]: { animType: act.animType, label: act.label },
-                            [nearbySpectator.id]: { animType: act.animType, label: act.label },
-                          };
-                          try {
-                            localStorage.setItem(
-                              `waist_paired_activities_${getBangkok7AmDayKey()}`,
-                              JSON.stringify(next)
-                            );
-                          } catch {
-                            // ignore
-                          }
-                          return next;
-                        });
-                        setIsPairMenuOpen(false);
-                        broadcastRealtimeEvent('activity', {
-                          updates: {
-                            [walkingSpectatorId]: { animType: act.animType, label: act.label },
-                            [nearbySpectator.id]: { animType: act.animType, label: act.label },
-                          },
-                        });
-                        confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
-                        showToast(
-                          '🤝',
-                          'ตั้งวงทำกิจกรรมคู่!',
-                          `${walker?.name || ''} ชวน ${nearbySpectator.name} มา${act.label}`
-                        );
-                      }}
-                      className={`border-2 border-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition ${
-                        act.animType === 'volleyball'
-                          ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
-                          : act.animType === 'picnic_shabu'
-                          ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
-                          : act.animType === 'play_cards'
-                          ? 'bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-black hover:brightness-105 shadow'
-                          : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
-                      }`}
-                    >
-                      {act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
-                        ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
-                        : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
-                        ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
-                        : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
-                        ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
-                        : act.label}
-                    </button>
-                  ))}
+                          broadcastRealtimeEvent('activity', {
+                            updates: {
+                              [walkingSpectatorId]: { animType: act.animType, label: act.label },
+                              [nearbySpectator.id]: { animType: act.animType, label: act.label },
+                            },
+                          });
+                          confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+                          showToast(
+                            '🤝',
+                            'ตั้งวงทำกิจกรรมคู่!',
+                            `${walker?.name || ''} ชวน ${nearbySpectator.name} มา${act.label}`
+                          );
+                        }}
+                        className={`border-2 border-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition ${act.animType === 'volleyball'
+                            ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
+                            : act.animType === 'picnic_shabu'
+                              ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
+                              : act.animType === 'play_cards'
+                                ? 'bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-black hover:brightness-105 shadow'
+                                : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
+                          }`}
+                      >
+                        {act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
+                          ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
+                          : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
+                            ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
+                            : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
+                              ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
+                              : act.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setIsPairMenuOpen((v) => !v)}
-                className="neo-btn bg-[#FF4D8D] text-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer animate-bounce"
-              >
-                🤝 ชวน {nearbySpectator.emoji} {nearbySpectator.name} ทำกิจกรรมด้วยกัน!
-              </button>
             </div>
           )}
 
-          {isNearGuard && (
-            <button
-              type="button"
-              onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
-              className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
-            >
-              😈 แกล้งพี่ยาม!
-            </button>
-          )}
+          {/* แถวปุ่มกิจกรรมใกล้ตัวแบบแนวนอน 1 แถว (ไม่ซ้อนสูงบังจอบนมือถือ และซ่อนอัตโนมัติตอนกำลังตกปลา/ดูผลปลา) */}
+          {fishingPhase === 'idle' && !fishingResult && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[94vw]">
+              {nearbySpectator && (
+                <button
+                  type="button"
+                  onClick={() => setIsPairMenuOpen((v) => !v)}
+                  className="neo-btn bg-[#FF4D8D] text-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  🤝 ชวน {nearbySpectator.emoji} {nearbySpectator.name}
+                  <span className="hidden sm:inline"> ทำกิจกรรม!</span>
+                </button>
+              )}
 
-          {isNearCafe && (
-            <button
-              type="button"
-              onClick={() => setIsPetCafeOpen(true)}
-              className="neo-btn bg-gradient-to-r from-pink-400 via-amber-300 to-rose-400 text-stone-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
-            >
-              ☕🐾 เข้าคาเฟ่สัตว์เลี้ยง (Pet Café)!
-            </button>
+              {!isPairMenuOpen && isNearGuard && (
+                <button
+                  type="button"
+                  onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
+                  className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  😈 แกล้งพี่ยาม!
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearCafe && (
+                <button
+                  type="button"
+                  onClick={() => setIsPetCafeOpen(true)}
+                  className="neo-btn bg-gradient-to-r from-pink-400 via-amber-300 to-rose-400 text-stone-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  ☕🐾 คาเฟ่<span className="hidden sm:inline">สัตว์เลี้ยง (Pet Café)!</span>
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearQuestBoard && (
+                <button
+                  type="button"
+                  onClick={() => openQuestBoard(null)}
+                  className="neo-btn bg-gradient-to-b from-[#ffdf6b] via-[#f5a623] to-[#d97706] text-[#3d1b06] border-2 border-[#fff7d6] font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#5c2d0c] whitespace-nowrap"
+                >
+                  📜 กระดานเควส<span className="hidden sm:inline"> • Mission Board!</span>
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearOcean && (
+                <button
+                  type="button"
+                  onClick={startFishing}
+                  className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  🎣 ตกปลา<span className="hidden sm:inline">ริมทะเล!</span>
+                </button>
+              )}
+            </div>
           )}
 
           {/* การ์ดผลลัพธ์ตกปลาริมทะเล */}
@@ -7621,17 +8311,6 @@ export default function Arena3DPage() {
               </div>
             );
           })()}
-
-          {/* ปุ่มมินิเกมตกปลาริมทะเล */}
-          {isNearOcean && fishingPhase === 'idle' && !fishingResult && (
-            <button
-              type="button"
-              onClick={startFishing}
-              className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
-            >
-              🎣 เหวี่ยงเบ็ดตกปลาริมทะเล!
-            </button>
-          )}
 
           {fishingPhase === 'waiting' && (
             <div className="flex flex-col items-center gap-1.5">
@@ -7926,6 +8605,34 @@ export default function Arena3DPage() {
           onClose={() => setIsPetCafeOpen(false)}
           qualityMode={qualityMode}
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
+        />
+      )}
+
+      {isQuestBoardOpen && (
+        <QuestBoardModal
+          isOpen={isQuestBoardOpen}
+          onClose={() => setIsQuestBoardOpen(false)}
+          currentUser={(() => {
+            const u = players.find((pl) => pl.id === currentUserId);
+            if (!u) return null;
+            return {
+              id: u.id,
+              name: u.name,
+              emoji: u.emoji,
+              colorHex: u.colorHex,
+              points: u.points ?? 0,
+            };
+          })()}
+          allPlayers={players.map((pl) => ({
+            id: pl.id,
+            name: pl.name,
+            emoji: pl.emoji,
+            colorHex: pl.colorHex,
+          }))}
+          quests={quests}
+          initialQuestId={questBoardFocusId}
+          onQuestsUpdated={handleQuestsUpdated}
+          onShowToast={(icon, title, desc) => showToast(icon, title, desc || '')}
         />
       )}
 

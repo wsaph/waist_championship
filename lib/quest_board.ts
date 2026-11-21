@@ -1,4 +1,4 @@
-export const QUEST_MIN_DURATION_DAYS = 30;
+export const QUEST_MIN_DURATION_DAYS = 1;
 export const QUEST_BETTING_WINDOW_DAYS = 7;
 export const QUEST_MIN_STAKE = 10;
 export const QUEST_MAX_STAKE = 500;
@@ -204,11 +204,14 @@ export function validateQuestDateRange(
   if (days === null) {
     return { ok: false, error: 'รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)' };
   }
-  const required = Math.max(QUEST_MIN_DURATION_DAYS, Math.floor(minDays));
+  const required = Math.max(1, Math.floor(minDays));
   if (days < required) {
     return {
       ok: false,
-      error: `ระยะเวลาเควสต้องอย่างน้อย ${required} วัน (ปัจจุบันเลือกไว้ ${days} วัน)`,
+      error:
+        required <= 1
+          ? 'วันสิ้นสุดต้องอยู่หลังวันเริ่มต้นอย่างน้อย 1 วัน'
+          : `ระยะเวลาเควสต้องอย่างน้อย ${required} วัน (ปัจจุบันเลือกไว้ ${days} วัน)`,
     };
   }
   return { ok: true, days };
@@ -364,14 +367,13 @@ export function validateStakeIncrement(
 export function buildFallbackQuestSummary(
   title: string,
   description: string,
-  durationDays: number
+  _durationDays?: number
 ): { summary: string; verificationTip: string } {
   const cleanTitle = title.trim();
   const cleanDesc = description.trim();
-  const days = Math.max(QUEST_MIN_DURATION_DAYS, Math.floor(durationDays || QUEST_MIN_DURATION_DAYS));
   const snippet = cleanDesc.length > 140 ? `${cleanDesc.slice(0, 137)}...` : cleanDesc;
   return {
-    summary: `เป้าหมาย: ${cleanTitle} (ระยะเวลาอย่างน้อย ${days} วัน) — ${snippet || 'ทำให้สำเร็จตามเงื่อนไขที่ตกลงไว้ครบทุกคนในปาร์ตี้'}`,
+    summary: `เป้าหมาย: ${cleanTitle} — ${snippet || 'ทำให้สำเร็จตามเงื่อนไขที่ตกลงไว้ครบทุกคนในปาร์ตี้'}`,
     verificationTip: 'เมื่อครบกำหนด ให้ผู้ทำเควสทุกคนแนบสรุปผล/หลักฐาน เพื่อส่งให้เพื่อนในสนามโหวตหรือผู้สร้างเควสยืนยันผล',
   };
 }

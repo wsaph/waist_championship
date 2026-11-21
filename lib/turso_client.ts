@@ -351,6 +351,12 @@ export const turso: Client = new Proxy(client, {
         return target.execute(...args);
       };
     }
+    if (prop === 'batch') {
+      return async (...args: Parameters<Client['batch']>) => {
+        await ensureSchema();
+        return target.batch(...args);
+      };
+    }
     const value = Reflect.get(target, prop, receiver);
     return typeof value === 'function' ? value.bind(target) : value;
   },
