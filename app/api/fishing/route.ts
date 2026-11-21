@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
-import { FISHING_DAILY_REWARD_LIMIT, rollFishingCatch } from '@/lib/fishing_catalog';
+import {
+  FISHING_DAILY_REWARD_LIMIT,
+  rollFishingCatch,
+  rollGuardTrollCatch,
+} from '@/lib/fishing_catalog';
 
 function getBangkok7AmDayKey(nowMs: number = Date.now()): string {
   // Shift by UTC+7 then subtract 7 hours => UTC+0 date changes right at 07:00 Bangkok time
@@ -64,9 +68,10 @@ export async function POST(req: Request) {
     const prevCount = countRes.rows.length > 0 ? Number(countRes.rows[0].catch_count ?? 0) : 0;
 
     if (prevCount >= FISHING_DAILY_REWARD_LIMIT) {
+      const trollCatch = rollGuardTrollCatch();
       return NextResponse.json({
         success: true,
-        caught,
+        caught: trollCatch,
         coinsEarned: 0,
         points: currentPoints,
         dailyRewardCount: prevCount,

@@ -1,4 +1,4 @@
-export type FishingRarity = 'common' | 'uncommon' | 'rare' | 'legendary';
+export type FishingRarity = 'common' | 'uncommon' | 'rare' | 'legendary' | 'guard_troll';
 
 export interface FishingCatch {
   id: string;
@@ -49,6 +49,13 @@ export const FISHING_RARITY_META: Record<
     cardBorderClass: 'border-amber-300',
     beamHex: 0xfacc15,
     confettiColors: ['#facc15', '#fb923c', '#fef08a', '#ffffff'],
+  },
+  guard_troll: {
+    label: '🚨 โดนพี่ยามจับได้!!',
+    badgeClass: 'bg-gradient-to-r from-rose-600 via-red-500 to-amber-400 text-white border-white',
+    cardBorderClass: 'border-rose-400',
+    beamHex: 0xef4444,
+    confettiColors: ['#ef4444', '#facc15', '#ffffff'],
   },
 };
 
@@ -197,6 +204,45 @@ export const FISHING_CATALOG: FishingCatch[] = [
   },
 ];
 
+export const GUARD_TROLL_CATCHES: FishingCatch[] = [
+  {
+    id: 'guard_hooked',
+    name: 'พี่ยามติดเบ็ดขึ้นมา!!',
+    icon: '👮',
+    rarity: 'guard_troll',
+    coins: 0,
+    desc: '"เฮ้ย!! ตกปลาเยอะไปแล้วนะ! กลับไปเดินเก็บก้าวเดี๋ยวนี้!!"',
+    weight: 40,
+  },
+  {
+    id: 'guard_diver',
+    name: 'พี่ยามดำน้ำมาจับถึงที่!',
+    icon: '🤿',
+    rarity: 'guard_troll',
+    coins: 0,
+    desc: '"นึกว่าแอบตกไกลๆ แล้วพี่ไม่เห็นเหรอ! ดำน้ำมาดักตัดสายเบ็ดเลย!"',
+    weight: 28,
+  },
+  {
+    id: 'guard_ticket',
+    name: 'ใบสั่งจับอู้งานของพี่ยาม',
+    icon: '📜',
+    rarity: 'guard_troll',
+    coins: 0,
+    desc: '"ข้อหาอู้งานตกปลาเกินโควต้าวันนี้ ปรับให้ไปเดินเพิ่ม 1,000 ก้าว!"',
+    weight: 18,
+  },
+  {
+    id: 'guard_no_fishing_sign',
+    name: 'ป้ายห้ามตกปลา (ลงชื่อ: พี่ยาม)',
+    icon: '🚫',
+    rarity: 'guard_troll',
+    coins: 0,
+    desc: '"ทะเลปิดปรับปรุง ปลาหมดบ่อแล้ว! พรุ่งนี้ 07:00 น. ค่อยมาใหม่!"',
+    weight: 14,
+  },
+];
+
 export function rollFishingCatch(): FishingCatch {
   const totalWeight = FISHING_CATALOG.reduce((sum, item) => sum + item.weight, 0);
   let r = Math.random() * totalWeight;
@@ -205,4 +251,14 @@ export function rollFishingCatch(): FishingCatch {
     if (r <= 0) return item;
   }
   return FISHING_CATALOG[0];
+}
+
+export function rollGuardTrollCatch(): FishingCatch {
+  const totalWeight = GUARD_TROLL_CATCHES.reduce((sum, item) => sum + item.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const item of GUARD_TROLL_CATCHES) {
+    r -= item.weight;
+    if (r <= 0) return item;
+  }
+  return GUARD_TROLL_CATCHES[0];
 }

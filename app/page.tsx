@@ -171,15 +171,6 @@ const STYLES = [
   { bodyColor: 0xC084FC, bandColor: 0xFFE600, accessory: 'ears' },
 ];
 
-const EXCUSES = [
-  { icon: '🥓', text: 'ชาบูเมื่อคืนเป็นเหตุ 🥓' },
-  { icon: '🥗', text: 'คลีนจัดปลัดบอก 🥗' },
-  { icon: '💧', text: 'บวมน้ำเฉยๆ ไม่ได้อ้วน 💧' },
-  { icon: '👟', text: 'เดิน 10,000 ก้าวแล้ว 👟' },
-  { icon: '🧋', text: 'แพ้ชานมไข่มุก 🧋' },
-  { icon: '💪', text: 'กล้ามเนื้อล้วนๆ 💪' },
-];
-
 const AVATARS = ['🦊', '🐰', '🐸', '🐱', '🐷', '🐼', '🐶', '🦁', '🐨', '🦄'];
 
 const BODY_COLORS = ['#38BDF8', '#A3E635', '#FACC15', '#F472B6', '#FB923C', '#C084FC', '#EF4444', '#2DD4BF'];
@@ -268,7 +259,6 @@ export default function Arena3DPage() {
   const [selectedPlayerId, setSelectedPlayerId] = useState<number>(1);
   const [pinInput, setPinInput] = useState('');
   const [newWeightInput, setNewWeightInput] = useState('');
-  const [selectedExcuse, setSelectedExcuse] = useState(EXCUSES[0].text);
   const [modalError, setModalError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -355,15 +345,29 @@ export default function Arena3DPage() {
   const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
   const fishingFxRef = useRef<{
     rarity: FishingRarity;
+    caughtId?: string;
     startedAt: number;
     durationMs: number;
     bobberX: number;
     bobberZ: number;
   } | null>(null);
   const fishingBobberPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  const fishingNibbleUntilRef = useRef<number>(0);
+  const fishingQuotaReachedRef = useRef<boolean>(false);
+  const guardFishingDistRef = useRef<number>(999);
+  const walkerPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  const guardFishFoodThrowRef = useRef<{
+    startedAt: number;
+    durationMs: number;
+    targetX: number;
+    targetZ: number;
+  } | null>(null);
   const fishingTimersRef = useRef<{
+    nibbleTimer?: ReturnType<typeof setTimeout>;
     biteTimer?: ReturnType<typeof setTimeout>;
     missTimer?: ReturnType<typeof setTimeout>;
+    guardInterruptTimer?: ReturnType<typeof setTimeout>;
+    guardHitTimer?: ReturnType<typeof setTimeout>;
   }>({});
   const guardPrankFxRef = useRef<{
     prank: GuardPrank;
@@ -800,7 +804,56 @@ export default function Arena3DPage() {
     fetchArenaData({ force: true });
   }, [fetchArenaData]);
 
+  const playFishingSfx = useCallback((kind: 'cast' | 'nibble' | 'bite' | 'miss' | 'catch') => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const nowT = ctx.currentTime;
+      const playTone = (freq: number, endFreq: number, startOffset: number, dur: number, vol = 0.14) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = kind === 'bite' || kind === 'catch' ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, nowT + startOffset);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, nowT + startOffset + dur);
+        gain.gain.setValueAtTime(vol, nowT + startOffset);
+        gain.gain.exponentialRampToValueAtTime(0.001, nowT + startOffset + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(nowT + startOffset);
+        osc.stop(nowT + startOffset + dur + 0.02);
+      };
+
+      if (kind === 'cast') {
+        playTone(440, 170, 0, 0.16, 0.11);
+      } else if (kind === 'nibble') {
+        playTone(540, 420, 0, 0.08, 0.07);
+      } else if (kind === 'bite') {
+        // Harvest Moon BTN crisp alert chime!
+        playTone(980, 1180, 0, 0.09, 0.18);
+        playTone(1320, 1560, 0.09, 0.14, 0.2);
+      } else if (kind === 'miss') {
+        playTone(320, 150, 0, 0.22, 0.12);
+      } else if (kind === 'catch') {
+        playTone(523, 523, 0, 0.09, 0.14);
+        playTone(659, 659, 0.09, 0.09, 0.14);
+        playTone(784, 1046, 0.18, 0.18, 0.16);
+      }
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 600);
+    } catch {
+      // ignore autoplay/audio restrictions
+    }
+  }, []);
+
   const cancelFishing = useCallback(() => {
+    if (fishingTimersRef.current.nibbleTimer) {
+      clearTimeout(fishingTimersRef.current.nibbleTimer);
+      fishingTimersRef.current.nibbleTimer = undefined;
+    }
     if (fishingTimersRef.current.biteTimer) {
       clearTimeout(fishingTimersRef.current.biteTimer);
       fishingTimersRef.current.biteTimer = undefined;
@@ -809,6 +862,15 @@ export default function Arena3DPage() {
       clearTimeout(fishingTimersRef.current.missTimer);
       fishingTimersRef.current.missTimer = undefined;
     }
+    if (fishingTimersRef.current.guardInterruptTimer) {
+      clearTimeout(fishingTimersRef.current.guardInterruptTimer);
+      fishingTimersRef.current.guardInterruptTimer = undefined;
+    }
+    if (fishingTimersRef.current.guardHitTimer) {
+      clearTimeout(fishingTimersRef.current.guardHitTimer);
+      fishingTimersRef.current.guardHitTimer = undefined;
+    }
+    fishingNibbleUntilRef.current = 0;
     fishingPhaseRef.current = 'idle';
     setFishingPhase('idle');
   }, []);
@@ -819,20 +881,98 @@ export default function Arena3DPage() {
     walkTargetRef.current = null;
     fishingPhaseRef.current = 'waiting';
     setFishingPhase('waiting');
+    playFishingSfx('cast');
 
-    const waitMs = 2000 + Math.floor(Math.random() * 2200);
-    fishingTimersRef.current.biteTimer = setTimeout(() => {
-      fishingPhaseRef.current = 'bite';
-      setFishingPhase('bite');
-      fishingTimersRef.current.missTimer = setTimeout(() => {
-        fishingPhaseRef.current = 'idle';
-        setFishingPhase('idle');
-        showToast('💨', 'ปลาหลุดเบ็ดไปซะแล้ว!', 'กดดึงไม่ทันจังหวะ ลองเหวี่ยงเบ็ดใหม่อีกรอบนะ 🎣');
-      }, 1900);
-    }, waitMs);
-  }, [cancelFishing, showToast]);
+    // ถ้าครบโควต้าวันนี้แล้ว และแอบมายืนตกปลาใกล้พี่ยาม → มีโอกาส 55% ที่พี่ยามจะเขวี้ยงหมูกรอบมาขัดจังหวะกลางคัน!
+    if (fishingQuotaReachedRef.current && guardFishingDistRef.current < 16 && Math.random() < 0.55) {
+      fishingTimersRef.current.guardInterruptTimer = setTimeout(() => {
+        if (fishingPhaseRef.current !== 'waiting' && fishingPhaseRef.current !== 'bite') return;
+        const wp = walkerPosRef.current;
+        guardFishFoodThrowRef.current = {
+          startedAt: performance.now(),
+          durationMs: 850,
+          targetX: wp.x,
+          targetZ: wp.z,
+        };
+        fishingTimersRef.current.guardHitTimer = setTimeout(() => {
+          if (fishingPhaseRef.current === 'idle') return;
+          cancelFishing();
+          playFishingSfx('miss');
+          setShakeScreen(true);
+          setTimeout(() => setShakeScreen(false), 420);
+          showToast(
+            '🥩',
+            'โดนพี่ยามเขวี้ยงหมูกรอบขัดจังหวะ!!',
+            '"อู้งานตกปลาเยอะไปแล้วนะ! กลับไปเดินเก็บก้าวเดี๋ยวนี้!!" — ลองหนีไปแอบตกอีกฝั่งสิ 😜'
+          );
+        }, 800);
+      }, 1150);
+    }
+
+    // สไตล์ Harvest Moon: Back to Nature แท้ๆ — ถ้าสั่นแล้วไม่กดดึง เบ็ดจะยังแช่อยู่ในน้ำและรอปลามากินรอบใหม่ไปเรื่อยๆ!
+    const scheduleNextBite = () => {
+      if (fishingPhaseRef.current !== 'waiting') return;
+
+      const hasNibble = Math.random() < 0.65;
+      const nibbleDelay = 1100 + Math.floor(Math.random() * 1000);
+      const biteDelay = hasNibble
+        ? nibbleDelay + 1150 + Math.floor(Math.random() * 1300)
+        : 1800 + Math.floor(Math.random() * 2000);
+
+      if (hasNibble) {
+        fishingTimersRef.current.nibbleTimer = setTimeout(() => {
+          if (fishingPhaseRef.current !== 'waiting') return;
+          fishingNibbleUntilRef.current = performance.now() + 340;
+          playFishingSfx('nibble');
+        }, nibbleDelay);
+      }
+
+      // สุ่มช่วงเวลาให้กดดึง (มีรอบนรก 0.35–0.45 วิ, รอบโหด, รอบกลาง, รอบชิล)
+      // โดยผลปลาที่ตกได้ยังคงสุ่มอิสระฝั่ง Server (สั่นแวบเดียวก็อาจได้รองเท้าแตะหรือปลาธรรมดาได้!)
+      const rollSpeed = Math.random();
+      const biteWindowMs =
+        rollSpeed < 0.15
+          ? 350 + Math.floor(Math.random() * 100) // โหมดนรก: 350–450ms!
+          : rollSpeed < 0.35
+          ? 460 + Math.floor(Math.random() * 140) // โหมดโหด: 460–600ms
+          : rollSpeed < 0.75
+          ? 620 + Math.floor(Math.random() * 260) // โหมดกลาง: 620–880ms
+          : 900 + Math.floor(Math.random() * 250); // โหมดชิล: 900–1150ms
+
+      fishingTimersRef.current.biteTimer = setTimeout(() => {
+        if (fishingPhaseRef.current !== 'waiting') return;
+        fishingNibbleUntilRef.current = 0;
+        fishingPhaseRef.current = 'bite';
+        setFishingPhase('bite');
+        playFishingSfx('bite');
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          try {
+            navigator.vibrate([90, 35, 90]);
+          } catch {
+            // ignore
+          }
+        }
+        fishingTimersRef.current.missTimer = setTimeout(() => {
+          if (fishingPhaseRef.current !== 'bite') return;
+          // ไม่กดดึง → หยุดสั่น กลับไปแช่เบ็ดรอปลามากินรอบถัดไปเรื่อยๆ (ไม่ตัดจบเหมือน BTN!)
+          fishingPhaseRef.current = 'waiting';
+          setFishingPhase('waiting');
+          scheduleNextBite();
+        }, biteWindowMs);
+      }, biteDelay);
+    };
+
+    scheduleNextBite();
+  }, [cancelFishing, playFishingSfx, showToast]);
 
   const reelInFish = useCallback(async () => {
+    // กดดึงเร็วเกินไปก่อนขึ้น ! (สไตล์ Harvest Moon BTN)
+    if (fishingPhaseRef.current === 'waiting') {
+      cancelFishing();
+      playFishingSfx('miss');
+      showToast('💨', 'รีบดึงเร็วไปนิด!', 'รอให้ตัวละครสั่นและขึ้น ! บนหัวก่อนค่อยกดดึงนะ 🎣');
+      return;
+    }
     if (fishingPhaseRef.current !== 'bite') return;
     if (fishingTimersRef.current.missTimer) {
       clearTimeout(fishingTimersRef.current.missTimer);
@@ -840,6 +980,7 @@ export default function Arena3DPage() {
     }
     fishingPhaseRef.current = 'reeling';
     setFishingPhase('reeling');
+    playFishingSfx('catch');
 
     try {
       const res = await fetch('/api/fishing', {
@@ -864,13 +1005,18 @@ export default function Arena3DPage() {
         );
       }
 
-      // Trigger 3D water splash / rarity light pillar FX at bobber position
+      if (data.quotaReached || Number(data.dailyRewardCount ?? 0) >= Number(data.dailyRewardLimit ?? 5)) {
+        fishingQuotaReachedRef.current = true;
+      }
+
+      // Trigger 3D water splash / rarity light pillar / Guard Sea Pop FX at bobber position
       const bPos = fishingBobberPosRef.current;
       fishingFxRef.current = {
         rarity: caught.rarity,
+        caughtId: caught.id,
         startedAt: performance.now(),
         durationMs:
-          caught.rarity === 'legendary'
+          caught.rarity === 'legendary' || caught.rarity === 'guard_troll'
             ? 3400
             : caught.rarity === 'rare'
             ? 2500
@@ -882,7 +1028,21 @@ export default function Arena3DPage() {
       };
 
       // Tier-specific celebration effects
-      if (caught.rarity === 'uncommon') {
+      if (caught.rarity === 'guard_troll') {
+        // แกล้งแฟลชทองให้ดีใจเก้อ แล้วค่อยสั่นจอเมื่อพี่ยามโผล่!!
+        setLegendaryFlash(true);
+        setTimeout(() => {
+          setLegendaryFlash(false);
+          setShakeScreen(true);
+          setTimeout(() => setShakeScreen(false), 450);
+        }, 420);
+        confetti({
+          particleCount: 55,
+          spread: 70,
+          origin: { y: 0.62 },
+          colors: meta.confettiColors,
+        });
+      } else if (caught.rarity === 'uncommon') {
         confetti({
           particleCount: 40,
           spread: 58,
@@ -940,7 +1100,21 @@ export default function Arena3DPage() {
       fishingPhaseRef.current = 'idle';
       setFishingPhase('idle');
     }
-  }, [currentUserId, showToast, broadcastRealtimeEvent]);
+  }, [currentUserId, showToast, broadcastRealtimeEvent, cancelFishing, playFishingSfx]);
+
+  // กด Spacebar เพื่อดึงเบ็ดได้ทันทีแบบจอย PS1 (Harvest Moon BTN)
+  useEffect(() => {
+    if (fishingPhase !== 'waiting' && fishingPhase !== 'bite') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      reelInFish();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [fishingPhase, reelInFish]);
 
   useEffect(() => {
     walkingSpectatorIdRef.current = walkingSpectatorId;
@@ -2368,6 +2542,33 @@ export default function Arena3DPage() {
     splashRingMesh.visible = false;
     fishingRigGroup.add(splashRingMesh);
 
+    // Harvest Moon BTN Iconic "!" Exclamation Mark Sprite above character head
+    const biteAlertCanvas = document.createElement('canvas');
+    biteAlertCanvas.width = 128;
+    biteAlertCanvas.height = 128;
+    const baCtx = biteAlertCanvas.getContext('2d');
+    if (baCtx) {
+      baCtx.fillStyle = '#ffffff';
+      baCtx.beginPath();
+      baCtx.arc(64, 64, 54, 0, Math.PI * 2);
+      baCtx.fill();
+      baCtx.lineWidth = 8;
+      baCtx.strokeStyle = '#dc2626';
+      baCtx.stroke();
+      baCtx.fillStyle = '#dc2626';
+      baCtx.font = '900 84px sans-serif';
+      baCtx.textAlign = 'center';
+      baCtx.textBaseline = 'middle';
+      baCtx.fillText('!', 64, 68);
+    }
+    const biteAlertTex = new THREE.CanvasTexture(biteAlertCanvas);
+    const biteAlertSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: biteAlertTex, transparent: true, depthTest: false })
+    );
+    biteAlertSprite.scale.set(1.15, 1.15, 1);
+    biteAlertSprite.visible = false;
+    fishingRigGroup.add(biteAlertSprite);
+
     // 3D Catch Celebration FX (วงคลื่น + เสาแสง Rare/Legendary แยกจากคันเบ็ดเพื่อให้โชว์ต่อหลังดึงเบ็ดได้)
     const fishingFxGroup = new THREE.Group();
     fishingFxGroup.visible = false;
@@ -2405,6 +2606,19 @@ export default function Arena3DPage() {
     catchRing2Mesh.rotation.x = -Math.PI / 2;
     catchRing2Mesh.position.y = 0.14;
     fishingFxGroup.add(catchRing2Mesh);
+
+    // พี่ยาม 3D พุ่งขึ้นมาจากทะเลตอนแอบตกปลาเกินโควต้า!
+    const seaGuardPopParts = buildCustomGuardCharacter('/images/guard_face_tex.jpg');
+    seaGuardPopParts.rootGroup.visible = false;
+    fishingFxGroup.add(seaGuardPopParts.rootGroup);
+
+    // จานหมูกรอบ 3D สำหรับพี่ยามเขวี้ยงขัดจังหวะตอนแอบตกปลาใกล้ป้อมยาม
+    const guardFoodThrowGroup = new THREE.Group();
+    guardFoodThrowGroup.visible = false;
+    const thrownFoodMesh = buildFoodPileMesh(0);
+    thrownFoodMesh.scale.setScalar(2.1);
+    guardFoodThrowGroup.add(thrownFoodMesh);
+    scene.add(guardFoodThrowGroup);
 
     scene.add(fishingRigGroup);
     scene.add(fishingFxGroup);
@@ -3283,6 +3497,8 @@ export default function Arena3DPage() {
           }
 
           const distToGuard = c.rootGroup.position.distanceTo(guardParts.rootGroup.position);
+          guardFishingDistRef.current = distToGuard;
+          walkerPosRef.current = { x: c.rootGroup.position.x, z: c.rootGroup.position.z };
           const nearGuardNow = distToGuard < 5.2;
           if (nearGuardNow !== isNearGuardRef.current) {
             isNearGuardRef.current = nearGuardNow;
@@ -3331,14 +3547,31 @@ export default function Arena3DPage() {
             const py = c.rootGroup.position.y;
             const pz = c.rootGroup.position.z;
 
+            const isNibbling = fPhase === 'waiting' && now < fishingNibbleUntilRef.current;
+
             rodPivot.position.set(px + od.dx * 0.45, py + 1.05, pz + od.dz * 0.45);
             const rodTilt =
               fPhase === 'bite'
-                ? Math.sin(elapsed * 28) * 0.14
+                ? Math.sin(elapsed * 42) * 0.22
                 : fPhase === 'reeling'
-                ? 0.48
-                : Math.sin(elapsed * 2.2) * 0.03;
+                ? 0.52
+                : isNibbling
+                ? Math.sin(elapsed * 24) * 0.07
+                : Math.sin(elapsed * 2.2) * 0.025;
             rodPivot.rotation.set(0, targetFacing, rodTilt);
+
+            // สไตล์ Harvest Moon BTN: ตัวละครสั่นแรง + เครื่องหมาย ! เด้งบนหัวตอนปลากินเบ็ด!
+            if (fPhase === 'bite') {
+              c.bounceGroup.position.x = Math.sin(elapsed * 55) * 0.09;
+              c.bounceGroup.position.y = Math.abs(Math.sin(elapsed * 32)) * 0.14;
+              biteAlertSprite.visible = true;
+              biteAlertSprite.position.set(px, py + 3.15 + Math.abs(Math.sin(elapsed * 16)) * 0.25, pz);
+              const popScale = 1.05 + Math.sin(elapsed * 22) * 0.14;
+              biteAlertSprite.scale.set(popScale, popScale, 1);
+            } else {
+              c.bounceGroup.position.x = 0;
+              biteAlertSprite.visible = false;
+            }
 
             const tipX = px + od.dx * 2.75;
             const tipY = py + 2.45 + rodTilt * 1.1;
@@ -3348,8 +3581,10 @@ export default function Arena3DPage() {
             const bobZ = pz + od.dz * 5.6;
             const bobY =
               fPhase === 'bite'
-                ? -0.58 + Math.sin(elapsed * 32) * 0.16
-                : -0.34 + Math.sin(elapsed * 3.5) * 0.08;
+                ? -0.62 + Math.sin(elapsed * 36) * 0.18
+                : isNibbling
+                ? -0.46 + Math.sin(elapsed * 22) * 0.06
+                : -0.34 + Math.sin(elapsed * 3.5) * 0.06;
 
             bobberGroup.position.set(bobX, bobY, bobZ);
             fishingBobberPosRef.current = { x: bobX, z: bobZ };
@@ -3361,15 +3596,22 @@ export default function Arena3DPage() {
 
             if (fPhase === 'bite') {
               splashRingMesh.visible = true;
-              const pulse = (elapsed * 3.2) % 1;
+              const pulse = (elapsed * 3.6) % 1;
               splashRingMesh.position.set(bobX, -0.36, bobZ);
-              splashRingMesh.scale.setScalar(1 + pulse * 3.2);
-              splashRingMat.opacity = (1 - pulse) * 0.85;
+              splashRingMesh.scale.setScalar(1 + pulse * 3.6);
+              splashRingMat.opacity = (1 - pulse) * 0.9;
+            } else if (isNibbling) {
+              splashRingMesh.visible = true;
+              const pulse = (elapsed * 2.4) % 1;
+              splashRingMesh.position.set(bobX, -0.36, bobZ);
+              splashRingMesh.scale.setScalar(0.8 + pulse * 1.6);
+              splashRingMat.opacity = (1 - pulse) * 0.55;
             } else {
               splashRingMesh.visible = false;
             }
           } else {
             fishingRigGroup.visible = false;
+            biteAlertSprite.visible = false;
           }
         } else {
           const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
@@ -3672,25 +3914,58 @@ export default function Arena3DPage() {
           catchRingMesh.scale.setScalar(ringScale);
           catchRingMat.opacity = (1 - p) * 0.9;
 
-          // เสาแสงพุ่งขึ้นฟ้าสำหรับ Rare & Legendary
-          if (rarity === 'rare' || rarity === 'legendary') {
+          // เสาแสงพุ่งขึ้นฟ้าสำหรับ Rare, Legendary และ Fake-out แสงทองของพี่ยาม!
+          if (rarity === 'rare' || rarity === 'legendary' || rarity === 'guard_troll') {
             catchBeamMesh.visible = true;
-            catchBeamMat.color.setHex(beamHex);
-            const widthBoost = rarity === 'legendary' ? 1.55 : 0.95;
+            // guard_troll แกล้งเป็นเสาแสงสีทองหลอกๆ ช่วงแรก แล้วสลับเป็นสีแดง-ทองตอนพี่ยามโผล่!
+            const effectiveBeamHex =
+              rarity === 'guard_troll'
+                ? p < 0.22
+                  ? 0xfacc15
+                  : Math.floor(elapsed * 12) % 2 === 0
+                  ? 0xef4444
+                  : 0xfacc15
+                : beamHex;
+            catchBeamMat.color.setHex(effectiveBeamHex);
+            const widthBoost = rarity === 'legendary' || rarity === 'guard_troll' ? 1.55 : 0.95;
             const fade = p < 0.15 ? p / 0.15 : 1 - (p - 0.15) / 0.85;
             catchBeamMesh.scale.set(
               widthBoost * (0.85 + Math.sin(elapsed * 14) * 0.12),
-              rarity === 'legendary' ? 1.35 : 0.9,
+              rarity === 'legendary' || rarity === 'guard_troll' ? 1.35 : 0.9,
               widthBoost * (0.85 + Math.sin(elapsed * 14) * 0.12)
             );
-            catchBeamMat.opacity = Math.max(0, fade * (rarity === 'legendary' ? 0.65 : 0.45));
+            catchBeamMat.opacity = Math.max(0, fade * (rarity === 'legendary' ? 0.65 : 0.48));
             catchBeamMesh.rotation.y = elapsed * 2.4;
           } else {
             catchBeamMesh.visible = false;
           }
 
-          // วงแหวนทองชั้นที่ 2 เฉพาะ Legendary
-          if (rarity === 'legendary') {
+          // พี่ยาม 3D พุ่งขึ้นมาจากทะเลเกาะเบ็ดขึ้นมา!
+          const isGuardPop =
+            rarity === 'guard_troll' &&
+            (activeFishFx.caughtId === 'guard_hooked' || activeFishFx.caughtId === 'guard_diver');
+          if (isGuardPop && p >= 0.16) {
+            seaGuardPopParts.rootGroup.visible = true;
+            const popP = (p - 0.16) / 0.84;
+            const riseY =
+              popP < 0.2
+                ? -1.8 + (popP / 0.2) * 3.2
+                : popP < 0.82
+                ? 1.4 + Math.sin(elapsed * 10) * 0.16
+                : 1.4 - ((popP - 0.82) / 0.18) * 3.4;
+            seaGuardPopParts.rootGroup.position.set(0, riseY, 0);
+            seaGuardPopParts.rootGroup.rotation.y = elapsed * 2.8;
+            seaGuardPopParts.armL.rotation.z = 1.1 + Math.sin(elapsed * 22) * 0.6;
+            seaGuardPopParts.armR.rotation.z = -1.1 - Math.sin(elapsed * 22) * 0.6;
+            seaGuardPopParts.legL.rotation.z = Math.sin(elapsed * 18) * 0.5;
+            seaGuardPopParts.legR.rotation.z = -Math.sin(elapsed * 18) * 0.5;
+            setCharacterExpression(seaGuardPopParts, 'angry');
+          } else {
+            seaGuardPopParts.rootGroup.visible = false;
+          }
+
+          // วงแหวนทองชั้นที่ 2 เฉพาะ Legendary และ guard_troll
+          if (rarity === 'legendary' || rarity === 'guard_troll') {
             catchRing2Mesh.visible = true;
             const p2 = (p * 2.2) % 1;
             catchRing2Mesh.scale.setScalar(1 + p2 * 6.5);
@@ -3701,6 +3976,40 @@ export default function Arena3DPage() {
         }
       } else {
         fishingFxGroup.visible = false;
+        seaGuardPopParts.rootGroup.visible = false;
+      }
+
+      // พี่ยามเขวี้ยงหมูกรอบ 3D ขัดจังหวะตอนแอบตกปลาใกล้ป้อมยาม
+      const activeFoodThrow = guardFishFoodThrowRef.current;
+      if (activeFoodThrow) {
+        const ftP = (now - activeFoodThrow.startedAt) / activeFoodThrow.durationMs;
+        if (ftP >= 1) {
+          guardFishFoodThrowRef.current = null;
+          guardFoodThrowGroup.visible = false;
+        } else {
+          guardFoodThrowGroup.visible = true;
+          const sx = guardParts.rootGroup.position.x;
+          const sy = guardParts.rootGroup.position.y + 1.5;
+          const sz = guardParts.rootGroup.position.z;
+          const tx = activeFoodThrow.targetX;
+          const tz = activeFoodThrow.targetZ;
+          guardFoodThrowGroup.position.set(
+            sx + (tx - sx) * ftP,
+            sy + (1.2 - sy) * ftP + Math.sin(ftP * Math.PI) * 3.8,
+            sz + (tz - sz) * ftP
+          );
+          guardFoodThrowGroup.rotation.x = elapsed * 12;
+          guardFoodThrowGroup.rotation.y = elapsed * 10;
+          guardParts.rootGroup.rotation.y = Math.atan2(-(tz - sz), tx - sx);
+          if (guardBadgeEl) {
+            currentGuardBadgeKey = `fish-throw-${activeFoodThrow.startedAt}`;
+            guardBadgeEl.className =
+              'bg-rose-600 text-amber-200 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap animate-bounce';
+            guardBadgeEl.textContent = '🥩 อู้งานตกปลาอีกแล้วเหรอ!! กลับไปเดินเก็บก้าว!';
+          }
+        }
+      } else {
+        guardFoodThrowGroup.visible = false;
       }
 
       const activePrank = guardPrankFxRef.current;
@@ -4440,7 +4749,7 @@ export default function Arena3DPage() {
             logType: 'steps',
             steps: Math.round(Number(stepInput)),
             stepMode: stepInputMode,
-            excuseTag: selectedExcuse,
+            excuseTag: '',
           }
         : {
             userId: activeUserId,
@@ -4448,7 +4757,7 @@ export default function Arena3DPage() {
             logType: 'side_goal',
             weight: parseFloat(newWeightInput),
             value: parseFloat(newWeightInput),
-            excuseTag: selectedExcuse,
+            excuseTag: '',
           };
 
       const res = await fetch('/api/weights', {
@@ -5762,28 +6071,6 @@ export default function Arena3DPage() {
                       </div>
                     )}
 
-                    <div>
-                      <label className="block text-xs font-bold text-amber-200 mb-1.5">
-                        เลือกสถานะ / คำคมผู้กล้า
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {EXCUSES.map((ex) => (
-                          <button
-                            type="button"
-                            key={ex.text}
-                            onClick={() => setSelectedExcuse(ex.text)}
-                            className={`${
-                              selectedExcuse === ex.text
-                                ? 'bg-amber-400 text-black border-white'
-                                : 'bg-slate-900 text-amber-100 border-slate-700'
-                            } border-2 rounded-lg px-2.5 py-1.5 text-xs font-bold text-left cursor-pointer`}
-                          >
-                            {ex.text}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
                     {modalError && (
                       <div className="bg-rose-600 text-white border-2 border-amber-300 rounded-xl p-2 text-xs font-bold text-center">
                         {modalError}
@@ -6701,8 +6988,8 @@ export default function Arena3DPage() {
                         +{fishingResult.coinsEarned} 💰 ({fishingResult.dailyRewardCount}/{fishingResult.dailyRewardLimit} วันนี้)
                       </span>
                     ) : fishingResult.quotaReached ? (
-                      <span className="text-slate-300">
-                        ครบโควต้าเหรียญวันนี้แล้ว ({fishingResult.dailyRewardLimit}/{fishingResult.dailyRewardLimit}) • ตกเล่นฟรีต่อได้!
+                      <span className="text-rose-300">
+                        👮 พี่ยามจับได้! ครบ {fishingResult.dailyRewardLimit}/{fishingResult.dailyRewardLimit} ครั้งวันนี้แล้ว (แอบตกปั่นพี่ยามต่อได้!)
                       </span>
                     ) : (
                       <span className="text-cyan-300">โหมดผู้ชม • ล็อกอินเพื่อสะสมเหรียญ!</span>
@@ -6734,17 +7021,26 @@ export default function Arena3DPage() {
           )}
 
           {fishingPhase === 'waiting' && (
-            <div className="flex items-center gap-2 bg-slate-950/90 border-2 border-cyan-400 rounded-full px-4 py-1.5 shadow-xl">
-              <span className="text-xs sm:text-sm font-extrabold text-cyan-200 animate-pulse">
-                🎣 กำลังรอปลากินเบ็ด... (จับตาดูทุ่นในน้ำ!)
+            <div className="flex flex-col items-center gap-1.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={reelInFish}
+                  className="neo-btn bg-slate-900/95 hover:bg-slate-800 text-cyan-200 border-2 border-cyan-400 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-5 py-2 rounded-full cursor-pointer shadow-xl"
+                >
+                  🎣 ดึงเบ็ด <span className="hidden sm:inline opacity-75 text-[11px]">(Space)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelFishing}
+                  className="text-[11px] font-extrabold bg-slate-800/90 hover:bg-rose-600 text-white border border-slate-500 px-3 py-2 rounded-full cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+              </div>
+              <span className="text-[11px] font-bold text-cyan-100/90 bg-black/55 px-3 py-0.5 rounded-full">
+                👀 รอจนตัวละครสั่นและขึ้น ❗ บนหัวค่อยกดดึง!
               </span>
-              <button
-                type="button"
-                onClick={cancelFishing}
-                className="text-[11px] font-extrabold bg-slate-800 hover:bg-rose-600 text-white px-2 py-0.5 rounded-full cursor-pointer"
-              >
-                ยกเลิก
-              </button>
             </div>
           )}
 
@@ -6752,9 +7048,9 @@ export default function Arena3DPage() {
             <button
               type="button"
               onClick={reelInFish}
-              className="neo-btn bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-500 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base px-6 py-2.5 rounded-full cursor-pointer shadow-[0_4px_0_#000] animate-bounce"
+              className="neo-btn bg-gradient-to-r from-red-500 via-amber-400 to-yellow-300 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base px-6 py-2.5 rounded-full cursor-pointer shadow-[0_0_24px_rgba(250,204,21,0.9)] animate-bounce"
             >
-              ⚡ ปลากินเบ็ดแล้ว! กดดึงเลย! 🎣
+              ❗ กดดึงเบ็ดเลย!! <span className="hidden sm:inline text-xs">(Space)</span> 🎣
             </button>
           )}
 
