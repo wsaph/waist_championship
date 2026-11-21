@@ -158,9 +158,9 @@ export function GuardDanceLoader({ visible }: GuardDanceLoaderProps) {
     const height = container.clientHeight || 280;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 40);
-    camera.position.set(0, 1.85, 5.2);
-    camera.lookAt(0, 1.15, 0);
+    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 40);
+    camera.position.set(0, 1.65, 6.4);
+    camera.lookAt(0, 1.35, 0);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setSize(width, height);
@@ -323,13 +323,6 @@ export function GuardDanceLoader({ visible }: GuardDanceLoaderProps) {
             {em}
           </span>
         ))}
-      </div>
-
-      {/* Dance Style Badge */}
-      <div
-        className={`relative z-10 px-4 py-1 rounded-full border-2 bg-black/50 text-xs font-extrabold tracking-wider mb-2 shadow-lg ${dance.accentClass}`}
-      >
-        {dance.badge} • {dance.title}
       </div>
 
       {/* Real 3D Dancing Guard Stage */}
