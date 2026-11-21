@@ -13,20 +13,24 @@ export interface CafePetOption {
   modelUrl: string;
   photoUrl?: string;
   voicePitch: number;
-  spicyThreshold: number; // how much belly rub before swatting!
+  spicyThreshold: number;
   treatLabel: string;
   treatIcon: string;
+  homePos: [number, number];
+  moveSpeed: number;
+  scaleHeight: number;
   idleQuote: string;
   petQuote: string;
   bellyQuote: string;
   spicyQuote: string;
   eatQuote: string;
+  napQuote: string;
 }
 
 const CAFE_PETS: CafePetOption[] = [
   {
     id: 'husky',
-    name: 'น้องข้าวคั่ว (สมจริง!)',
+    name: 'น้องข้าวคั่ว',
     speciesLabel: 'ข้าวคั่ว ฮัสกี้',
     icon: '🐺',
     modelUrl: '/models/husky_hero.glb',
@@ -35,11 +39,15 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 34,
     treatLabel: 'ป้อนหมูย่าง',
     treatIcon: '🍖',
-    idleQuote: 'โฮ่ง! ข้าวคั่วเป็นลูกสาวนะ ไม่ใช่บักข้าวคั่ว!',
+    homePos: [0, -0.25],
+    moveSpeed: 0,
+    scaleHeight: 1.95,
+    idleQuote: 'โฮ่ง! ข้าวคั่วเป็นลูกสาวนะ มานั่งเล่นบนพรมสิ!',
     petQuote: 'วู้ววว~ เกาคางหน่อย ชอบมากกก!',
     bellyQuote: 'แฮ่กๆ เกาพุงแรงๆ เลยมนุษย์ ชอบๆ!',
     spicyQuote: 'บรู้ววว!! จั๊กจี้โว้ยยย พอก่อน! 🐺💢',
-    eatQuote: 'งับ!! ของโปรดเลย ขอกินอีกชิ้น! 🍖✨',
+    eatQuote: 'งับ!! หมูย่างของโปรด ขอกินอีกชิ้น! 🍖✨',
+    napQuote: 'คร่อก... ฝันว่ากินหมูกรอบ... 💤',
   },
   {
     id: 'cat',
@@ -51,11 +59,15 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 22,
     treatLabel: 'ป้อนปลาทู',
     treatIcon: '🐟',
-    idleQuote: 'เหมียว~ มานั่งเล่นกันสิ',
+    homePos: [-2.1, 0.85],
+    moveSpeed: 1.35,
+    scaleHeight: 1.05,
+    idleQuote: 'เหมียว~ เดินตรวจคาเฟ่แป๊บนะ',
     petQuote: 'ครืดดด~ ลูบหัวตรงนี้แหละฟินสุด!',
     bellyQuote: 'อื้มม~ เกาพุงเบาๆ นะมนุษย์...',
     spicyQuote: 'แง้ว!! เกาพุงนานเกินไปแล้วนะ งั่มมือซะเลย! 😾',
-    eatQuote: 'งั่มๆ อร่อยจังเลยเหมียว! 🐟💖',
+    eatQuote: 'งั่มๆ ปลาทูอร่อยจังเลยเหมียว! 🐟💖',
+    napQuote: 'เหมียว... ของีบแป๊บนะ zZz 💤',
   },
   {
     id: 'corgi',
@@ -67,11 +79,15 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 32,
     treatLabel: 'ป้อนขนมหมา',
     treatIcon: '🦴',
+    homePos: [2.15, 0.9],
+    moveSpeed: 1.65,
+    scaleHeight: 1.05,
     idleQuote: 'บ๊อกๆ! อยากวิ่งไล่เลเซอร์จังเลย!',
     petQuote: 'หูตั้งดุ๊กดิ๊ก~ ลูบอีกๆ!',
     bellyQuote: 'นอนหงายพุงรอเลย เกาอีกๆ!',
-    spicyQuote: 'บ๊อก! จั๊กจี้พุงแล้วนะมนุษย์! 🐶',
+    spicyQuote: 'บ๊อก! จั๊กจี้พุงแล้วนะมนุษย์! 🐶💢',
     eatQuote: 'กรุบกรอบ! อร่อยสุดๆ เลยบ๊อก! 🦴💛',
+    napQuote: 'ง่วงแล้ว... ขอนอนพักตูดแป๊บ 💤',
   },
   {
     id: 'capybara',
@@ -83,11 +99,15 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 48,
     treatLabel: 'ป้อนส้มยูซุ',
     treatIcon: '🍊',
+    homePos: [-2.6, -1.6],
+    moveSpeed: 0.78,
+    scaleHeight: 1.15,
     idleQuote: 'นิ่งสงบสยบทุกความเครียด... 🍊',
     petQuote: 'ฟิน... จะหลับแล้วนะ...',
     bellyQuote: 'เกาไปเลย สบายตัวสุดๆ...',
     spicyQuote: 'อือ... ขยับหนีนิดนึง จั๊กจี้เบาๆ',
     eatQuote: 'งั่ม... ส้มหวานมาก ชีวิตดี๊ดี 🍊✨',
+    napQuote: 'zZz... นอนชิลระดับปรมาจารย์ 💤',
   },
   {
     id: 'fox',
@@ -99,11 +119,15 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 26,
     treatLabel: 'ป้อนเบอร์รี่',
     treatIcon: '🍓',
-    idleQuote: 'กิ๊ว~ แอบมองอยู่นะ!',
+    homePos: [2.55, -1.55],
+    moveSpeed: 1.55,
+    scaleHeight: 1.1,
+    idleQuote: 'กิ๊ว~ แอบสำรวจมุมห้องอยู่นะ!',
     petQuote: 'หางฟูเลย~ ลูบหูนุ่มๆ สิ!',
     bellyQuote: 'ยอมให้เกาพุงแป๊บเดียวนะ!',
     spicyQuote: 'กิ๊ว!! พอแล้ว เดี๋ยวงับนิ้วเลย! 🦊💢',
     eatQuote: 'งั่มๆ เบอร์รี่หวานฉ่ำ! 🍓💖',
+    napQuote: 'ขดหางนอนอุ่นๆ แป๊บนะ 💤',
   },
   {
     id: 'bunny',
@@ -115,15 +139,41 @@ const CAFE_PETS: CafePetOption[] = [
     spicyThreshold: 28,
     treatLabel: 'ป้อนแครอท',
     treatIcon: '🥕',
+    homePos: [0.95, 1.85],
+    moveSpeed: 1.45,
+    scaleHeight: 0.92,
     idleQuote: 'ดุ๊กดิ๊กๆ~ แครอทอยู่ไหนน้า',
     petQuote: 'หูตกสบายใจ~ ลูบเบาๆ นะ',
     bellyQuote: 'พุงนุ่มๆ เกาเบาๆ จั๊กจี้น้า~',
     spicyQuote: 'ตุ้บ! กระทืบเท้าดุแล้วนะ! 🐰💢',
     eatQuote: 'กร้วมๆ แครอทกรอบมาก! 🥕✨',
+    napQuote: 'หูกระดิกเบาๆ หลับปุ๋ยแล้ว~ 💤',
   },
 ];
 
 type CafeTool = 'pet' | 'belly' | 'laser' | 'treat';
+type PetAiMode = 'wander' | 'idle_look' | 'nap' | 'sniff_bowl';
+
+interface PetRuntime {
+  meta: CafePetOption;
+  root: THREE.Group;
+  bodyPivot: THREE.Group;
+  mixer: THREE.AnimationMixer | null;
+  idleAction: THREE.AnimationAction | null;
+  walkAction: THREE.AnimationAction | null;
+  activeClip: 'idle' | 'walk';
+  aiMode: PetAiMode;
+  aiUntil: number;
+  targetPos: THREE.Vector3;
+  petTiltX: number;
+  petTiltZ: number;
+  bellyRoll: number;
+  happyHopUntil: number;
+  spicyUntil: number;
+  eatUntil: number;
+  bellyHeat: number;
+  laserOffsetAngle: number;
+}
 
 interface PetCafeModalProps {
   isOpen: boolean;
@@ -139,6 +189,53 @@ interface FloatingParticle {
   emoji: string;
 }
 
+const BOWL_POS = new THREE.Vector3(-2.35, 0.06, 1.85);
+
+function pickNaturalTarget(petId: string): { mode: PetAiMode; pos: THREE.Vector3; durationMs: number } {
+  const r = Math.random();
+  if (r < 0.18) {
+    // Walk over to sniff the food & water bowls!
+    return {
+      mode: 'sniff_bowl',
+      pos: new THREE.Vector3(
+        BOWL_POS.x + (Math.random() - 0.5) * 0.9,
+        0.06,
+        BOWL_POS.z + (Math.random() - 0.5) * 0.7
+      ),
+      durationMs: 3600 + Math.random() * 2400,
+    };
+  }
+  if (r < 0.36) {
+    // Take a cozy little nap where they are
+    return {
+      mode: 'nap',
+      pos: new THREE.Vector3(),
+      durationMs: 4200 + Math.random() * 3500,
+    };
+  }
+  if (r < 0.56) {
+    // Pause and look curiously around / at the camera
+    return {
+      mode: 'idle_look',
+      pos: new THREE.Vector3(),
+      durationMs: 2400 + Math.random() * 2200,
+    };
+  }
+  // Wander freely around the cozy café floor (avoiding the center photo cushion where Kaokua rests)
+  const angle = Math.random() * Math.PI * 2;
+  const minR = petId === 'bunny' ? 1.55 : 1.75;
+  const rad = minR + Math.random() * 1.95;
+  return {
+    mode: 'wander',
+    pos: new THREE.Vector3(
+      THREE.MathUtils.clamp(Math.cos(angle) * rad, -3.4, 3.4),
+      0.06,
+      THREE.MathUtils.clamp(Math.sin(angle) * rad * 0.78 + 0.25, -2.35, 2.35)
+    ),
+    durationMs: 3800 + Math.random() * 2800,
+  };
+}
+
 export function PetCafeModal({
   isOpen,
   onClose,
@@ -149,42 +246,32 @@ export function PetCafeModal({
   const [activeTool, setActiveTool] = useState<CafeTool>('pet');
   const [moodText, setMoodText] = useState<string>(CAFE_PETS[0].idleQuote);
   const [moodState, setMoodState] = useState<'chill' | 'happy' | 'spicy' | 'play' | 'eating'>('chill');
-  const [happiness, setHappiness] = useState<number>(68);
+  const [happiness, setHappiness] = useState<number>(74);
   const [bondExp, setBondExp] = useState<number>(0);
   const [particles, setParticles] = useState<FloatingParticle[]>([]);
-  const [loadingModel, setLoadingModel] = useState<boolean>(true);
+  const [loadingCount, setLoadingCount] = useState<number>(CAFE_PETS.length);
   const [scratchFlash, setScratchFlash] = useState<boolean>(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const activeToolRef = useRef<CafeTool>('pet');
-  const selectedPetRef = useRef<CafePetOption>(CAFE_PETS[0]);
+  const selectedPetIdRef = useRef<string>('husky');
   const isPointerDownRef = useRef<boolean>(false);
-  const bellyHeatRef = useRef<number>(0);
+  const activeRubPetIdRef = useRef<string | null>(null);
   const lastParticleAtRef = useRef<number>(0);
   const lastSfxAtRef = useRef<number>(0);
   const particleIdRef = useRef<number>(1);
+  const petsRuntimeRef = useRef<Record<string, PetRuntime>>({});
 
-  // Refs shared with 3D loop
-  const petStateRef = useRef<{
-    petTiltX: number;
-    petTiltZ: number;
-    bellyRoll: number;
-    happyHopUntil: number;
-    spicyUntil: number;
-    eatUntil: number;
+  const cafeSharedRef = useRef<{
     laserActive: boolean;
     laserTarget: THREE.Vector3;
     treatArc: { active: boolean; startedAt: number; targetX: number; targetZ: number };
+    gatherUntil: number;
   }>({
-    petTiltX: 0,
-    petTiltZ: 0,
-    bellyRoll: 0,
-    happyHopUntil: 0,
-    spicyUntil: 0,
-    eatUntil: 0,
     laserActive: false,
-    laserTarget: new THREE.Vector3(0, 0.06, 0),
-    treatArc: { active: false, startedAt: 0, targetX: 0, targetZ: 0.7 },
+    laserTarget: new THREE.Vector3(0, 0.08, 1.3),
+    treatArc: { active: false, startedAt: 0, targetX: 0, targetZ: 1.15 },
+    gatherUntil: 0,
   });
 
   const selectedPet = CAFE_PETS.find((p) => p.id === selectedPetId) || CAFE_PETS[0];
@@ -192,15 +279,12 @@ export function PetCafeModal({
   useEffect(() => {
     activeToolRef.current = activeTool;
     if (activeTool !== 'laser') {
-      petStateRef.current.laserActive = false;
+      cafeSharedRef.current.laserActive = false;
     }
   }, [activeTool]);
 
   useEffect(() => {
-    selectedPetRef.current = selectedPet;
-    setMoodText(selectedPet.idleQuote);
-    setMoodState('chill');
-    bellyHeatRef.current = 0;
+    selectedPetIdRef.current = selectedPet.id;
     try {
       const saved = localStorage.getItem(`waist_pet_cafe_bond_${selectedPet.id}`);
       setBondExp(saved ? Math.max(0, Number(saved) || 0) : 0);
@@ -210,18 +294,22 @@ export function PetCafeModal({
   }, [selectedPet]);
 
   const addBond = useCallback((petId: string, delta: number) => {
-    setBondExp((prev) => {
+    try {
+      const key = `waist_pet_cafe_bond_${petId}`;
+      const prev = Math.max(0, Number(localStorage.getItem(key) || 0) || 0);
       const next = prev + delta;
-      try {
-        localStorage.setItem(`waist_pet_cafe_bond_${petId}`, String(next));
-      } catch {
-        // ignore
+      localStorage.setItem(key, String(next));
+      if (petId === selectedPetIdRef.current) {
+        setBondExp(next);
       }
-      return next;
-    });
+    } catch {
+      if (petId === selectedPetIdRef.current) {
+        setBondExp((p) => p + delta);
+      }
+    }
   }, []);
 
-  const playPetSfx = useCallback((kind: 'purr' | 'spicy' | 'eat' | 'laser') => {
+  const playPetSfx = useCallback((kind: 'purr' | 'spicy' | 'eat' | 'bell', voicePitch?: number) => {
     const now = performance.now();
     if (kind === 'purr' && now - lastSfxAtRef.current < 320) return;
     lastSfxAtRef.current = now;
@@ -232,10 +320,20 @@ export function PetCafeModal({
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const t = ctx.currentTime;
-      const base = selectedPetRef.current.voicePitch;
+      const base = voicePitch ?? 500;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      if (kind === 'purr') {
+      if (kind === 'bell') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1046, t);
+        osc.frequency.exponentialRampToValueAtTime(1318, t + 0.12);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.26);
+      } else if (kind === 'purr') {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(base * 0.65, t);
         osc.frequency.exponentialRampToValueAtTime(base * 0.85, t + 0.14);
@@ -255,7 +353,7 @@ export function PetCafeModal({
         gain.connect(ctx.destination);
         osc.start(t);
         osc.stop(t + 0.25);
-      } else if (kind === 'eat') {
+      } else {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(base * 0.8, t);
         osc.frequency.exponentialRampToValueAtTime(base * 1.25, t + 0.14);
@@ -266,7 +364,7 @@ export function PetCafeModal({
         osc.start(t);
         osc.stop(t + 0.19);
       }
-      setTimeout(() => ctx.close().catch(() => {}), 400);
+      setTimeout(() => ctx.close().catch(() => {}), 420);
     } catch {
       // ignore
     }
@@ -274,35 +372,64 @@ export function PetCafeModal({
 
   const spawnParticle = useCallback((clientX: number, clientY: number, emoji: string) => {
     const now = performance.now();
-    if (now - lastParticleAtRef.current < 130) return;
+    if (now - lastParticleAtRef.current < 120) return;
     lastParticleAtRef.current = now;
     const id = particleIdRef.current++;
-    setParticles((prev) => [...prev.slice(-14), { id, x: clientX, y: clientY, emoji }]);
+    setParticles((prev) => [...prev.slice(-16), { id, x: clientX, y: clientY, emoji }]);
     setTimeout(() => {
       setParticles((prev) => prev.filter((p) => p.id !== id));
     }, 900);
   }, []);
 
-  const handleFeedTreat = useCallback(() => {
-    const pet = selectedPetRef.current;
-    const now = performance.now();
-    petStateRef.current.treatArc = {
-      active: true,
-      startedAt: now,
-      targetX: (Math.random() - 0.5) * 0.6,
-      targetZ: 0.75,
-    };
-    petStateRef.current.eatUntil = now + 1800;
-    petStateRef.current.happyHopUntil = now + 1400;
-    bellyHeatRef.current = Math.max(0, bellyHeatRef.current - 12);
-    setMoodState('eating');
-    setMoodText(pet.eatQuote);
-    setHappiness((h) => Math.min(100, h + 12));
-    addBond(pet.id, 15);
-    playPetSfx('eat');
-  }, [addBond, playPetSfx]);
+  const handleFeedTreat = useCallback(
+    (targetX = (Math.random() - 0.5) * 1.2, targetZ = 1.2) => {
+      const pet = CAFE_PETS.find((p) => p.id === selectedPetIdRef.current) || CAFE_PETS[0];
+      const now = performance.now();
+      cafeSharedRef.current.treatArc = {
+        active: true,
+        startedAt: now,
+        targetX,
+        targetZ,
+      };
+      // All roaming 3D pets rush excitedly toward the treat!
+      Object.values(petsRuntimeRef.current).forEach((rt, idx) => {
+        rt.eatUntil = now + 2200;
+        rt.happyHopUntil = now + 1500;
+        rt.bellyHeat = Math.max(0, rt.bellyHeat - 10);
+        if (rt.meta.moveSpeed > 0) {
+          const ang = (idx / 5) * Math.PI * 2;
+          rt.aiMode = 'wander';
+          rt.aiUntil = now + 3200;
+          rt.targetPos.set(targetX + Math.cos(ang) * 0.85, 0.06, targetZ + Math.sin(ang) * 0.75);
+        }
+      });
+      setMoodState('eating');
+      setMoodText(`${pet.eatQuote} (แก๊งน้องๆ วิ่งมารุมกินด้วย!)`);
+      setHappiness((h) => Math.min(100, h + 12));
+      addBond(pet.id, 15);
+      playPetSfx('eat', pet.voicePitch);
+    },
+    [addBond, playPetSfx]
+  );
 
-  // 3D Cozy Pet Café Scene
+  const handleCallAllPets = useCallback(() => {
+    const now = performance.now();
+    cafeSharedRef.current.gatherUntil = now + 4500;
+    Object.values(petsRuntimeRef.current).forEach((rt, idx) => {
+      rt.happyHopUntil = now + 900;
+      if (rt.meta.moveSpeed > 0) {
+        const ang = -Math.PI * 0.15 + (idx - 1) * 0.55;
+        rt.aiMode = 'wander';
+        rt.aiUntil = now + 4200;
+        rt.targetPos.set(Math.cos(ang) * 1.75, 0.06, 0.9 + Math.sin(ang) * 0.85);
+      }
+    });
+    setMoodState('play');
+    setMoodText(`🔔 กรุ๊งกริ๊ง! แก๊งสัตว์เลี้ยงทั้งคาเฟ่วิ่งมารวมตัวหา ${playerName} แล้ว!`);
+    playPetSfx('bell');
+  }, [playPetSfx, playerName]);
+
+  // Living 3D Multi-Pet Café Scene
   useEffect(() => {
     if (!isOpen) return;
     const container = stageRef.current;
@@ -313,12 +440,13 @@ export function PetCafeModal({
     const height = container.clientHeight || window.innerHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xfef3c7); // Warm sunlit café cream
-    scene.fog = new THREE.Fog(0xfef3c7, 10, 24);
+    scene.background = new THREE.Color(0xfef3c7);
+    scene.fog = new THREE.Fog(0xfef3c7, 11, 26);
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 60);
-    camera.position.set(0, 2.35, 5.1);
-    camera.lookAt(0, 0.85, 0);
+    const camera = new THREE.PerspectiveCamera(44, width / height, 0.1, 60);
+    camera.position.set(0, 3.25, 6.6);
+    const cameraLookAt = new THREE.Vector3(0, 0.75, 0.2);
+    camera.lookAt(cameraLookAt);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: qCfg.antialias,
@@ -332,31 +460,29 @@ export function PetCafeModal({
     container.appendChild(renderer.domElement);
 
     // Warm Café Lighting
-    const hemi = new THREE.HemisphereLight(0xfffbeb, 0xd97706, 1.15);
-    scene.add(hemi);
-
+    scene.add(new THREE.HemisphereLight(0xfffbeb, 0xd97706, 1.2));
     const sun = new THREE.DirectionalLight(0xfff7ed, 1.45);
-    sun.position.set(4.5, 7.5, 5.0);
+    sun.position.set(4.5, 8.5, 5.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(qCfg.shadowMapSize, qCfg.shadowMapSize);
     scene.add(sun);
 
-    const warmLamp = new THREE.PointLight(0xfdba74, 1.2, 12);
-    warmLamp.position.set(-2.5, 3.2, 1.5);
+    const warmLamp = new THREE.PointLight(0xfdba74, 1.2, 14);
+    warmLamp.position.set(-3.0, 3.5, 1.5);
     scene.add(warmLamp);
 
-    // Cozy Wood Floor
+    // Warm Café Wood Floor
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(9, 40),
+      new THREE.CircleGeometry(10.5, 44),
       new THREE.MeshStandardMaterial({ color: 0xd9a066, roughness: 0.78 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Soft Pastel Café Rug
+    // Center Soft Pastel Rug
     const rug = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.35, 2.4, 0.06, 36),
+      new THREE.CylinderGeometry(2.6, 2.65, 0.06, 40),
       new THREE.MeshStandardMaterial({ color: 0xfce7f3, roughness: 0.92 })
     );
     rug.position.y = 0.03;
@@ -364,47 +490,95 @@ export function PetCafeModal({
     scene.add(rug);
 
     const rugTrim = new THREE.Mesh(
-      new THREE.TorusGeometry(2.36, 0.06, 8, 40),
+      new THREE.TorusGeometry(2.62, 0.06, 8, 44),
       new THREE.MeshStandardMaterial({ color: 0xf472b6, roughness: 0.85 })
     );
     rugTrim.rotation.x = Math.PI / 2;
     rugTrim.position.y = 0.06;
     scene.add(rugTrim);
 
-    // Cozy Café Backdrop Props (Cat Tree + Window Frame + Plant + Cushion)
-    const catTree = new THREE.Group();
-    catTree.position.set(-2.4, 0, -2.0);
-    const post = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.2, 2.2, 10),
-      new THREE.MeshStandardMaterial({ color: 0xd6b48c, roughness: 0.95 })
-    );
-    post.position.y = 1.1;
-    const perch = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.68, 0.68, 0.14, 16),
+    // Cozy Pet Cushions around the room
+    const cushionSpecs: Array<[number, number, number]> = [
+      [-2.8, -1.65, 0xbfdbfe],
+      [2.8, -1.6, 0xbbf7d0],
+    ];
+    cushionSpecs.forEach(([cx, cz, hex]) => {
+      const cush = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.85, 0.95, 0.16, 20),
+        new THREE.MeshStandardMaterial({ color: hex, roughness: 0.9 })
+      );
+      cush.position.set(cx, 0.08, cz);
+      cush.receiveShadow = true;
+      scene.add(cush);
+    });
+
+    // Pet Food & Water Bowls Station (pets wander over here to sniff!)
+    const bowlStation = new THREE.Group();
+    bowlStation.position.set(BOWL_POS.x, 0, BOWL_POS.z);
+    const matBase = new THREE.Mesh(
+      new THREE.BoxGeometry(1.3, 0.03, 0.72),
       new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.85 })
     );
-    perch.position.y = 2.22;
+    matBase.position.y = 0.015;
+    const foodBowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.28, 0.16, 16),
+      new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 })
+    );
+    foodBowl.position.set(-0.32, 0.09, 0);
+    const kibble = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 })
+    );
+    kibble.scale.set(1, 0.35, 1);
+    kibble.position.set(-0.32, 0.17, 0);
+    const waterBowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.28, 0.16, 16),
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4 })
+    );
+    waterBowl.position.set(0.32, 0.09, 0);
+    const waterFill = new THREE.Mesh(
+      new THREE.CircleGeometry(0.21, 16),
+      new THREE.MeshBasicMaterial({ color: 0xbae6fd })
+    );
+    waterFill.rotation.x = -Math.PI / 2;
+    waterFill.position.set(0.32, 0.172, 0);
+    bowlStation.add(matBase, foodBowl, kibble, waterBowl, waterFill);
+    scene.add(bowlStation);
+
+    // Cat Condo / Scratching Post
+    const catTree = new THREE.Group();
+    catTree.position.set(-3.4, 0, -2.5);
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.22, 2.4, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd6b48c, roughness: 0.95 })
+    );
+    post.position.y = 1.2;
+    const perch = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.75, 0.75, 0.14, 16),
+      new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.85 })
+    );
+    perch.position.y = 2.42;
     catTree.add(post, perch);
     scene.add(catTree);
 
-    // Coffee table + steaming mug on right
+    // Wooden Café Table + Mug
     const tableGroup = new THREE.Group();
-    tableGroup.position.set(2.55, 0, -1.7);
+    tableGroup.position.set(3.45, 0, -2.2);
     const tableTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.75, 0.75, 0.1, 18),
+      new THREE.CylinderGeometry(0.82, 0.82, 0.1, 18),
       new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.65 })
     );
-    tableTop.position.y = 1.05;
+    tableTop.position.y = 1.1;
     const tableLeg = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.1, 0.14, 1.05, 10),
+      new THREE.CylinderGeometry(0.1, 0.14, 1.1, 10),
       new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 })
     );
-    tableLeg.position.y = 0.52;
+    tableLeg.position.y = 0.55;
     const mug = new THREE.Mesh(
       new THREE.CylinderGeometry(0.14, 0.12, 0.24, 12),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
     );
-    mug.position.set(-0.1, 1.22, 0.1);
+    mug.position.set(-0.1, 1.27, 0.1);
     tableGroup.add(tableTop, tableLeg, mug);
     scene.add(tableGroup);
 
@@ -436,116 +610,164 @@ export function PetCafeModal({
     treatMesh.visible = false;
     scene.add(treatMesh);
 
-    // Pet Root Group
-    const petRoot = new THREE.Group();
-    petRoot.position.set(0, 0.06, 0);
-    scene.add(petRoot);
-
-    const petBodyPivot = new THREE.Group();
-    petRoot.add(petBodyPivot);
-
-    let mixer: THREE.AnimationMixer | null = null;
+    // Spawn ALL 6 Pets Together in the Café!
+    petsRuntimeRef.current = {};
     let disposed = false;
+    setLoadingCount(CAFE_PETS.length);
 
-    setLoadingModel(true);
-    if (selectedPet.photoUrl) {
-      // โหมด 2.5D ภาพสมจริง (วางบนพรมคาเฟ่ 3D พร้อมเงา ลูบหัว เกาพุง ไล่เลเซอร์ ป้อนขนมได้ครบ!)
-      const texLoader = new THREE.TextureLoader();
-      texLoader.load(
-        selectedPet.photoUrl,
-        (tex) => {
-          if (disposed) {
-            tex.dispose();
-            return;
-          }
-          tex.colorSpace = THREE.SRGBColorSpace;
-          const img = tex.image as HTMLImageElement | undefined;
-          const aspect = img && img.height > 0 ? img.width / img.height : 1.18;
-          const planeH = 2.05;
-          const planeW = planeH * aspect;
-          const photoMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(planeW, planeH),
-            new THREE.MeshBasicMaterial({
-              map: tex,
-              transparent: true,
-              alphaTest: 0.05,
-              side: THREE.DoubleSide,
-            })
-          );
-          photoMesh.position.set(0, planeH / 2 - 0.04, 0);
-          petBodyPivot.add(photoMesh);
+    const gltfLoader = new GLTFLoader();
+    const texLoader = new THREE.TextureLoader();
 
-          // Soft ground shadow oval under the photorealistic pet
-          const shadowOval = new THREE.Mesh(
-            new THREE.CircleGeometry(planeW * 0.42, 24),
-            new THREE.MeshBasicMaterial({
-              color: 0x000000,
-              transparent: true,
-              opacity: 0.22,
-              depthWrite: false,
-            })
-          );
-          shadowOval.rotation.x = -Math.PI / 2;
-          shadowOval.scale.set(1, 0.55, 1);
-          shadowOval.position.y = 0.02;
-          petRoot.add(shadowOval);
+    CAFE_PETS.forEach((meta, idx) => {
+      const petRoot = new THREE.Group();
+      petRoot.position.set(meta.homePos[0], 0.06, meta.homePos[1]);
+      petRoot.userData.cafePetId = meta.id;
+      scene.add(petRoot);
 
-          setLoadingModel(false);
-        },
-        undefined,
-        () => {
-          if (!disposed) setLoadingModel(false);
-        }
-      );
-    } else {
-      const loader = new GLTFLoader();
-      loader.load(
-        selectedPet.modelUrl,
-        (gltf) => {
-          if (disposed) {
-            disposeObject3D(gltf.scene);
-            return;
-          }
-          const model = gltf.scene;
-          // Normalize bounding box so every pet (.glb or custom realistic .glb) sits nicely at ~1.65m height on the rug!
-          const box = new THREE.Box3().setFromObject(model);
-          const size = new THREE.Vector3();
-          const center = new THREE.Vector3();
-          box.getSize(size);
-          box.getCenter(center);
-          const maxDim = Math.max(size.x, size.y, size.z, 0.01);
-          const scale = 1.65 / maxDim;
-          model.scale.setScalar(scale);
-          model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
-          model.traverse((child) => {
-            const mesh = child as THREE.Mesh;
-            if (mesh.isMesh) {
-              mesh.castShadow = true;
-              mesh.receiveShadow = true;
+      const bodyPivot = new THREE.Group();
+      bodyPivot.userData.cafePetId = meta.id;
+      petRoot.add(bodyPivot);
+
+      const initPlan = meta.moveSpeed > 0 ? pickNaturalTarget(meta.id) : null;
+      const runtime: PetRuntime = {
+        meta,
+        root: petRoot,
+        bodyPivot,
+        mixer: null,
+        idleAction: null,
+        walkAction: null,
+        activeClip: 'idle',
+        aiMode: initPlan ? initPlan.mode : 'idle_look',
+        aiUntil: performance.now() + 1800 + idx * 750,
+        targetPos:
+          initPlan && (initPlan.mode === 'wander' || initPlan.mode === 'sniff_bowl')
+            ? initPlan.pos
+            : new THREE.Vector3(meta.homePos[0], 0.06, meta.homePos[1]),
+        petTiltX: 0,
+        petTiltZ: 0,
+        bellyRoll: 0,
+        happyHopUntil: 0,
+        spicyUntil: 0,
+        eatUntil: 0,
+        bellyHeat: 0,
+        laserOffsetAngle: (idx / CAFE_PETS.length) * Math.PI * 2,
+      };
+      petsRuntimeRef.current[meta.id] = runtime;
+
+      if (meta.photoUrl) {
+        texLoader.load(
+          meta.photoUrl,
+          (tex) => {
+            if (disposed) {
+              tex.dispose();
+              return;
             }
-          });
-          petBodyPivot.add(model);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            const img = tex.image as HTMLImageElement | undefined;
+            const aspect = img && img.height > 0 ? img.width / img.height : 1.18;
+            const planeH = meta.scaleHeight;
+            const planeW = planeH * aspect;
+            const photoMesh = new THREE.Mesh(
+              new THREE.PlaneGeometry(planeW, planeH),
+              new THREE.MeshBasicMaterial({
+                map: tex,
+                transparent: true,
+                alphaTest: 0.05,
+                side: THREE.DoubleSide,
+              })
+            );
+            photoMesh.position.set(0, planeH / 2 - 0.04, 0);
+            photoMesh.userData.cafePetId = meta.id;
+            bodyPivot.add(photoMesh);
 
-          if (gltf.animations && gltf.animations.length > 0) {
-            mixer = new THREE.AnimationMixer(model);
-            const idleClip =
-              gltf.animations.find((a) => /idle|sit|breath|stand/i.test(a.name)) || gltf.animations[0];
-            mixer.clipAction(idleClip).play();
+            const shadowOval = new THREE.Mesh(
+              new THREE.CircleGeometry(planeW * 0.42, 24),
+              new THREE.MeshBasicMaterial({
+                color: 0x000000,
+                transparent: true,
+                opacity: 0.22,
+                depthWrite: false,
+              })
+            );
+            shadowOval.rotation.x = -Math.PI / 2;
+            shadowOval.scale.set(1, 0.55, 1);
+            shadowOval.position.y = 0.02;
+            petRoot.add(shadowOval);
+
+            setLoadingCount((c) => Math.max(0, c - 1));
+          },
+          undefined,
+          () => {
+            if (!disposed) setLoadingCount((c) => Math.max(0, c - 1));
           }
-          setLoadingModel(false);
-        },
-        undefined,
-        () => {
-          if (!disposed) setLoadingModel(false);
-        }
-      );
-    }
+        );
+      } else {
+        gltfLoader.load(
+          meta.modelUrl,
+          (gltf) => {
+            if (disposed) {
+              disposeObject3D(gltf.scene);
+              return;
+            }
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(size);
+            box.getCenter(center);
+            const maxDim = Math.max(size.x, size.y, size.z, 0.01);
+            const scale = meta.scaleHeight / maxDim;
+            model.scale.setScalar(scale);
+            model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+            model.traverse((child) => {
+              child.userData.cafePetId = meta.id;
+              const mesh = child as THREE.Mesh;
+              if (mesh.isMesh) {
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+              }
+            });
+            bodyPivot.add(model);
 
-    // Pointer Interaction (Pet Head / Rub Belly / Chase Laser)
+            if (gltf.animations && gltf.animations.length > 0) {
+              const mixer = new THREE.AnimationMixer(model);
+              const idleClip =
+                gltf.animations.find((a) => /idle|sit|breath|stand/i.test(a.name)) ||
+                gltf.animations[0];
+              const walkClip =
+                gltf.animations.find((a) => /walk|run|trot|move|hop/i.test(a.name)) || null;
+              runtime.mixer = mixer;
+              runtime.idleAction = mixer.clipAction(idleClip);
+              runtime.walkAction = walkClip ? mixer.clipAction(walkClip) : null;
+              runtime.idleAction.play();
+            }
+            setLoadingCount((c) => Math.max(0, c - 1));
+          },
+          undefined,
+          () => {
+            if (!disposed) setLoadingCount((c) => Math.max(0, c - 1));
+          }
+        );
+      }
+    });
+
+    // Pointer Interaction: Rub / Pet ANY pet in the room, or shine Laser / toss Treat!
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.08);
     const hitPoint = new THREE.Vector3();
+
+    const findHitPet = (): PetRuntime | null => {
+      const roots = Object.values(petsRuntimeRef.current).map((r) => r.bodyPivot);
+      const hits = raycaster.intersectObjects(roots, true);
+      if (hits.length === 0) return null;
+      let obj: THREE.Object3D | null = hits[0].object;
+      while (obj && !obj.userData.cafePetId) {
+        obj = obj.parent;
+      }
+      const pid = obj?.userData.cafePetId as string | undefined;
+      return pid ? petsRuntimeRef.current[pid] || null : null;
+    };
 
     const updatePointerInteraction = (e: PointerEvent, isDownEvent: boolean) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -554,57 +776,75 @@ export function PetCafeModal({
       raycaster.setFromCamera(pointer, camera);
 
       const tool = activeToolRef.current;
-      const pet = selectedPetRef.current;
-      const st = petStateRef.current;
+      const shared = cafeSharedRef.current;
 
       if (tool === 'laser') {
         if (raycaster.ray.intersectPlane(floorPlane, hitPoint)) {
-          const clampedR = Math.min(2.15, Math.hypot(hitPoint.x, hitPoint.z));
-          const ang = Math.atan2(hitPoint.z, hitPoint.x);
-          st.laserTarget.set(Math.cos(ang) * clampedR, 0.08, Math.sin(ang) * clampedR);
-          st.laserActive = true;
+          const clampedX = THREE.MathUtils.clamp(hitPoint.x, -3.5, 3.5);
+          const clampedZ = THREE.MathUtils.clamp(hitPoint.z, -2.3, 2.5);
+          shared.laserTarget.set(clampedX, 0.08, clampedZ);
+          shared.laserActive = true;
           setMoodState('play');
-          setMoodText('🔴 สายตาจ้องเลเซอร์ไม่กะพริบ! วิ่งไล่ใหญ่เลย!');
+          setMoodText('🔴 แก๊งน้องๆ จ้องจุดเลเซอร์ตาแป๋ว วิ่งไล่กันใหญ่เลย!');
         }
         return;
       }
 
       if (tool === 'treat' && isDownEvent) {
-        handleFeedTreat();
-        spawnParticle(e.clientX, e.clientY, pet.treatIcon);
+        if (raycaster.ray.intersectPlane(floorPlane, hitPoint)) {
+          handleFeedTreat(
+            THREE.MathUtils.clamp(hitPoint.x, -2.4, 2.4),
+            THREE.MathUtils.clamp(hitPoint.z, -1.2, 2.1)
+          );
+        } else {
+          handleFeedTreat();
+        }
+        const curMeta = CAFE_PETS.find((p) => p.id === selectedPetIdRef.current) || CAFE_PETS[0];
+        spawnParticle(e.clientX, e.clientY, curMeta.treatIcon);
         return;
       }
 
       if (!isPointerDownRef.current && !isDownEvent) return;
 
-      // Check if touching/rubbing the pet
-      const petHits = raycaster.intersectObject(petBodyPivot, true);
-      if (petHits.length === 0) return;
+      const hitRt = findHitPet();
+      if (!hitRt) return;
+
+      // Focus the pet you touched!
+      activeRubPetIdRef.current = hitRt.meta.id;
+      if (selectedPetIdRef.current !== hitRt.meta.id) {
+        setSelectedPetId(hitRt.meta.id);
+      }
 
       const now = performance.now();
+      const pet = hitRt.meta;
+      // Pause walking while being petted
+      if (hitRt.meta.moveSpeed > 0) {
+        hitRt.aiMode = 'idle_look';
+        hitRt.aiUntil = now + 2600;
+      }
+
       if (tool === 'pet') {
-        st.petTiltZ = THREE.MathUtils.clamp(-pointer.x * 0.32, -0.28, 0.28);
-        st.petTiltX = 0.14;
-        st.happyHopUntil = now + 450;
-        bellyHeatRef.current = Math.max(0, bellyHeatRef.current - 0.5);
+        hitRt.petTiltZ = THREE.MathUtils.clamp(-pointer.x * 0.3, -0.26, 0.26);
+        hitRt.petTiltX = 0.14;
+        hitRt.happyHopUntil = now + 450;
+        hitRt.bellyHeat = Math.max(0, hitRt.bellyHeat - 0.5);
         setMoodState('happy');
         setMoodText(pet.petQuote);
         setHappiness((h) => Math.min(100, h + 0.6));
         addBond(pet.id, 1);
-        playPetSfx('purr');
+        playPetSfx('purr', pet.voicePitch);
         spawnParticle(e.clientX, e.clientY, Math.random() < 0.5 ? '💖' : '✨');
       } else if (tool === 'belly') {
-        bellyHeatRef.current += 1;
-        if (bellyHeatRef.current >= pet.spicyThreshold) {
-          // Cat/Pet gets spicy & swats hand!
-          bellyHeatRef.current = 0;
-          st.spicyUntil = now + 1350;
-          st.bellyRoll = 0;
+        hitRt.bellyHeat += 1;
+        if (hitRt.bellyHeat >= pet.spicyThreshold) {
+          hitRt.bellyHeat = 0;
+          hitRt.spicyUntil = now + 1350;
+          hitRt.bellyRoll = 0;
           setMoodState('spicy');
           setMoodText(pet.spicyQuote);
           setScratchFlash(true);
           setTimeout(() => setScratchFlash(false), 320);
-          playPetSfx('spicy');
+          playPetSfx('spicy', pet.voicePitch);
           spawnParticle(e.clientX, e.clientY, '💢');
           if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
             try {
@@ -614,13 +854,13 @@ export function PetCafeModal({
             }
           }
         } else {
-          st.bellyRoll = 0.68;
-          st.happyHopUntil = now + 350;
+          hitRt.bellyRoll = 0.68;
+          hitRt.happyHopUntil = now + 350;
           setMoodState('happy');
           setMoodText(pet.bellyQuote);
           setHappiness((h) => Math.min(100, h + 0.8));
           addBond(pet.id, 1);
-          playPetSfx('purr');
+          playPetSfx('purr', pet.voicePitch);
           spawnParticle(e.clientX, e.clientY, Math.random() < 0.5 ? '💕' : '🐾');
         }
       }
@@ -637,9 +877,12 @@ export function PetCafeModal({
     };
     const onPointerUp = () => {
       isPointerDownRef.current = false;
-      petStateRef.current.petTiltX = 0;
-      petStateRef.current.petTiltZ = 0;
-      petStateRef.current.bellyRoll = 0;
+      activeRubPetIdRef.current = null;
+      Object.values(petsRuntimeRef.current).forEach((rt) => {
+        rt.petTiltX = 0;
+        rt.petTiltZ = 0;
+        rt.bellyRoll = 0;
+      });
     };
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -664,84 +907,168 @@ export function PetCafeModal({
       const dt = Math.min(0.05, clock.getDelta());
       const elapsed = clock.getElapsedTime();
       const now = performance.now();
-      const st = petStateRef.current;
+      const shared = cafeSharedRef.current;
 
-      if (mixer) mixer.update(dt);
-
-      // Gentle breathing
-      const breath = 1 + Math.sin(elapsed * 2.8) * 0.022;
-      petBodyPivot.scale.set(1, breath, 1);
-
-      // Smoothly interpolate head tilt & belly roll
-      petBodyPivot.rotation.x += (st.petTiltX - petBodyPivot.rotation.x) * 0.14;
-      const targetRoll = st.bellyRoll > 0 ? st.bellyRoll + Math.sin(elapsed * 14) * 0.12 : st.petTiltZ;
-      petBodyPivot.rotation.z += (targetRoll - petBodyPivot.rotation.z) * 0.14;
-
-      if (now < st.spicyUntil) {
-        // Spicy swat jump!
-        petBodyPivot.position.y = Math.abs(Math.sin(elapsed * 26)) * 0.42;
-        petBodyPivot.rotation.z = Math.sin(elapsed * 42) * 0.25;
-      } else if (now < st.eatUntil) {
-        petBodyPivot.position.y = Math.abs(Math.sin(elapsed * 12)) * 0.14;
-        petBodyPivot.rotation.x = 0.22 + Math.sin(elapsed * 16) * 0.12;
-      } else if (now < st.happyHopUntil) {
-        petBodyPivot.position.y = Math.abs(Math.sin(elapsed * 14)) * 0.16;
-      } else {
-        petBodyPivot.position.y += (0 - petBodyPivot.position.y) * 0.12;
-      }
-
-      // Laser pointer chase!
-      if (st.laserActive) {
+      // Update laser dot
+      if (shared.laserActive) {
         laserDot.visible = true;
-        laserDot.position.copy(st.laserTarget);
-        const dx = st.laserTarget.x - petRoot.position.x;
-        const dz = st.laserTarget.z - petRoot.position.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist > 0.28) {
-          const step = Math.min(dist, dt * 2.5);
-          petRoot.position.x += (dx / dist) * step;
-          petRoot.position.z += (dz / dist) * step;
-          petBodyPivot.position.y = Math.abs(Math.sin(elapsed * 16)) * 0.22;
-        }
-        // For 2.5D photorealistic pet, keep facing camera & flip horizontally toward laser; for 3D GLB, rotate yaw
-        if (selectedPetRef.current.photoUrl) {
-          petBodyPivot.scale.x = dx < -0.1 ? -1 : 1;
-        } else {
-          const targetYaw = Math.atan2(dx, dz);
-          let diff = targetYaw - petRoot.rotation.y;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          petRoot.rotation.y += diff * 0.18;
-        }
+        laserDot.position.copy(shared.laserTarget);
       } else {
         laserDot.visible = false;
-        // Gently drift back toward rug center & face camera
-        petRoot.position.x += (0 - petRoot.position.x) * 0.03;
-        petRoot.position.z += (0 - petRoot.position.z) * 0.03;
-        let diff = 0 - petRoot.rotation.y;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        petRoot.rotation.y += diff * 0.06;
       }
 
-      // Treat toss arc
-      if (st.treatArc.active) {
-        const tp = (now - st.treatArc.startedAt) / 520;
+      // Update treat toss arc
+      if (shared.treatArc.active) {
+        const tp = (now - shared.treatArc.startedAt) / 520;
         if (tp >= 1) {
-          st.treatArc.active = false;
+          shared.treatArc.active = false;
           treatMesh.visible = false;
         } else {
           treatMesh.visible = true;
           treatMesh.position.set(
-            st.treatArc.targetX * tp,
-            0.25 + (1 - tp) * 1.4 + Math.sin(tp * Math.PI) * 1.3,
-            3.2 + (st.treatArc.targetZ - 3.2) * tp
+            shared.treatArc.targetX * tp,
+            0.25 + (1 - tp) * 1.4 + Math.sin(tp * Math.PI) * 1.4,
+            3.6 + (shared.treatArc.targetZ - 3.6) * tp
           );
           treatMesh.rotation.x = elapsed * 10;
         }
       } else {
         treatMesh.visible = false;
       }
+
+      // Update ALL pets with natural autonomous behavior!
+      Object.values(petsRuntimeRef.current).forEach((rt, idx) => {
+        if (rt.mixer) rt.mixer.update(dt);
+
+        const isPhoto = Boolean(rt.meta.photoUrl);
+        let isMovingNow = false;
+
+        if (!isPhoto && rt.meta.moveSpeed > 0) {
+          // 1. Laser Chase overrides idle wandering
+          if (shared.laserActive) {
+            const tx = shared.laserTarget.x + Math.cos(rt.laserOffsetAngle) * 0.55;
+            const tz = shared.laserTarget.z + Math.sin(rt.laserOffsetAngle) * 0.55;
+            const dx = tx - rt.root.position.x;
+            const dz = tz - rt.root.position.z;
+            const dist = Math.hypot(dx, dz);
+            if (dist > 0.25) {
+              isMovingNow = true;
+              const step = Math.min(dist, dt * rt.meta.moveSpeed * 1.55);
+              rt.root.position.x += (dx / dist) * step;
+              rt.root.position.z += (dz / dist) * step;
+            }
+            const targetYaw = Math.atan2(shared.laserTarget.x - rt.root.position.x, shared.laserTarget.z - rt.root.position.z);
+            let diff = targetYaw - rt.root.rotation.y;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            rt.root.rotation.y += diff * 0.16;
+          } else if (activeRubPetIdRef.current === rt.meta.id) {
+            // Turn affectionately toward camera when being petted
+            let diff = 0 - rt.root.rotation.y;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            rt.root.rotation.y += diff * 0.14;
+          } else {
+            // Autonomous Pet AI State Machine
+            if (now >= rt.aiUntil) {
+              const plan = pickNaturalTarget(rt.meta.id);
+              rt.aiMode = plan.mode;
+              rt.aiUntil = now + plan.durationMs;
+              if (plan.mode === 'wander' || plan.mode === 'sniff_bowl') {
+                rt.targetPos.copy(plan.pos);
+              }
+            }
+
+            if (rt.aiMode === 'wander' || rt.aiMode === 'sniff_bowl') {
+              const dx = rt.targetPos.x - rt.root.position.x;
+              const dz = rt.targetPos.z - rt.root.position.z;
+              const dist = Math.hypot(dx, dz);
+              if (dist > 0.16) {
+                isMovingNow = true;
+                const step = Math.min(dist, dt * rt.meta.moveSpeed);
+                rt.root.position.x += (dx / dist) * step;
+                rt.root.position.z += (dz / dist) * step;
+                const targetYaw = Math.atan2(dx, dz);
+                let diff = targetYaw - rt.root.rotation.y;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                rt.root.rotation.y += diff * 0.1;
+              } else if (rt.aiMode === 'sniff_bowl') {
+                // Dip head slightly to sniff bowl
+                rt.bodyPivot.rotation.x += (0.24 + Math.sin(elapsed * 8) * 0.06 - rt.bodyPivot.rotation.x) * 0.15;
+              }
+            } else if (rt.aiMode === 'idle_look') {
+              // Curious gentle look toward camera
+              const targetYaw = Math.atan2(-rt.root.position.x * 0.35, 4 - rt.root.position.z);
+              let diff = targetYaw - rt.root.rotation.y;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              rt.root.rotation.y += diff * 0.05;
+            }
+          }
+
+          // Crossfade GLB walk vs idle clip if available
+          if (rt.walkAction && rt.idleAction) {
+            if (isMovingNow && rt.activeClip !== 'walk') {
+              rt.activeClip = 'walk';
+              rt.idleAction.fadeOut(0.2);
+              rt.walkAction.reset().fadeIn(0.2).play();
+            } else if (!isMovingNow && rt.activeClip !== 'idle') {
+              rt.activeClip = 'idle';
+              rt.walkAction.fadeOut(0.25);
+              rt.idleAction.reset().fadeIn(0.25).play();
+            }
+          }
+        } else if (isPhoto && shared.laserActive) {
+          // Photorealistic Kaokua leans playfully toward the laser
+          rt.bodyPivot.scale.x = shared.laserTarget.x < -0.2 ? -1 : 1;
+        } else if (isPhoto) {
+          rt.bodyPivot.scale.x = 1;
+        }
+
+        // Natural breathing + napping squat
+        const isNapping = !isPhoto && !isMovingNow && rt.aiMode === 'nap' && now >= rt.happyHopUntil && now >= rt.eatUntil;
+        const breath = isNapping
+          ? 0.84 + Math.sin(elapsed * 1.9 + idx) * 0.03
+          : 1 + Math.sin(elapsed * 2.8 + idx) * 0.022;
+        rt.bodyPivot.scale.y = breath;
+
+        // Smooth tilt & belly roll
+        const curiousTilt =
+          !isMovingNow && rt.aiMode === 'idle_look' && rt.petTiltZ === 0
+            ? Math.sin(elapsed * 1.7 + idx * 2) * 0.08
+            : rt.petTiltZ;
+        const targetRoll =
+          rt.bellyRoll > 0 ? rt.bellyRoll + Math.sin(elapsed * 14) * 0.12 : curiousTilt;
+        if (rt.aiMode !== 'sniff_bowl' || isMovingNow) {
+          rt.bodyPivot.rotation.x += (rt.petTiltX - rt.bodyPivot.rotation.x) * 0.14;
+        }
+        rt.bodyPivot.rotation.z += (targetRoll - rt.bodyPivot.rotation.z) * 0.14;
+
+        // Vertical gait / hop / spicy jump
+        if (now < rt.spicyUntil) {
+          rt.bodyPivot.position.y = Math.abs(Math.sin(elapsed * 26)) * 0.4;
+          rt.bodyPivot.rotation.z = Math.sin(elapsed * 42) * 0.24;
+        } else if (now < rt.eatUntil) {
+          rt.bodyPivot.position.y = Math.abs(Math.sin(elapsed * 12 + idx)) * 0.14;
+          rt.bodyPivot.rotation.x = 0.2 + Math.sin(elapsed * 15) * 0.1;
+        } else if (now < rt.happyHopUntil) {
+          rt.bodyPivot.position.y = Math.abs(Math.sin(elapsed * 14 + idx)) * 0.16;
+        } else if (isMovingNow) {
+          const hopAmp = rt.meta.id === 'bunny' ? 0.26 : 0.11;
+          rt.bodyPivot.position.y = Math.abs(Math.sin(elapsed * 12 + idx)) * hopAmp;
+        } else {
+          rt.bodyPivot.position.y += (0 - rt.bodyPivot.position.y) * 0.12;
+        }
+      });
+
+      // Gently pan camera lookAt slightly toward the currently selected pet while keeping the whole café visible!
+      const focusedRt = petsRuntimeRef.current[selectedPetIdRef.current];
+      const targetLookX = focusedRt ? THREE.MathUtils.clamp(focusedRt.root.position.x * 0.35, -1.2, 1.2) : 0;
+      const targetLookZ = focusedRt ? THREE.MathUtils.clamp(focusedRt.root.position.z * 0.25, -0.5, 0.8) : 0.2;
+      cameraLookAt.x += (targetLookX - cameraLookAt.x) * 0.05;
+      cameraLookAt.z += (targetLookZ - cameraLookAt.z) * 0.05;
+      camera.lookAt(cameraLookAt);
 
       renderer.render(scene, camera);
     };
@@ -757,7 +1084,7 @@ export function PetCafeModal({
       disposeObject3D(scene);
       renderer.dispose();
     };
-  }, [isOpen, selectedPet.modelUrl, selectedPet.photoUrl, qualityMode, addBond, handleFeedTreat, playPetSfx, spawnParticle]);
+  }, [isOpen, qualityMode, addBond, handleFeedTreat, playPetSfx, spawnParticle]);
 
   if (!isOpen) return null;
 
@@ -766,7 +1093,7 @@ export function PetCafeModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-amber-950/90 flex flex-col overflow-hidden select-none">
-      {/* Full-screen 3D Cozy Pet Café Stage */}
+      {/* Full-screen Living 3D Pet Café Stage */}
       <div
         ref={stageRef}
         className="fixed inset-0 w-full h-full z-0 touch-none cursor-pointer"
@@ -794,7 +1121,7 @@ export function PetCafeModal({
 
       {/* TOP HUD */}
       <div className="relative z-20 p-3 sm:p-4 pt-safe flex items-start justify-between gap-2 pointer-events-none">
-        <div className="pointer-events-auto bg-amber-950/85 backdrop-blur-md border-2 border-amber-300/90 rounded-2xl px-3.5 py-2 shadow-xl max-w-[75vw]">
+        <div className="pointer-events-auto bg-amber-950/85 backdrop-blur-md border-2 border-amber-300/90 rounded-2xl px-3.5 py-2 shadow-xl max-w-[72vw]">
           <div className="flex items-center gap-2">
             <span className="text-2xl">{selectedPet.icon}</span>
             <div className="min-w-0">
@@ -815,14 +1142,25 @@ export function PetCafeModal({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="pointer-events-auto w-10 h-10 bg-rose-600 hover:bg-rose-500 text-white border-2 border-amber-200 rounded-xl font-extrabold text-lg flex items-center justify-center shadow-xl cursor-pointer shrink-0"
-          title="ออกจากคาเฟ่"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-1.5 pointer-events-auto shrink-0">
+          <button
+            type="button"
+            onClick={handleCallAllPets}
+            className="h-10 px-3 bg-amber-400 hover:bg-amber-300 text-stone-950 border-2 border-white rounded-xl font-extrabold text-xs flex items-center gap-1 shadow-xl cursor-pointer"
+            title="สั่นกระดิ่งเรียกรวมตัวแก๊งสัตว์เลี้ยง!"
+          >
+            <span>🔔</span>
+            <span className="hidden sm:inline">เรียกรวมตัว</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 bg-rose-600 hover:bg-rose-500 text-white border-2 border-amber-200 rounded-xl font-extrabold text-lg flex items-center justify-center shadow-xl cursor-pointer"
+            title="ออกจากคาเฟ่"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Speech Bubble */}
@@ -836,19 +1174,25 @@ export function PetCafeModal({
               : 'bg-white/95 text-stone-800 border-amber-400'
           }`}
         >
-          {loadingModel ? `⏳ กำลังเรียก ${selectedPet.name} ออกมาต้อนรับ ${playerName}...` : `💬 ${moodText}`}
+          {loadingCount > 0
+            ? `⏳ กำลังเปิดประตูคาเฟ่เรียกแก๊งสัตว์เลี้ยงออกมาต้อนรับ ${playerName}...`
+            : `💬 ${moodText}`}
         </div>
       </div>
 
-      {/* BOTTOM CONTROLS: Pet Selector + Interaction Tools */}
+      {/* BOTTOM CONTROLS: Pet Focus Strip + Interaction Tools */}
       <div className="relative z-20 mt-auto p-3 sm:p-4 pb-safe flex flex-col items-center gap-2 pointer-events-none">
-        {/* Pet Switcher Strip */}
+        {/* Pet Focus Strip (all 6 pets are in the room — tap to focus or tap directly on any pet!) */}
         <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto max-w-[96vw] bg-amber-950/80 backdrop-blur-md border-2 border-amber-400/70 rounded-2xl p-1.5 shadow-xl">
           {CAFE_PETS.map((pet) => (
             <button
               key={pet.id}
               type="button"
-              onClick={() => setSelectedPetId(pet.id)}
+              onClick={() => {
+                setSelectedPetId(pet.id);
+                setMoodState('chill');
+                setMoodText(pet.idleQuote);
+              }}
               className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition whitespace-nowrap shrink-0 ${
                 selectedPetId === pet.id
                   ? 'bg-amber-300 text-stone-950 shadow'

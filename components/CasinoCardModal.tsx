@@ -17,7 +17,7 @@ import {
 import type { VolleyballPlayerSummary } from '@/components/BeachVolleyballModal';
 import {
   createShuffledDeck,
-  createOldMaidDeck,
+  createOldMaidDeck52,
   discardOldMaidPairs,
   evaluatePokDengHand,
   comparePokDeng,
@@ -29,7 +29,6 @@ import {
   rankLabel,
   SUIT_SYMBOL,
   SUIT_IS_RED,
-  OLD_MAID_CARD_ID,
   type CasinoGameType,
   type PlayingCard,
   type GuardMoodMeta,
@@ -71,6 +70,7 @@ interface TableMember {
   userId: number;
   name: string;
   emoji: string;
+  points: number;
 }
 
 interface SeatRoundState {
@@ -97,6 +97,7 @@ interface CasinoRoundState {
   currentBet?: number; // Hold'em
   turnIndex?: number; // Hold'em / Old Maid
   oldMaidStake?: number;
+  oldMaidHiddenCard?: PlayingCard | null; // 1 secret mystery card from 52-card deck!
   deck: PlayingCard[];
   community: PlayingCard[];
   dealerCards: PlayingCard[];
@@ -139,9 +140,9 @@ const GAME_CATALOG: Array<{
   {
     id: 'oldmaid',
     icon: '👵',
-    title: 'อีแก่กินน้ำ',
+    title: 'อีแก่กินน้ำ (52 ใบ)',
     playersText: '2–5 คน',
-    desc: 'ดึงไพ่จับคู่ทิ้ง • คนสุดท้ายถืออีแก่ Q♠ จ่ายรอบวงให้เพื่อนทุกคน!',
+    desc: 'สำรับเต็ม 52 ใบ สุ่มคว่ำ 1 ใบปริศนากลางโต๊ะ • คนสุดท้ายถือใบไร้คู่จ่ายรอบวง!',
   },
 ];
 
@@ -180,14 +181,13 @@ function PlayingCardView({
   }
 
   const isRed = SUIT_IS_RED[card.suit];
-  const isOldMaid = card.id === OLD_MAID_CARD_ID;
   const rTxt = rankLabel(card.rank);
   const sTxt = SUIT_SYMBOL[card.suit];
 
   return (
     <div
       className={`${sizeCls} relative bg-gradient-to-b from-white to-slate-100 border-2 ${
-        highlight || isOldMaid
+        highlight
           ? 'border-amber-400 ring-2 ring-yellow-300 shadow-[0_0_12px_rgba(250,204,21,0.7)]'
           : 'border-slate-300 shadow-md'
       } flex flex-col justify-between p-1 sm:p-1.5 select-none shrink-0 ${
@@ -199,7 +199,7 @@ function PlayingCardView({
         <span className="text-[10px]">{sTxt}</span>
       </div>
       <div className="text-center text-xl sm:text-2xl leading-none font-black">
-        {isOldMaid ? '👵' : sTxt}
+        {sTxt}
       </div>
       <div className="font-black leading-none text-right rotate-180 flex items-center gap-0.5">
         <span>{rTxt}</span>
@@ -422,13 +422,28 @@ export function CasinoCardModal({
           setGuardBank(nextBank);
           setGuardMood(mood);
 
+          const updatedPlayers: Array<{ userId: number; points: number }> = Array.isArray(data.updatedPlayers)
+            ? data.updatedPlayers
+            : [];
+          if (updatedPlayers.length > 0) {
+            const nextMem = { ...membersRef.current };
+            (Object.keys(nextMem) as SeatId[]).forEach((s) => {
+              const m = nextMem[s];
+              if (!m) return;
+              const up = updatedPlayers.find((u) => u.userId === m.userId);
+              if (up) nextMem[s] = { ...m, points: up.points };
+            });
+            setMembers(nextMem);
+            membersRef.current = nextMem;
+          }
+
           const updatedRound: CasinoRoundState = {
             ...finalRound,
             dealerNetGp: dealerNet,
           };
           setRound(updatedRound);
           roundRef.current = updatedRound;
-          sendRoomMsg('round_sync', { round: updatedRound, guardBank: nextBank, guardMood: mood });
+          sendRoomMsg('round_sync', { round: updatedRound, guardBank: nextBank, guardMood: mood, members: membersRef.current });
           onPointsUpdatedRef.current?.();
         }
       } catch {
@@ -445,14 +460,19 @@ export function CasinoCardModal({
   // ============================================================
   const createFreshBettingRound = useCallback(
     (gType: CasinoGameType, memObj: Partial<Record<SeatId, TableMember>>): CasinoRoundState => {
-      const seats: SeatRoundState[] = SEAT_ORDER.filter((s) => Boolean(memObj[s])).map((s) => {
+      // Only members with >= 5 GP can play; players with < 5 GP stay as spectators!
+      const seats: SeatRoundState[] = SEAT_ORDER.filter((s) => {
+        const m = memObj[s];
+        return Boolean(m) && (m!.points ?? 0) >= 5;
+      }).map((s) => {
         const m = memObj[s]!;
+        const defaultBet = m.points >= 10 ? 10 : 5;
         return {
           seatId: s,
           userId: m.userId,
           name: m.name,
           emoji: m.emoji,
-          bet: 10,
+          bet: defaultBet,
           ready: false,
           cards: [],
           done: false,
@@ -461,7 +481,8 @@ export function CasinoCardModal({
       return {
         gameType: gType,
         phase: 'betting',
-        oldMaidStake: 10,
+        oldMaidStake: 5,
+        oldMaidHiddenCard: null,
         deck: [],
         community: [],
         dealerCards: [],
@@ -799,11 +820,11 @@ export function CasinoCardModal({
           seats,
         });
       } else if (cur.gameType === 'oldmaid') {
-        const deck = createOldMaidDeck();
+        const { dealDeck, hiddenCard } = createOldMaidDeck52();
         const buckets: PlayingCard[][] = cur.seats.map(() => []);
         let bi = 0;
-        while (deck.length > 0) {
-          buckets[bi % cur.seats.length].push(deck.pop()!);
+        while (dealDeck.length > 0) {
+          buckets[bi % cur.seats.length].push(dealDeck.pop()!);
           bi++;
         }
         const seats = cur.seats.map((s, i) => {
@@ -819,9 +840,10 @@ export function CasinoCardModal({
         pushRoundSync({
           ...cur,
           phase: 'playing',
+          oldMaidHiddenCard: hiddenCard,
           deck: [],
           dealerCards: [],
-          dealerRevealed: true,
+          dealerRevealed: false,
           turnIndex: firstActive >= 0 ? firstActive : 0,
           seats,
         });
@@ -1070,12 +1092,16 @@ export function CasinoCardModal({
             });
 
             playCasinoSound('lose', mutedRef.current);
+            const hiddenTxt = cur.oldMaidHiddenCard
+              ? `${rankLabel(cur.oldMaidHiddenCard.rank)}${SUIT_SYMBOL[cur.oldMaidHiddenCard.suit]}`
+              : 'อีแก่';
             const settled: CasinoRoundState = {
               ...cur,
               phase: 'settled',
+              dealerRevealed: true,
               seats: settledSeats,
               dealerNetGp: rakeGp,
-              summaryText: `👵💧 ${loser?.emoji || ''} ${loser?.name || 'คนแพ้'} ถืออีแก่คามือ! โดนกินน้ำ + จ่ายรอบวงคนละ ${stake} 💰!`,
+              summaryText: `👵💧 เฉลยไพ่ปริศนา: ${hiddenTxt}! ${loser?.emoji || ''} ${loser?.name || 'คนแพ้'} ถือคู่ไร้คู่อยู่คามือ จ่ายรอบวงคนละ ${stake} 💰!`,
             };
             pushRoundSync(settled);
             void settleRoundOnServer(settled, false, rakeGp);
@@ -1124,6 +1150,7 @@ export function CasinoCardModal({
       userId: me?.id ?? 0,
       name: me?.name ?? 'ผู้กล้า',
       emoji: me?.emoji ?? '🐰',
+      points: currentUserPoints,
     };
 
     if (initialIsHost) {
@@ -1156,6 +1183,7 @@ export function CasinoCardModal({
             userId: Number(payload.userId ?? 0),
             name: String(payload.name || 'เพื่อน'),
             emoji: String(payload.emoji || '🦊'),
+            points: Number(payload.points ?? 0),
           };
           setMembers(cur);
           membersRef.current = cur;
@@ -1222,6 +1250,11 @@ export function CasinoCardModal({
           const b = payload.guardBank as { guardBalance: number; guardTotalWon: number; guardRoundsPlayed: number };
           setGuardBank(b);
           onPointsUpdatedRef.current?.();
+        }
+        if (payload.members) {
+          const incMem = payload.members as Partial<Record<SeatId, TableMember>>;
+          setMembers(incMem);
+          membersRef.current = incMem;
         }
         if (payload.guardMood) {
           setGuardMood(payload.guardMood as GuardMoodMeta);

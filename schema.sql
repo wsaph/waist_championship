@@ -127,3 +127,82 @@ CREATE TABLE IF NOT EXISTS arena_coins (
   spawn_at INTEGER NOT NULL DEFAULT 0,
   claimed_by INTEGER DEFAULT NULL
 );
+
+CREATE TABLE IF NOT EXISTS quests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  creator_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  quest_type TEXT NOT NULL DEFAULT 'custom',
+  template_key TEXT DEFAULT '',
+  target_value REAL DEFAULT 0,
+  target_unit TEXT DEFAULT '',
+  ai_summary TEXT DEFAULT '',
+  duration_days INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'open',
+  acceptor_id INTEGER DEFAULT NULL,
+  start_date TEXT DEFAULT '',
+  end_date TEXT DEFAULT '',
+  accepted_at TEXT DEFAULT NULL,
+  betting_ends_at TEXT DEFAULT NULL,
+  submitted_at TEXT DEFAULT NULL,
+  resolved_at TEXT DEFAULT NULL,
+  resolved_by INTEGER DEFAULT NULL,
+  resolution_note TEXT DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS quest_sponsors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  payout_amount INTEGER DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(quest_id, user_id),
+  FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS quest_party (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  invite_status TEXT NOT NULL DEFAULT 'accepted',
+  proof_text TEXT DEFAULT '',
+  member_completed INTEGER NOT NULL DEFAULT 0,
+  payout_amount INTEGER DEFAULT NULL,
+  joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(quest_id, user_id),
+  FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS quest_bets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  side TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  payout_amount INTEGER DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(quest_id, user_id),
+  FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS quest_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quest_id INTEGER NOT NULL,
+  voter_id INTEGER NOT NULL,
+  vote TEXT NOT NULL,
+  comment TEXT DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(quest_id, voter_id),
+  FOREIGN KEY (quest_id) REFERENCES quests(id) ON DELETE CASCADE,
+  FOREIGN KEY (voter_id) REFERENCES users(id) ON DELETE CASCADE
+);

@@ -54,6 +54,11 @@ export async function POST(req: Request) {
       if (uRes.rows.length === 0) continue;
 
       const curPoints = Number(uRes.rows[0].points ?? 0);
+      // Prevent 0-GP free-rolling: players with < 5 GP can only spectate and cannot win GP
+      if (curPoints < 5 && requestedDelta > 0) {
+        updatedPlayers.push({ userId: uid, actualDelta: 0, points: curPoints });
+        continue;
+      }
       const nextPoints = Math.max(0, curPoints + requestedDelta);
       const actualDelta = nextPoints - curPoints;
 

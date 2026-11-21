@@ -324,21 +324,22 @@ export function evaluateTexasHoldem7(cards: PlayingCard[]): HoldemEval {
 }
 
 // ============================================================
-// 4. OLD MAID (อีแก่กินน้ำ) HELPERS
+// 4. OLD MAID (อีแก่กินน้ำ — สำรับเต็ม 52 ใบ สุ่มคว่ำ 1 ใบปริศนากลางโต๊ะ!)
 // ============================================================
-export const OLD_MAID_CARD_ID = '12S'; // Q♠ = อีแก่!
+export const OLD_MAID_CARD_ID = 'MYSTERY';
 
 /**
- * Create a 51-card deck by removing Q♣ so Q♠ (อีแก่) has no matching pair!
- * Actually in classic 51-card Old Maid, remove Q♣ (12C) and Q♦/Q♥ pair up, leaving Q♠ (12S) unpaired.
- * Better: remove ONLY Q♣ (12C) -> 3 Queens remain (12S, 12H, 12D). Pair 12H+12D -> 12S is always the single Old Maid!
+ * Full 52-card deck: draw 1 random secret card face-down in the center of the table,
+ * and deal the remaining 51 cards so nobody knows which rank is the Old Maid until the end!
  */
-export function createOldMaidDeck(): PlayingCard[] {
-  return createShuffledDeck('12C');
+export function createOldMaidDeck52(): { dealDeck: PlayingCard[]; hiddenCard: PlayingCard } {
+  const full52 = createShuffledDeck();
+  const hiddenCard = full52.pop()!;
+  return { dealDeck: full52, hiddenCard };
 }
 
 /**
- * Strip all rank pairs from a hand, keeping Q♠ (12S) unpairable if 3 Queens are present.
+ * Strip all matching rank pairs from a hand (works cleanly with the 52-card mystery-card rule).
  */
 export function discardOldMaidPairs(hand: PlayingCard[]): {
   remaining: PlayingCard[];
@@ -353,16 +354,11 @@ export function discardOldMaidPairs(hand: PlayingCard[]): {
   const remaining: PlayingCard[] = [];
   let discardedPairs = 0;
 
-  byRank.forEach((cards, rank) => {
-    // Keep 12S (Q♠) at the end so if 3 Queens are held, 12H & 12D pair up leaving 12S
-    const sorted =
-      rank === 12
-        ? [...cards].sort((a, b) => (a.id === OLD_MAID_CARD_ID ? 1 : b.id === OLD_MAID_CARD_ID ? -1 : 0))
-        : cards;
-    const pairs = Math.floor(sorted.length / 2);
+  byRank.forEach((cards) => {
+    const pairs = Math.floor(cards.length / 2);
     discardedPairs += pairs;
-    if (sorted.length % 2 === 1) {
-      remaining.push(sorted[sorted.length - 1]);
+    if (cards.length % 2 === 1) {
+      remaining.push(cards[cards.length - 1]);
     }
   });
 
