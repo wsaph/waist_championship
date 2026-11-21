@@ -68,6 +68,7 @@ import {
   type FishingCatch,
   type FishingRarity,
 } from '@/lib/fishing_catalog';
+import { GuardDanceLoader } from '@/components/GuardDanceLoader';
 
 const WardrobeShopModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.WardrobeShopModal),
@@ -241,6 +242,8 @@ const TRACK_END_X = 13;
 
 export default function Arena3DPage() {
   const [players, setPlayers] = useState<Player[]>([]);
+  const [playersLoadedOnce, setPlayersLoadedOnce] = useState<boolean>(false);
+  const [initialArenaReady, setInitialArenaReady] = useState<boolean>(false);
   const [roastFeed, setRoastFeed] = useState<FeedItem[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
   const [isMusicOn, setIsMusicOn] = useState(false);
@@ -747,10 +750,21 @@ export default function Arena3DPage() {
         }
       } catch (e) {
         console.error(e);
+      } finally {
+        setPlayersLoadedOnce(true);
       }
     },
     []
   );
+
+  // Safety fallback: never stay stuck on loading screen if network is extremely slow
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPlayersLoadedOnce(true);
+      setInitialArenaReady(true);
+    }, 5500);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     fetchArenaDataRef.current = fetchArenaData;
@@ -2029,7 +2043,12 @@ export default function Arena3DPage() {
   };
 
   useEffect(() => {
+    if (!playersLoadedOnce) return;
     if (!canvasRef.current || !labelsRef.current) return;
+
+    const readyTimer = setTimeout(() => {
+      setInitialArenaReady(true);
+    }, 800);
 
     const container = canvasRef.current;
     const labelsContainer = labelsRef.current;
@@ -4523,10 +4542,11 @@ export default function Arena3DPage() {
       window.removeEventListener('resize', handleResize);
       controls.dispose();
       disposeObject3D(scene);
+      clearTimeout(readyTimer);
       renderer.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneSignature, pairedActivities, currentUserId, qualityMode]);
+  }, [playersLoadedOnce, sceneSignature, pairedActivities, currentUserId, qualityMode]);
 
   const loadFeedbackItems = useCallback(async () => {
     setLoadingFeedback(true);
@@ -7987,6 +8007,8 @@ export default function Arena3DPage() {
           }}
         />
       )}
+
+      <GuardDanceLoader visible={!initialArenaReady} />
 
     </div>
   );
