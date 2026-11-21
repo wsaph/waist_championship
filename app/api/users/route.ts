@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { GOAL_TYPES, parsePropColors } from '@/lib/rpg_catalog';
+import { ensureUserSyncKey } from '@/lib/health_sync';
 
 const VALID_GOAL_TYPES = new Set<string>(GOAL_TYPES.map((g) => g.id));
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9A-Fa-f]{6}$/.test(v);
@@ -149,6 +150,7 @@ export async function POST(req: Request) {
     });
 
     const newUserId = Number(result.lastInsertRowid);
+    await ensureUserSyncKey(newUserId);
     const activeSeasonId = await getActiveSeasonId(Number(seasonId || 0));
 
     if (finalRole === 'competitor') {

@@ -85,6 +85,10 @@ const ShabuCoopModal = dynamic(
   () => import('@/components/ShabuCoopModal').then((m) => m.ShabuCoopModal),
   { ssr: false }
 );
+const PetCafeModal = dynamic(
+  () => import('@/components/PetCafeModal').then((m) => m.PetCafeModal),
+  { ssr: false }
+);
 const CasinoCardModal = dynamic(
   () => import('@/components/CasinoCardModal').then((m) => m.CasinoCardModal),
   { ssr: false }
@@ -115,6 +119,7 @@ interface Player {
   stepCount?: number;
   stepTarget?: number;
   stepProgressPct?: number;
+  todaySyncedSteps?: number;
   sideGoalProgressPct?: number;
   progressPct?: number;
   diffLabel?: string;
@@ -244,7 +249,24 @@ export default function Arena3DPage() {
   const [isLogOpen, setIsLogOpen] = useState(false);
   const [logTab, setLogTab] = useState<'steps' | 'side_goal'>('steps');
   const [stepInput, setStepInput] = useState('');
-  const [stepInputMode, setStepInputMode] = useState<'add' | 'set'>('add');
+  const [stepInputMode, setStepInputMode] = useState<'daily_sync' | 'add' | 'set'>('daily_sync');
+  const [stepSyncSource, setStepSyncSource] = useState<'web_daily_sync' | 'ocr_screenshot'>('web_daily_sync');
+  const [syncKey, setSyncKey] = useState('');
+  const [showSyncKey, setShowSyncKey] = useState(false);
+  const [loadingSyncStatus, setLoadingSyncStatus] = useState(false);
+  const [rotatingSyncKey, setRotatingSyncKey] = useState(false);
+  const [confirmRotateKey, setConfirmRotateKey] = useState(false);
+  const [copiedSyncField, setCopiedSyncField] = useState<'key' | 'url' | null>(null);
+  const [todaySyncedSteps, setTodaySyncedSteps] = useState(0);
+  const [showIosShortcutGuide, setShowIosShortcutGuide] = useState(false);
+  const [ocrScanning, setOcrScanning] = useState(false);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState('');
+  const [ocrResult, setOcrResult] = useState<{
+    steps: number;
+    appName: string;
+    dateHint: string;
+  } | null>(null);
+  const healthFileInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSeason, setActiveSeason] = useState<{
     id: number;
     name: string;
@@ -314,6 +336,8 @@ export default function Arena3DPage() {
   const [walkingSpectatorId, setWalkingSpectatorId] = useState<number | null>(null);
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isNearGuard, setIsNearGuard] = useState(false);
+  const [isNearCafe, setIsNearCafe] = useState(false);
+  const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
   const [isNearOcean, setIsNearOcean] = useState(false);
   const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
   const [fishingResult, setFishingResult] = useState<{
@@ -340,6 +364,7 @@ export default function Arena3DPage() {
   const walkingSpectatorIdRef = useRef<number | null>(null);
   const nearbySpectatorIdRef = useRef<number | null>(null);
   const isNearGuardRef = useRef<boolean>(false);
+  const isNearCafeRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
   const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
   const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
@@ -353,21 +378,10 @@ export default function Arena3DPage() {
   } | null>(null);
   const fishingBobberPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
   const fishingNibbleUntilRef = useRef<number>(0);
-  const fishingQuotaReachedRef = useRef<boolean>(false);
-  const guardFishingDistRef = useRef<number>(999);
-  const walkerPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  const guardFishFoodThrowRef = useRef<{
-    startedAt: number;
-    durationMs: number;
-    targetX: number;
-    targetZ: number;
-  } | null>(null);
   const fishingTimersRef = useRef<{
     nibbleTimer?: ReturnType<typeof setTimeout>;
     biteTimer?: ReturnType<typeof setTimeout>;
     missTimer?: ReturnType<typeof setTimeout>;
-    guardInterruptTimer?: ReturnType<typeof setTimeout>;
-    guardHitTimer?: ReturnType<typeof setTimeout>;
   }>({});
   const guardPrankFxRef = useRef<{
     prank: GuardPrank;
@@ -645,6 +659,7 @@ export default function Arena3DPage() {
             p.stepCount,
             p.stepTarget,
             p.stepProgressPct,
+            p.todaySyncedSteps,
             p.sideGoalProgressPct,
             p.progressPct,
             p.bmiBellyScale,
@@ -772,6 +787,7 @@ export default function Arena3DPage() {
         actorName: meta?.actorName ?? '',
         actorEmoji: meta?.actorEmoji ?? '✨',
         detail: meta?.detail ?? '',
+        dividends: meta?.dividends ?? [],
         ts: Date.now(),
       });
     },
@@ -862,14 +878,6 @@ export default function Arena3DPage() {
       clearTimeout(fishingTimersRef.current.missTimer);
       fishingTimersRef.current.missTimer = undefined;
     }
-    if (fishingTimersRef.current.guardInterruptTimer) {
-      clearTimeout(fishingTimersRef.current.guardInterruptTimer);
-      fishingTimersRef.current.guardInterruptTimer = undefined;
-    }
-    if (fishingTimersRef.current.guardHitTimer) {
-      clearTimeout(fishingTimersRef.current.guardHitTimer);
-      fishingTimersRef.current.guardHitTimer = undefined;
-    }
     fishingNibbleUntilRef.current = 0;
     fishingPhaseRef.current = 'idle';
     setFishingPhase('idle');
@@ -882,32 +890,6 @@ export default function Arena3DPage() {
     fishingPhaseRef.current = 'waiting';
     setFishingPhase('waiting');
     playFishingSfx('cast');
-
-    // ถ้าครบโควต้าวันนี้แล้ว และแอบมายืนตกปลาใกล้พี่ยาม → มีโอกาส 55% ที่พี่ยามจะเขวี้ยงหมูกรอบมาขัดจังหวะกลางคัน!
-    if (fishingQuotaReachedRef.current && guardFishingDistRef.current < 16 && Math.random() < 0.55) {
-      fishingTimersRef.current.guardInterruptTimer = setTimeout(() => {
-        if (fishingPhaseRef.current !== 'waiting' && fishingPhaseRef.current !== 'bite') return;
-        const wp = walkerPosRef.current;
-        guardFishFoodThrowRef.current = {
-          startedAt: performance.now(),
-          durationMs: 850,
-          targetX: wp.x,
-          targetZ: wp.z,
-        };
-        fishingTimersRef.current.guardHitTimer = setTimeout(() => {
-          if (fishingPhaseRef.current === 'idle') return;
-          cancelFishing();
-          playFishingSfx('miss');
-          setShakeScreen(true);
-          setTimeout(() => setShakeScreen(false), 420);
-          showToast(
-            '🥩',
-            'โดนพี่ยามเขวี้ยงหมูกรอบขัดจังหวะ!!',
-            '"อู้งานตกปลาเยอะไปแล้วนะ! กลับไปเดินเก็บก้าวเดี๋ยวนี้!!" — ลองหนีไปแอบตกอีกฝั่งสิ 😜'
-          );
-        }, 800);
-      }, 1150);
-    }
 
     // สไตล์ Harvest Moon: Back to Nature แท้ๆ — ถ้าสั่นแล้วไม่กดดึง เบ็ดจะยังแช่อยู่ในน้ำและรอปลามากินรอบใหม่ไปเรื่อยๆ!
     const scheduleNextBite = () => {
@@ -963,7 +945,7 @@ export default function Arena3DPage() {
     };
 
     scheduleNextBite();
-  }, [cancelFishing, playFishingSfx, showToast]);
+  }, [cancelFishing, playFishingSfx]);
 
   const reelInFish = useCallback(async () => {
     // กดดึงเร็วเกินไปก่อนขึ้น ! (สไตล์ Harvest Moon BTN)
@@ -1003,10 +985,6 @@ export default function Arena3DPage() {
         setPlayers((prev) =>
           prev.map((pl) => (pl.id === currentUserId ? { ...pl, points: data.points } : pl))
         );
-      }
-
-      if (data.quotaReached || Number(data.dailyRewardCount ?? 0) >= Number(data.dailyRewardLimit ?? 5)) {
-        fishingQuotaReachedRef.current = true;
       }
 
       // Trigger 3D water splash / rarity light pillar / Guard Sea Pop FX at bobber position
@@ -1125,6 +1103,8 @@ export default function Arena3DPage() {
       walkTargetRef.current = null;
       isNearOceanRef.current = false;
       setIsNearOcean(false);
+      isNearCafeRef.current = false;
+      setIsNearCafe(false);
       setFishingResult(null);
       cancelFishing();
     }
@@ -2490,6 +2470,110 @@ export default function Arena3DPage() {
     let currentGuardBadgeKey = 'idle';
     let lastGuardWarnAt = 0;
 
+    // 3D Pet Café Building (โซนอาหาร ใกล้จุดเริ่มต้น — เดินเข้าไปใกล้แล้วกดเข้าคาเฟ่เล่นกับน้องๆ ได้!)
+    const rawCafeX = -halfLen - 8.5;
+    const rawCafeZ = trackWidth / 2 + 5.2;
+    const cafePos = new THREE.Vector3(
+      Math.max(islandCenterX - islandW / 2 + 4.2, Math.min(islandCenterX + islandW / 2 - 4.2, rawCafeX)),
+      0.2,
+      Math.max(-(islandD / 2 - 4.2), Math.min(islandD / 2 - 4.2, rawCafeZ))
+    );
+    const petCafeGroup = new THREE.Group();
+    petCafeGroup.position.copy(cafePos);
+    petCafeGroup.rotation.y = Math.PI * 0.85; // หันหน้าร้านเข้าหาลานอาหารและจุดเริ่มต้น
+
+    // Wooden Deck
+    const cafeDeck = new THREE.Mesh(
+      new THREE.BoxGeometry(5.2, 0.22, 4.6),
+      new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.85 })
+    );
+    cafeDeck.position.y = 0.11;
+    cafeDeck.receiveShadow = true;
+    petCafeGroup.add(cafeDeck);
+
+    // Warm Cream Café Walls
+    const cafeBody = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 2.7, 3.3),
+      new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.7 })
+    );
+    cafeBody.position.set(0, 1.55, -0.35);
+    cafeBody.castShadow = true;
+    cafeBody.receiveShadow = true;
+    petCafeGroup.add(cafeBody);
+
+    // Pitched Cozy Brown Roof
+    const cafeRoof = new THREE.Mesh(
+      new THREE.ConeGeometry(3.45, 1.65, 4),
+      new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.65 })
+    );
+    cafeRoof.rotation.y = Math.PI / 4;
+    cafeRoof.position.set(0, 3.65, -0.35);
+    cafeRoof.castShadow = true;
+    petCafeGroup.add(cafeRoof);
+
+    // Cute Pink-and-White Striped Awning over front entrance
+    for (let i = 0; i < 6; i++) {
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.68, 0.12, 1.05),
+        new THREE.MeshStandardMaterial({
+          color: i % 2 === 0 ? 0xf472b6 : 0xffffff,
+          roughness: 0.5,
+        })
+      );
+      stripe.position.set(-1.7 + i * 0.68, 2.32, 1.65);
+      stripe.rotation.x = 0.28;
+      petCafeGroup.add(stripe);
+    }
+
+    // Warm Glowing Café Door & Window
+    const cafeDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(1.1, 1.85, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.6 })
+    );
+    cafeDoor.position.set(-0.9, 1.12, 1.32);
+    const cafeWindow = new THREE.Mesh(
+      new THREE.BoxGeometry(1.55, 1.15, 0.12),
+      new THREE.MeshStandardMaterial({
+        color: 0xfef08a,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.55,
+        roughness: 0.2,
+      })
+    );
+    cafeWindow.position.set(0.85, 1.45, 1.32);
+    petCafeGroup.add(cafeDoor, cafeWindow);
+
+    // Giant Glowing Paw Emblem on Roof
+    const pawSign = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 0.16, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0xfbcfe8,
+        emissive: 0xf472b6,
+        emissiveIntensity: 0.35,
+      })
+    );
+    pawSign.rotation.x = Math.PI / 2;
+    pawSign.position.set(0, 3.25, 1.2);
+    petCafeGroup.add(pawSign);
+
+    scene.add(petCafeGroup);
+
+    const cafeTagEl = document.createElement('div');
+    cafeTagEl.className = 'player-tag cursor-pointer';
+    cafeTagEl.onclick = () => {
+      cameraLookAtRef.current.set(cafePos.x, 1.9, cafePos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(cafePos.x + 2.2, 4.5, cafePos.z + 6.8);
+      if (isNearCafeRef.current) {
+        setIsPetCafeOpen(true);
+      }
+    };
+    cafeTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-pink-500 via-amber-400 to-rose-500 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        ☕🐾 Pet Café (เดินเข้ามาเล่นกับน้อง!)
+      </div>
+    `;
+    labelsContainer.appendChild(cafeTagEl);
+
     // 3D Fishing Rig (คันเบ็ด + สายเบ็ด + ทุ่นลอยน้ำ + วงคลื่น + เสาแสงตามระดับความแรร์!)
     const fishingRigGroup = new THREE.Group();
     fishingRigGroup.visible = false;
@@ -2611,14 +2695,6 @@ export default function Arena3DPage() {
     const seaGuardPopParts = buildCustomGuardCharacter('/images/guard_face_tex.jpg');
     seaGuardPopParts.rootGroup.visible = false;
     fishingFxGroup.add(seaGuardPopParts.rootGroup);
-
-    // จานหมูกรอบ 3D สำหรับพี่ยามเขวี้ยงขัดจังหวะตอนแอบตกปลาใกล้ป้อมยาม
-    const guardFoodThrowGroup = new THREE.Group();
-    guardFoodThrowGroup.visible = false;
-    const thrownFoodMesh = buildFoodPileMesh(0);
-    thrownFoodMesh.scale.setScalar(2.1);
-    guardFoodThrowGroup.add(thrownFoodMesh);
-    scene.add(guardFoodThrowGroup);
 
     scene.add(fishingRigGroup);
     scene.add(fishingFxGroup);
@@ -3497,13 +3573,18 @@ export default function Arena3DPage() {
           }
 
           const distToGuard = c.rootGroup.position.distanceTo(guardParts.rootGroup.position);
-          guardFishingDistRef.current = distToGuard;
-          walkerPosRef.current = { x: c.rootGroup.position.x, z: c.rootGroup.position.z };
           const nearGuardNow = distToGuard < 5.2;
           if (nearGuardNow !== isNearGuardRef.current) {
             isNearGuardRef.current = nearGuardNow;
             setIsNearGuard(nearGuardNow);
             if (!nearGuardNow) setGuardPrankMenu(null);
+          }
+
+          const distToCafe = c.rootGroup.position.distanceTo(cafePos);
+          const nearCafeNow = distToCafe < 5.8;
+          if (nearCafeNow !== isNearCafeRef.current) {
+            isNearCafeRef.current = nearCafeNow;
+            setIsNearCafe(nearCafeNow);
           }
 
           // ตรวจระยะใกล้ขอบทะเล (ริมเกาะ) เพื่อเปิดกิจกรรมตกปลา 🎣
@@ -3979,39 +4060,6 @@ export default function Arena3DPage() {
         seaGuardPopParts.rootGroup.visible = false;
       }
 
-      // พี่ยามเขวี้ยงหมูกรอบ 3D ขัดจังหวะตอนแอบตกปลาใกล้ป้อมยาม
-      const activeFoodThrow = guardFishFoodThrowRef.current;
-      if (activeFoodThrow) {
-        const ftP = (now - activeFoodThrow.startedAt) / activeFoodThrow.durationMs;
-        if (ftP >= 1) {
-          guardFishFoodThrowRef.current = null;
-          guardFoodThrowGroup.visible = false;
-        } else {
-          guardFoodThrowGroup.visible = true;
-          const sx = guardParts.rootGroup.position.x;
-          const sy = guardParts.rootGroup.position.y + 1.5;
-          const sz = guardParts.rootGroup.position.z;
-          const tx = activeFoodThrow.targetX;
-          const tz = activeFoodThrow.targetZ;
-          guardFoodThrowGroup.position.set(
-            sx + (tx - sx) * ftP,
-            sy + (1.2 - sy) * ftP + Math.sin(ftP * Math.PI) * 3.8,
-            sz + (tz - sz) * ftP
-          );
-          guardFoodThrowGroup.rotation.x = elapsed * 12;
-          guardFoodThrowGroup.rotation.y = elapsed * 10;
-          guardParts.rootGroup.rotation.y = Math.atan2(-(tz - sz), tx - sx);
-          if (guardBadgeEl) {
-            currentGuardBadgeKey = `fish-throw-${activeFoodThrow.startedAt}`;
-            guardBadgeEl.className =
-              'bg-rose-600 text-amber-200 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap animate-bounce';
-            guardBadgeEl.textContent = '🥩 อู้งานตกปลาอีกแล้วเหรอ!! กลับไปเดินเก็บก้าว!';
-          }
-        }
-      } else {
-        guardFoodThrowGroup.visible = false;
-      }
-
       const activePrank = guardPrankFxRef.current;
 
       if (activePrank && now - activePrank.startedAt < activePrank.durationMs) {
@@ -4270,6 +4318,16 @@ export default function Arena3DPage() {
         guardTagEl.style.opacity = '1';
       } else {
         guardTagEl.style.opacity = '0';
+      }
+
+      tempProjVec.set(cafePos.x, cafePos.y + 4.65, cafePos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        cafeTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        cafeTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        cafeTagEl.style.opacity = '1';
+      } else {
+        cafeTagEl.style.opacity = '0';
       }
 
       if (cameraTargetPosRef.current) {
@@ -4533,7 +4591,7 @@ export default function Arena3DPage() {
           showToast(
             '💬',
             `ขอบคุณที่แจ้ง Beta Feedback! (+${data.bonusEarned} 💰)`,
-            `รับโบนัส +${data.bonusEarned} Gacha Pong เข้ากระเป๋าเรียบร้อย!`
+            `รับโบนัส +${data.bonusEarned} Gacha เข้ากระเป๋าเรียบร้อย!`
           );
           await fetchArenaData({ force: true });
         } else {
@@ -4734,21 +4792,268 @@ export default function Arena3DPage() {
     }
   };
 
+  useEffect(() => {
+    setSyncKey('');
+    setShowSyncKey(false);
+    setTodaySyncedSteps(0);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!isLogOpen) {
+      setOcrResult(null);
+      setOcrPreviewUrl('');
+      setConfirmRotateKey(false);
+      setCopiedSyncField(null);
+      setShowSyncKey(false);
+      return;
+    }
+    const targetUid = currentUserId;
+    if (!targetUid || targetUid <= 0) return;
+
+    let cancelled = false;
+    setLoadingSyncStatus(true);
+    const qSeason = activeSeason?.id ? `&seasonId=${activeSeason.id}` : '';
+    fetch(`/api/health-sync?userId=${targetUid}&viewerId=${targetUid}${qSeason}`, {
+      cache: 'no-store',
+    })
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then((d) => {
+        if (cancelled || !d) return;
+        if (typeof d.syncKey === 'string') setSyncKey(d.syncKey);
+        if (typeof d.todaySyncedSteps === 'number') setTodaySyncedSteps(d.todaySyncedSteps);
+      })
+      .catch(() => {
+        // ignore transient error
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSyncStatus(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLogOpen, currentUserId, activeSeason?.id]);
+
+  const handleCopySyncText = async (text: string, field: 'key' | 'url') => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedSyncField(field);
+      setTimeout(() => {
+        setCopiedSyncField((cur) => (cur === field ? null : cur));
+      }, 2400);
+      showToast(
+        '📋',
+        field === 'url' ? 'คัดลอก URL พร้อมคีย์แล้ว!' : 'คัดลอก Sync Key แล้ว!',
+        field === 'url'
+          ? 'นำไปวางในช่อง URL ของแอปคำสั่งลัด (Shortcuts) บน iPhone ได้เลย'
+          : 'เก็บรหัสนี้ไว้เป็นส่วนตัวสำหรับซิงก์ก้าวเดินของคุณ'
+      );
+    } catch {
+      setModalError('คัดลอกอัตโนมัติไม่สำเร็จ กรุณากดดูรหัสแล้วคัดลอกด้วยตัวเอง');
+    }
+  };
+
+  const handleRotateSyncKey = async () => {
+    const activeUid = currentUserId || selectedPlayerId;
+    if (!activeUid) return;
+    if (!confirmRotateKey) {
+      setConfirmRotateKey(true);
+      setTimeout(() => setConfirmRotateKey(false), 4500);
+      return;
+    }
+    setRotatingSyncKey(true);
+    setModalError('');
+    try {
+      const res = await fetch('/api/health-sync', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: activeUid, isSelf: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setModalError(data.error || 'สุ่มเปลี่ยนรหัสไม่สำเร็จ');
+      } else {
+        setSyncKey(String(data.syncKey || ''));
+        setShowSyncKey(true);
+        setConfirmRotateKey(false);
+        showToast(
+          '🔄',
+          'สุ่มรหัส Sync Key ใหม่เรียบร้อย!',
+          'อย่าลืมอัปเดต URL หรือรหัสใหม่ในแอป Apple Shortcuts ของคุณด้วยนะครับ'
+        );
+      }
+    } catch {
+      setModalError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      setRotatingSyncKey(false);
+    }
+  };
+
+  const compressImageForOcr = async (
+    file: File
+  ): Promise<{ dataUrl: string; mimeType: string } | null> => {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('decode_failed'));
+        el.src = objectUrl;
+      });
+      const maxDim = 1440;
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+      if (!width || !height) return null;
+      if (width > maxDim || height > maxDim) {
+        const ratio = Math.min(maxDim / width, maxDim / height);
+        width = Math.max(1, Math.round(width * ratio));
+        height = Math.max(1, Math.round(height * ratio));
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      return { dataUrl, mimeType: 'image/jpeg' };
+    } catch {
+      return null;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  const handleHealthScreenshotChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const activeUid = currentUserId || selectedPlayerId;
+    setModalError('');
+    setOcrScanning(true);
+    setOcrResult(null);
+
+    try {
+      const compressed = await compressImageForOcr(file);
+      let res: Response;
+      if (compressed) {
+        setOcrPreviewUrl(compressed.dataUrl);
+        res = await fetch('/api/health-sync/ocr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: compressed.dataUrl,
+            mimeType: compressed.mimeType,
+            fileName: file.name,
+            userId: activeUid,
+            seasonId: activeSeason?.id,
+          }),
+        });
+      } else {
+        if (file.size > 4.2 * 1024 * 1024) {
+          setModalError(
+            'ไฟล์รูปภาพมีขนาดใหญ่เกินไปและเบราว์เซอร์ย่อรูปไม่ได้ กรุณาแคปหน้าจอเป็นไฟล์ JPG/PNG ขนาดไม่เกิน 4MB'
+          );
+          return;
+        }
+        const fd = new FormData();
+        fd.append('file', file);
+        if (activeUid) fd.append('userId', String(activeUid));
+        if (activeSeason?.id) fd.append('seasonId', String(activeSeason.id));
+        res = await fetch('/api/health-sync/ocr', {
+          method: 'POST',
+          body: fd,
+        });
+      }
+
+      const rawText = await res.text();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        if (res.status === 413) {
+          setModalError('ขนาดไฟล์รูปภาพใหญ่เกินเพดานเซิร์ฟเวอร์ กรุณาเลือกภาพแคปหน้าจอที่เล็กลง');
+          return;
+        }
+        if (res.status === 504) {
+          setModalError('ระบบ AI ใช้เวลาประมวลผลนานเกินกำหนด กรุณากดลองใหม่อีกครั้งหรือพิมพ์ก้าวเอง');
+          return;
+        }
+        setModalError('อ่านผลลัพธ์จากระบบ AI ไม่สำเร็จ กรุณาลองใหม่อีกครั้งหรือพิมพ์ตัวเลขก้าวเอง');
+        return;
+      }
+      if (!res.ok || !data?.success) {
+        setModalError(
+          (typeof data?.error === 'string' && data.error) ||
+            'อ่านตัวเลขก้าวจากรูปไม่สำเร็จ กรุณาลองรูปอื่นหรือพิมพ์ตัวเลขเอง'
+        );
+        return;
+      }
+
+      const detectedSteps = Number(data.steps || 0);
+      if (typeof data.todaySyncedSteps === 'number') {
+        setTodaySyncedSteps(data.todaySyncedSteps);
+      }
+      setStepInputMode('daily_sync');
+      setStepSyncSource('ocr_screenshot');
+      setStepInput(String(detectedSteps));
+      setOcrResult({
+        steps: detectedSteps,
+        appName: String(data.appName || ''),
+        dateHint: String(data.dateHint || ''),
+      });
+    } catch {
+      setModalError('เชื่อมต่อระบบ AI อ่านรูปภาพไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setOcrScanning(false);
+    }
+  };
+
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
-    setSubmitting(true);
 
     const activeUserId = currentUserId || selectedPlayerId;
     const isStepSubmission = logTab === 'steps';
+    const trimmedStepStr = stepInput.trim();
+    if (isStepSubmission && (!trimmedStepStr || !/^\d+$/.test(trimmedStepStr))) {
+      setModalError('กรุณากรอกจำนวนก้าวเดินเป็นตัวเลขจำนวนเต็ม');
+      return;
+    }
+
+    setSubmitting(true);
     try {
       const payload = isStepSubmission
         ? {
             userId: activeUserId,
             isSelf: true,
             logType: 'steps',
-            steps: Math.round(Number(stepInput)),
+            steps: trimmedStepStr,
             stepMode: stepInputMode,
+            syncSource:
+              stepInputMode === 'daily_sync'
+                ? stepSyncSource
+                : stepInputMode === 'set'
+                ? 'manual_set'
+                : 'manual_add',
             excuseTag: '',
           }
         : {
@@ -4777,6 +5082,23 @@ export default function Arena3DPage() {
           payout: number;
           jackpot?: boolean;
         }> = Array.isArray(data.dividends) ? data.dividends : [];
+
+        if (typeof data.todaySyncedSteps === 'number') {
+          setTodaySyncedSteps(data.todaySyncedSteps);
+        }
+
+        if (data.alreadySynced) {
+          showToast(
+            '✅',
+            'ยอดก้าววันนี้ซิงก์ครบแล้ว!',
+            data.roast || 'ยังไม่มีก้าวเดินเพิ่มขึ้นจากรอบที่ซิงก์ก่อนหน้าในวันนี้'
+          );
+          setIsLogOpen(false);
+          setStepInput('');
+          setPinInput('');
+          await fetchArenaData({ force: true });
+          return;
+        }
 
         if (data.earnedPoints > 0 || (isStepSubmission ? data.diff > 0 : data.diff < 0)) {
           confetti({ particleCount: 85, spread: 72, origin: { y: 0.6 } });
@@ -4853,7 +5175,7 @@ export default function Arena3DPage() {
   const handleSpinGacha = async (count: 1 | 8 = 1) => {
     const targetUid = editingPlayerId || currentUserId;
     if (!targetUid) {
-      throw new Error('กรุณาเข้าสู่ระบบก่อนหมุนกาชาปอง');
+      throw new Error('กรุณาเข้าสู่ระบบก่อนหมุนGacha');
     }
     const res = await fetch('/api/gacha', {
       method: 'POST',
@@ -4862,7 +5184,7 @@ export default function Arena3DPage() {
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'หมุนกาชาปองไม่สำเร็จ');
+      throw new Error(data.error || 'หมุนGachaไม่สำเร็จ');
     }
     const results: Array<{ item: ShopItem; isDuplicate: boolean; refundPoints: number }> =
       Array.isArray(data.results)
@@ -4875,8 +5197,8 @@ export default function Arena3DPage() {
       actorId: targetUid,
       detail:
         results.length > 1
-          ? `🌟 อัญเชิญกาชาปอง ×${results.length} ได้ ${data.wonItem?.icon || ''} ${data.wonItem?.name || ''} และอีก ${results.length - 1} ชิ้น!`
-          : `🎰 สุ่มกาชาปองได้ ${data.wonItem?.icon || ''} ${data.wonItem?.name || ''}!`,
+          ? `🌟 อัญเชิญGacha ×${results.length} ได้ ${data.wonItem?.icon || ''} ${data.wonItem?.name || ''} และอีก ${results.length - 1} ชิ้น!`
+          : `🎰 สุ่มGachaได้ ${data.wonItem?.icon || ''} ${data.wonItem?.name || ''}!`,
     });
     return results;
   };
@@ -5313,7 +5635,7 @@ export default function Arena3DPage() {
               )}
             </div>
             <p className="hidden xl:block text-[10.5px] font-semibold text-amber-100/80 mt-0.5">
-              ทุก +1% รับ +15 💰 Gacha Pong แลกเสื้อผ้า สัตว์ขี่ &amp; ป้ายจองลู่!
+              ทุก +1% รับ +15 💰 Gacha แลกเสื้อผ้า สัตว์ขี่ &amp; ป้ายจองลู่!
             </p>
           </div>
         </div>
@@ -5366,7 +5688,9 @@ export default function Arena3DPage() {
                         gMeta.isCumulative || curVal === undefined ? '' : String(curVal)
                       );
                       setStepInput('');
-                      setStepInputMode('add');
+                      setStepInputMode('daily_sync');
+                      setStepSyncSource('web_daily_sync');
+                      setTodaySyncedSteps(currentUser.todaySyncedSteps ?? 0);
                       setLogTab('steps');
                       setModalError('');
                       setIsLogOpen(true);
@@ -5381,15 +5705,15 @@ export default function Arena3DPage() {
                 <button
                   onClick={() => openWardrobeModal(currentUser, 'gacha')}
                   className="neo-btn bg-gradient-to-r from-fuchsia-600 via-amber-400 to-cyan-400 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1 cursor-pointer shadow-[0_3px_0_#000]"
-                  title="เปิดตู้สุ่มกาชาปองลุ้นชุด สัตว์ขี่ และออร่าลิมิเต็ด!"
+                  title="เปิดตู้สุ่มGachaลุ้นชุด สัตว์ขี่ และออร่าลิมิเต็ด!"
                 >
                   <span>🎰</span>
-                  <span className="hidden sm:inline">กาชาปอง</span>
+                  <span className="hidden sm:inline">Gacha</span>
                 </button>
                 <button
                   onClick={() => openWardrobeModal(currentUser, 'armor')}
                   className="neo-btn rpg-btn-blue font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  title="เปิดหน้าต่างแต่งตัว 3D & ร้านค้า Gacha Pong"
+                  title="เปิดหน้าต่างแต่งตัว 3D & ร้านค้า Gacha"
                 >
                   <span>{currentUser.emoji}</span>
                   <span>{currentUser.name}</span>
@@ -5817,7 +6141,7 @@ export default function Arena3DPage() {
                 </div>
 
                 <div className="bg-emerald-950/70 border border-emerald-400/60 rounded-xl px-3 py-2 text-[11px] font-bold text-emerald-200">
-                  🎁 ผู้เล่นที่ล็อกอินจะได้รับโบนัส <span className="text-amber-300">+5 💰 Gacha Pong</span> ทันทีเมื่อส่งฟีดแบ็ก (สูงสุดวันละ 1 ครั้ง)
+                  🎁 ผู้เล่นที่ล็อกอินจะได้รับโบนัส <span className="text-amber-300">+5 💰 Gacha</span> ทันทีเมื่อส่งฟีดแบ็ก (สูงสุดวันละ 1 ครั้ง)
                 </div>
 
                 {feedbackError && (
@@ -6006,51 +6330,299 @@ export default function Arena3DPage() {
                     )}
 
                     {logTab === 'steps' ? (
-                      <div className="space-y-2.5">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setStepInputMode('add')}
-                            className={`rounded-lg py-1.5 text-[11px] font-extrabold border-2 cursor-pointer transition ${
-                              stepInputMode === 'add'
-                                ? 'bg-emerald-400 text-black border-white'
-                                : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                            }`}
-                          >
-                            ➕ บวกก้าวเพิ่มวันนี้
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setStepInputMode('set')}
-                            className={`rounded-lg py-1.5 text-[11px] font-extrabold border-2 cursor-pointer transition ${
-                              stepInputMode === 'set'
-                                ? 'bg-sky-400 text-black border-white'
-                                : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                            }`}
-                          >
-                            📝 กรอกยอดก้าวรวมทั้งซีซั่น
-                          </button>
-                        </div>
+                      (() => {
+                        const effectiveSyncedToday = todaySyncedSteps;
+                        const parsedTypedSteps =
+                          stepInput.trim() !== '' && !Number.isNaN(Number(stepInput))
+                            ? Math.round(Number(stepInput))
+                            : null;
+                        const liveDelta =
+                          stepInputMode === 'daily_sync' && parsedTypedSteps !== null
+                            ? Math.max(0, parsedTypedSteps - effectiveSyncedToday)
+                            : null;
+                        const originUrl =
+                          typeof window !== 'undefined' ? window.location.origin : '';
+                        const shortcutEndpointUrl = syncKey
+                          ? `${originUrl}/api/health-sync?key=${syncKey}`
+                          : `${originUrl}/api/health-sync`;
+                        const maskedKey =
+                          syncKey.length > 10
+                            ? `${syncKey.slice(0, 6)}••••••••••••${syncKey.slice(-4)}`
+                            : 'กำลังสร้างรหัส...';
 
-                        <div>
-                          <label className="block text-xs font-bold text-amber-200 mb-1">
-                            {stepInputMode === 'add'
-                              ? 'จำนวนก้าวที่เดินเพิ่มในครั้งนี้ (+ก้าว)'
-                              : 'ยอดก้าวเดินสะสมรวมทั้งซีซั่น (ก้าว)'}
-                          </label>
-                          <input
-                            type="number"
-                            step="1"
-                            min={stepInputMode === 'add' ? '1' : '0'}
-                            max={stepInputMode === 'add' ? '500000' : '10000000'}
-                            required
-                            value={stepInput}
-                            onChange={(e) => setStepInput(e.target.value)}
-                            placeholder={stepInputMode === 'add' ? 'เช่น 8500' : 'เช่น 45000'}
-                            className="w-full bg-slate-900 text-emerald-300 placeholder:text-slate-500 border-2 border-emerald-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
-                          />
-                        </div>
-                      </div>
+                        return (
+                          <div className="space-y-2.5">
+                            {/* กล่องซิงก์ด่วนจากแอปสุขภาพ (Android / iOS) */}
+                            <div className="bg-slate-950/85 border-2 border-emerald-500/60 rounded-xl p-2.5 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-extrabold text-emerald-300">
+                                  📲 ซิงก์จากแอปสุขภาพ (กันก้าวเบิ้ลอัตโนมัติ)
+                                </span>
+                                <span className="text-[10px] font-bold text-amber-200/90 bg-slate-900 border border-amber-400/40 rounded-full px-2 py-0.5 shrink-0">
+                                  วันนี้ซิงก์แล้ว {effectiveSyncedToday.toLocaleString()} ก้าว
+                                </span>
+                              </div>
+
+                              <input
+                                ref={healthFileInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleHealthScreenshotChange}
+                                className="hidden"
+                              />
+
+                              {/* วิธีที่ 2: แนบรูปแคปหน้าจอ อ่านตัวเลขก้าวอัตโนมัติด้วย Gemini AI */}
+                              <button
+                                type="button"
+                                disabled={ocrScanning || submitting}
+                                onClick={() => healthFileInputRef.current?.click()}
+                                className="w-full bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 text-slate-950 border-2 border-black shadow-[0_3px_0_#000] active:translate-y-0.5 rounded-xl py-2 px-3 flex items-center justify-center gap-2 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer disabled:opacity-60"
+                              >
+                                <span className="text-base">{ocrScanning ? '🤖' : '📸'}</span>
+                                <span>
+                                  {ocrScanning
+                                    ? 'AI กำลังอ่านยอดก้าวจากรูปแคปหน้าจอ...'
+                                    : 'แนบรูปแคปหน้าจอแอปสุขภาพ (AI อ่านก้าวให้)'}
+                                </span>
+                              </button>
+                              <p className="text-[10px] text-amber-100/70 text-center leading-tight">
+                                ใช้ได้ทั้ง Android (Health Connect / Samsung / Google Fit / Zepp / Garmin) และ iOS
+                              </p>
+
+                              {ocrResult && (
+                                <div className="bg-emerald-950/70 border border-emerald-400/70 rounded-xl p-2 flex items-center gap-2.5">
+                                  {ocrPreviewUrl && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={ocrPreviewUrl}
+                                      alt="Health screenshot preview"
+                                      className="w-11 h-14 object-cover rounded-lg border border-emerald-300/60 shrink-0"
+                                    />
+                                  )}
+                                  <div className="min-w-0 flex-1 text-left">
+                                    <div className="text-xs font-extrabold text-emerald-300 truncate">
+                                      🤖 อ่านได้ {ocrResult.steps.toLocaleString()} ก้าว
+                                      {ocrResult.appName ? ` • ${ocrResult.appName}` : ''}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-amber-200 leading-snug">
+                                      {ocrResult.steps > effectiveSyncedToday
+                                        ? `บวกส่วนต่างเข้าสนาม +${(
+                                            ocrResult.steps - effectiveSyncedToday
+                                          ).toLocaleString()} ก้าว (จากเดิมวันนี้ ${effectiveSyncedToday.toLocaleString()})`
+                                        : `ซิงก์ยอดวันนี้ครบ ${effectiveSyncedToday.toLocaleString()} ก้าวแล้ว (ไม่มีส่วนต่างเพิ่ม)`}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* วิธีที่ 1: สำหรับ iOS / Apple Health ผ่าน Apple Shortcuts */}
+                              <div className="pt-1 border-t border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowIosShortcutGuide((v) => !v)}
+                                  className="w-full bg-slate-900 hover:bg-slate-800 border border-sky-400/50 rounded-lg py-1.5 px-2.5 flex items-center justify-between text-[11px] font-extrabold text-sky-300 cursor-pointer transition"
+                                >
+                                  <span>🍎 เชื่อม Apple Health อัตโนมัติ (iOS Shortcuts)</span>
+                                  <span>{showIosShortcutGuide ? '▲ ซ่อน' : '▼ ตั้งค่า / ดูรหัส'}</span>
+                                </button>
+
+                                {showIosShortcutGuide && (
+                                  <div className="mt-2 bg-slate-900/95 border border-sky-500/40 rounded-xl p-2.5 space-y-2.5 text-left">
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className="text-[11px] font-extrabold text-amber-300">
+                                          🔑 รหัส Sync Key เฉพาะตัวของคุณ
+                                        </span>
+                                        {loadingSyncStatus && (
+                                          <span className="text-[10px] text-sky-300">กำลังโหลด...</span>
+                                        )}
+                                      </div>
+
+                                      <div className="bg-black/70 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-emerald-300 break-all select-all">
+                                        {showSyncKey ? syncKey || '...' : maskedKey}
+                                      </div>
+
+                                      <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                                        <button
+                                          type="button"
+                                          disabled={!syncKey}
+                                          onClick={() => setShowSyncKey((v) => !v)}
+                                          className="bg-slate-800 hover:bg-slate-700 text-amber-100 border border-slate-600 rounded-lg py-1 text-[10.5px] font-bold cursor-pointer disabled:opacity-50"
+                                        >
+                                          {showSyncKey ? '🙈 ซ่อนรหัส' : '👁️ ดูรหัส'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={!syncKey}
+                                          onClick={() => handleCopySyncText(syncKey, 'key')}
+                                          className="bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/50 rounded-lg py-1 text-[10.5px] font-bold cursor-pointer disabled:opacity-50"
+                                        >
+                                          {copiedSyncField === 'key' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกคีย์'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={!syncKey || rotatingSyncKey}
+                                          onClick={handleRotateSyncKey}
+                                          className={`rounded-lg py-1 text-[10.5px] font-bold border cursor-pointer disabled:opacity-50 ${
+                                            confirmRotateKey
+                                              ? 'bg-rose-600 text-white border-amber-300'
+                                              : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                                          }`}
+                                        >
+                                          {rotatingSyncKey
+                                            ? 'กำลังสุ่ม...'
+                                            : confirmRotateKey
+                                            ? '⚠️ กดยืนยันสุ่ม'
+                                            : '🔄 สุ่มใหม่'}
+                                        </button>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        disabled={!syncKey}
+                                        onClick={() => handleCopySyncText(shortcutEndpointUrl, 'url')}
+                                        className="w-full mt-1.5 bg-sky-400 hover:bg-sky-300 text-slate-950 border-2 border-black rounded-lg py-1.5 px-2 text-[11px] font-extrabold cursor-pointer disabled:opacity-50"
+                                      >
+                                        {copiedSyncField === 'url'
+                                          ? '✅ คัดลอก URL พร้อมคีย์แล้ว! นำไปวางใน Shortcuts ได้เลย'
+                                          : '🔗 คัดลอก URL พร้อมคีย์ (วางใน Shortcuts ได้ทันที)'}
+                                      </button>
+                                    </div>
+
+                                    <div className="border-t border-slate-800 pt-2 space-y-1 text-[11px] text-amber-100/90 leading-relaxed">
+                                      <div className="font-extrabold text-sky-300">
+                                        📖 วิธีตั้งค่า Apple Shortcuts บน iPhone (ทำครั้งเดียวจบ):
+                                      </div>
+                                      <ol className="list-decimal list-inside space-y-1 text-[10.5px] text-amber-100/85">
+                                        <li>
+                                          เปิดแอป <b>คำสั่งลัด (Shortcuts)</b> กด <b>+</b> สร้างคำสั่งลัดใหม่
+                                        </li>
+                                        <li>
+                                          เพิ่มคำสั่ง <b>ค้นหาตัวอย่างข้อมูลสุขภาพ (Find Health Samples)</b> → เลือกประเภท{' '}
+                                          <b>จำนวนก้าว (Steps)</b> และวันที่เริ่ม <b>คือวันนี้ (is Today)</b>
+                                          <span className="text-amber-300/80">
+                                            {' '}
+                                            (หากใส่ Apple Watch คู่ iPhone แล้วก้าวเบิ้ล ให้กรอง Source เลือกเครื่องเดียว)
+                                          </span>
+                                        </li>
+                                        <li>
+                                          เพิ่มคำสั่ง <b>คำนวณสถิติ (Calculate Statistics)</b> → เลือก{' '}
+                                          <b>ผลรวม (Sum)</b> จากตัวอย่างข้อมูลสุขภาพ
+                                        </li>
+                                        <li>
+                                          เพิ่มคำสั่ง <b>รับเนื้อหาของ URL (Get Contents of URL)</b>:
+                                          <div className="pl-3 mt-0.5 text-sky-200/90 space-y-0.5">
+                                            <div>• ช่อง URL: กดวางลิงก์จากปุ่ม <b>คัดลอก URL พร้อมคีย์</b> ด้านบน</div>
+                                            <div>• วิธีการ (Method): <b>POST</b> • เนื้อหาคำขอ: <b>JSON</b></div>
+                                            <div>
+                                              • กดเพิ่มช่องข้อมูลใหม่ เลือกชนิด <b>ข้อความ (Text)</b> ตั้งชื่อว่า{' '}
+                                              <code className="bg-black px-1 rounded text-emerald-300">steps</code>{' '}
+                                              แล้วจิ้มเลือกตัวแปร <b>ผลรวม (Sum)</b> จากข้อ 3
+                                            </div>
+                                          </div>
+                                        </li>
+                                        <li>
+                                          <i>(แนะนำ)</i> เพิ่ม <b>แสดงการแจ้งเตือน (Show Notification)</b> เลือกค่า{' '}
+                                          <code className="bg-black px-1 rounded text-amber-300">message</code> จากผลลัพธ์ URL
+                                          แล้วกดแชร์เพิ่มลงหน้าจอโฮม หรือตั้ง Automation รันเองทุกเย็นได้เลย! (กดซ้ำกี่รอบในวันเดียวก็ไม่เบิ้ล)
+                                        </li>
+                                      </ol>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* โหมดการกรอกตัวเลขก้าว */}
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setStepInputMode('daily_sync')}
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
+                                  stepInputMode === 'daily_sync'
+                                    ? 'bg-amber-300 text-black border-white'
+                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                }`}
+                              >
+                                🔄 ยอดวันนี้ (กันเบิ้ล)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStepInputMode('add')}
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
+                                  stepInputMode === 'add'
+                                    ? 'bg-emerald-400 text-black border-white'
+                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                }`}
+                              >
+                                ➕ บวกเพิ่มเอง
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStepInputMode('set')}
+                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${
+                                  stepInputMode === 'set'
+                                    ? 'bg-sky-400 text-black border-white'
+                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                }`}
+                              >
+                                📝 รวมทั้งซีซั่น
+                              </button>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-amber-200 mb-1">
+                                {stepInputMode === 'daily_sync'
+                                  ? 'ยอดก้าวเดินรวมของวันนี้จากแอปสุขภาพ (ระบบหักส่วนที่ซิงก์ไปแล้วให้อัตโนมัติ)'
+                                  : stepInputMode === 'add'
+                                  ? 'จำนวนก้าวที่เดินเพิ่มในครั้งนี้ (+ก้าว)'
+                                  : 'ยอดก้าวเดินสะสมรวมทั้งซีซั่น (ก้าว)'}
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                required
+                                value={stepInput}
+                                onChange={(e) => {
+                                  const thaiDigits = '๐๑๒๓๔๕๖๗๘๙';
+                                  let val = e.target.value;
+                                  for (let i = 0; i < 10; i++) {
+                                    val = val.replaceAll(thaiDigits[i], String(i));
+                                  }
+                                  val = val.replace(/[^0-9]/g, '');
+                                  setStepInput(val);
+                                  setStepSyncSource(
+                                    ocrResult && val !== '' && Number(val) === ocrResult.steps
+                                      ? 'ocr_screenshot'
+                                      : 'web_daily_sync'
+                                  );
+                                }}
+                                placeholder={
+                                  stepInputMode === 'daily_sync'
+                                    ? 'เช่น 8500 (ยอดก้าวของวันนี้)'
+                                    : stepInputMode === 'add'
+                                    ? 'เช่น 3500'
+                                    : 'เช่น 45000'
+                                }
+                                className="w-full bg-slate-900 text-emerald-300 placeholder:text-slate-500 border-2 border-emerald-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
+                              />
+
+                              {stepInputMode === 'daily_sync' && parsedTypedSteps !== null && (
+                                <p
+                                  className={`mt-1 text-[11px] font-bold text-center ${
+                                    liveDelta && liveDelta > 0 ? 'text-emerald-300' : 'text-amber-200/80'
+                                  }`}
+                                >
+                                  {liveDelta && liveDelta > 0
+                                    ? `✨ จะบวกเข้าสนามเฉพาะส่วนต่าง +${liveDelta.toLocaleString()} ก้าว (ซิงก์วันนี้ไปแล้ว ${effectiveSyncedToday.toLocaleString()} ก้าว)`
+                                    : `ℹ️ ยอดนี้ซิงก์ไปแล้วในวันนี้ (${effectiveSyncedToday.toLocaleString()} ก้าว) ระบบจะไม่บวกก้าวซ้ำ`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()
                     ) : (
                       <div>
                         <label className="block text-xs font-bold text-amber-200 mb-1">
@@ -6079,13 +6651,22 @@ export default function Arena3DPage() {
 
                     <button
                       type="submit"
-                      disabled={submitting}
-                      className="w-full rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1"
+                      disabled={submitting || ocrScanning}
+                      className="w-full rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1 disabled:opacity-60"
                     >
                       {submitting
                         ? 'กำลังอัปเดต...'
+                        : ocrScanning
+                        ? 'กำลังอ่านรูปด้วย AI...'
                         : logTab === 'steps'
-                        ? '👟 บันทึกก้าวเดิน & วิ่งเข้าเส้นชัย!'
+                        ? stepInputMode === 'daily_sync' &&
+                          stepInput.trim() !== '' &&
+                          !Number.isNaN(Number(stepInput)) &&
+                          Math.round(Number(stepInput)) > todaySyncedSteps
+                          ? `👟 ซิงก์ก้าววันนี้ (+${(
+                              Math.round(Number(stepInput)) - todaySyncedSteps
+                            ).toLocaleString()} ก้าว) เข้าสนาม!`
+                          : '👟 บันทึกก้าวเดิน & วิ่งเข้าเส้นชัย!'
                         : '🚀 ส่งผลภารกิจรอง & รับโบนัส!'}
                     </button>
                   </form>
@@ -6504,7 +7085,7 @@ export default function Arena3DPage() {
                     ส่งของขวัญให้ {liveRecipient.emoji} {liveRecipient.name}
                   </h3>
                   <p className="text-[11px] text-amber-100/85 font-bold">
-                    💰 Gacha Pong ของคุณ: <span className="text-amber-300">{senderPoints.toLocaleString()} GP</span> • ของจะเข้าตู้เพื่อนทันที!
+                    💰 Gacha ของคุณ: <span className="text-amber-300">{senderPoints.toLocaleString()} GP</span> • ของจะเข้าตู้เพื่อนทันที!
                   </p>
                 </div>
               </div>
@@ -6710,7 +7291,9 @@ export default function Arena3DPage() {
                         gMeta.isCumulative || curVal === undefined ? '' : String(curVal)
                       );
                       setStepInput('');
-                      setStepInputMode('add');
+                      setStepInputMode('daily_sync');
+                      setStepSyncSource('web_daily_sync');
+                      setTodaySyncedSteps(currentUser.todaySyncedSteps ?? 0);
                       setLogTab('steps');
                       setModalError('');
                       setIsLogOpen(true);
@@ -6737,7 +7320,7 @@ export default function Arena3DPage() {
                   className="bg-gradient-to-r from-fuchsia-600 via-amber-400 to-cyan-400 text-black border-2 border-white rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow"
                 >
                   <span className="text-base leading-none">🎰</span>
-                  <span className="text-[10.5px] font-extrabold leading-none">กาชาปอง</span>
+                  <span className="text-[10.5px] font-extrabold leading-none">Gacha</span>
                 </button>
 
                 <button
@@ -6944,6 +7527,16 @@ export default function Arena3DPage() {
               className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
             >
               😈 แกล้งพี่ยาม!
+            </button>
+          )}
+
+          {isNearCafe && (
+            <button
+              type="button"
+              onClick={() => setIsPetCafeOpen(true)}
+              className="neo-btn bg-gradient-to-r from-pink-400 via-amber-300 to-rose-400 text-stone-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm px-4 py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] animate-bounce"
+            >
+              ☕🐾 เข้าคาเฟ่สัตว์เลี้ยง (Pet Café)!
             </button>
           )}
 
@@ -7305,6 +7898,15 @@ export default function Arena3DPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {isPetCafeOpen && (
+        <PetCafeModal
+          isOpen={isPetCafeOpen}
+          onClose={() => setIsPetCafeOpen(false)}
+          qualityMode={qualityMode}
+          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
+        />
       )}
 
       {shabuSession && (

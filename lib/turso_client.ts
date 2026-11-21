@@ -59,6 +59,7 @@ async function ensureSchema() {
           coin_pickups_count INTEGER NOT NULL DEFAULT 0,
           dividend_earned_date TEXT DEFAULT '',
           dividend_earned_today INTEGER NOT NULL DEFAULT 0,
+          sync_key TEXT DEFAULT '',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -92,6 +93,8 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN volleyball_wins_count INTEGER NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_earned_today INTEGER NOT NULL DEFAULT 0`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN sync_key TEXT DEFAULT ''`);
+      await safeAlter(`CREATE INDEX IF NOT EXISTS idx_users_sync_key ON users(sync_key)`);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS casino_bank (
@@ -151,6 +154,22 @@ async function ensureSchema() {
           total_steps INTEGER NOT NULL DEFAULT 0,
           note TEXT DEFAULT '',
           logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS daily_step_syncs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          season_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          sync_date TEXT NOT NULL,
+          max_synced_steps INTEGER NOT NULL DEFAULT 0,
+          sync_count INTEGER NOT NULL DEFAULT 0,
+          last_source TEXT DEFAULT '',
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(season_id, user_id, sync_date),
           FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
