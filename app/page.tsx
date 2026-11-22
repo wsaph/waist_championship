@@ -2070,6 +2070,8 @@ export default function Arena3DPage() {
     );
   }, [players]);
 
+  const autoFocusedUserIdRef = useRef<number | null>(null);
+
   const focusOnCharacter = useCallback((playerId: number) => {
     const charObj = charMeshesRef.current.find((c) => c.id === playerId);
     if (!charObj) return;
@@ -2077,6 +2079,20 @@ export default function Arena3DPage() {
     cameraLookAtRef.current.set(pos.x, 1.6, pos.z);
     cameraTargetPosRef.current = new THREE.Vector3(pos.x + 2.5, 5.2, pos.z + 7.5);
   }, []);
+
+  // Auto-focus camera onto the signed-in player's 3D character once on entry / character switch
+  useEffect(() => {
+    if (!currentUserId || currentUserId <= 0) {
+      autoFocusedUserIdRef.current = null;
+      return;
+    }
+    if (!initialArenaReady) return;
+    if (autoFocusedUserIdRef.current === currentUserId) return;
+    if (charMeshesRef.current.some((c) => c.id === currentUserId)) {
+      autoFocusedUserIdRef.current = currentUserId;
+      focusOnCharacter(currentUserId);
+    }
+  }, [initialArenaReady, currentUserId, players, focusOnCharacter]);
 
   const openRadialActivityMenu = useCallback((cx: number, cy: number) => {
     const pool = [...FIT_ACTIVITIES, ...EAT_ACTIVITIES];
@@ -3810,6 +3826,18 @@ export default function Arena3DPage() {
     });
 
     charMeshesRef.current = meshes;
+
+    // Immediately focus camera on the signed-in player once their 3D character mesh spawns
+    const curUid = currentUserIdRef.current;
+    if (curUid && curUid > 0 && autoFocusedUserIdRef.current !== curUid) {
+      const meMesh = meshes.find((m) => m.id === curUid);
+      if (meMesh) {
+        autoFocusedUserIdRef.current = curUid;
+        const pos = meMesh.rootGroup.position;
+        cameraLookAtRef.current.set(pos.x, 1.6, pos.z);
+        cameraTargetPosRef.current = new THREE.Vector3(pos.x + 2.5, 5.2, pos.z + 7.5);
+      }
+    }
 
     const plumbobMesh = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.28, 0),

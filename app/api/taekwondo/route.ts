@@ -58,6 +58,7 @@ export async function GET(req: Request) {
         bestScore: Number(r.best_score ?? 0),
         beltName: belt.name,
         beltHex: belt.beltHex,
+        secondaryHex: belt.secondaryHex ?? null,
       };
     });
 

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   getBeltCommandLoadout,
+  getBeltSwatchStyle,
   getMoveById,
   getUnlockedTaekwondoMoves,
   resolveTaekwondoBelt,
@@ -71,6 +72,7 @@ interface LeaderboardEntry {
   bestScore: number;
   beltName: string;
   beltHex: string;
+  secondaryHex?: string | null;
 }
 
 const ROUND_SECONDS = 30;
@@ -106,115 +108,115 @@ function TekkenTaekwondoFighter({
     pose === 'axe_kick'
       ? -18
       : pose === 'back_kick'
-      ? 24
-      : pose === 'high_kick'
-      ? -28
-      : pose === 'side_kick'
-      ? -36
-      : pose === 'front_kick'
-      ? -16
-      : pose === 'flying_spin'
-      ? -22
-      : pose === 'hurricane_540'
-      ? -34
-      : pose === 'sky_dragon'
-      ? -42
-      : pose === 'hurt'
-      ? -32
-      : 4;
+        ? 24
+        : pose === 'high_kick'
+          ? -28
+          : pose === 'side_kick'
+            ? -36
+            : pose === 'front_kick'
+              ? -16
+              : pose === 'flying_spin'
+                ? -22
+                : pose === 'hurricane_540'
+                  ? -34
+                  : pose === 'sky_dragon'
+                    ? -42
+                    : pose === 'hurt'
+                      ? -32
+                      : 4;
 
   const kickLegAngle =
     pose === 'axe_kick'
       ? -158
       : pose === 'back_kick'
-      ? -102
-      : pose === 'high_kick'
-      ? -134
-      : pose === 'side_kick'
-      ? -92
-      : pose === 'front_kick'
-      ? -76
-      : pose === 'flying_spin'
-      ? -116
-      : pose === 'hurricane_540'
-      ? -138
-      : pose === 'sky_dragon'
-      ? -148
-      : pose === 'hurt'
-      ? -18
-      : 14;
+        ? -102
+        : pose === 'high_kick'
+          ? -134
+          : pose === 'side_kick'
+            ? -92
+            : pose === 'front_kick'
+              ? -76
+              : pose === 'flying_spin'
+                ? -116
+                : pose === 'hurricane_540'
+                  ? -138
+                  : pose === 'sky_dragon'
+                    ? -148
+                    : pose === 'hurt'
+                      ? -18
+                      : 14;
 
   const supportLegAngle =
     pose === 'sky_dragon'
       ? 54
       : pose === 'hurricane_540'
-      ? 48
-      : pose === 'flying_spin'
-      ? 36
-      : pose === 'axe_kick'
-      ? 4
-      : pose === 'back_kick'
-      ? -18
-      : pose === 'high_kick'
-      ? 12
-      : pose === 'side_kick'
-      ? 16
-      : pose === 'front_kick'
-      ? 8
-      : pose === 'hurt'
-      ? 24
-      : -14;
+        ? 48
+        : pose === 'flying_spin'
+          ? 36
+          : pose === 'axe_kick'
+            ? 4
+            : pose === 'back_kick'
+              ? -18
+              : pose === 'high_kick'
+                ? 12
+                : pose === 'side_kick'
+                  ? 16
+                  : pose === 'front_kick'
+                    ? 8
+                    : pose === 'hurt'
+                      ? 24
+                      : -14;
 
   const frontArmAngle =
     pose === 'sky_dragon'
       ? -115
       : pose === 'hurricane_540'
-      ? -98
-      : pose === 'flying_spin'
-      ? -84
-      : pose === 'axe_kick'
-      ? 48
-      : pose === 'back_kick'
-      ? -70
-      : pose === 'high_kick'
-      ? -44
-      : pose === 'side_kick'
-      ? -62
-      : pose === 'front_kick'
-      ? -38
-      : pose === 'hurt'
-      ? -130
-      : -34;
+        ? -98
+        : pose === 'flying_spin'
+          ? -84
+          : pose === 'axe_kick'
+            ? 48
+            : pose === 'back_kick'
+              ? -70
+              : pose === 'high_kick'
+                ? -44
+                : pose === 'side_kick'
+                  ? -62
+                  : pose === 'front_kick'
+                    ? -38
+                    : pose === 'hurt'
+                      ? -130
+                      : -34;
 
   const backArmAngle =
     pose === 'sky_dragon'
       ? 110
       : pose === 'hurricane_540'
-      ? 96
-      : pose === 'flying_spin'
-      ? 88
-      : pose === 'axe_kick'
-      ? 68
-      : pose === 'back_kick'
-      ? 80
-      : pose === 'high_kick'
-      ? 56
-      : pose === 'side_kick'
-      ? 70
-      : pose === 'front_kick'
-      ? 44
-      : pose === 'hurt'
-      ? 100
-      : 32;
+        ? 96
+        : pose === 'flying_spin'
+          ? 88
+          : pose === 'axe_kick'
+            ? 68
+            : pose === 'back_kick'
+              ? 80
+              : pose === 'high_kick'
+                ? 56
+                : pose === 'side_kick'
+                  ? 70
+                  : pose === 'front_kick'
+                    ? 44
+                    : pose === 'hurt'
+                      ? 100
+                      : 32;
 
   const bodyLiftY =
     pose === 'sky_dragon'
       ? -22
       : pose === 'hurricane_540'
-      ? -16
-      : pose === 'flying_spin'
-      ? -10
-      : 0;
+        ? -16
+        : pose === 'flying_spin'
+          ? -10
+          : 0;
 
   return (
     <div
@@ -302,10 +304,10 @@ function TekkenTaekwondoFighter({
                     pose === 'high_kick'
                       ? 'M 72 108 Q 134 80 128 22'
                       : pose === 'flying_spin'
-                      ? 'M 56 112 Q 142 74 134 18'
-                      : pose === 'back_kick'
-                      ? 'M 42 102 Q 108 106 138 66'
-                      : 'M 70 106 Q 124 96 140 66'
+                        ? 'M 56 112 Q 142 74 134 18'
+                        : pose === 'back_kick'
+                          ? 'M 42 102 Q 108 106 138 66'
+                          : 'M 70 106 Q 124 96 140 66'
                   }
                   fill="none"
                   stroke={activeTrail}
@@ -318,8 +320,8 @@ function TekkenTaekwondoFighter({
                     pose === 'high_kick'
                       ? 'M 78 100 Q 124 76 120 28'
                       : pose === 'flying_spin'
-                      ? 'M 64 104 Q 132 72 124 26'
-                      : 'M 76 100 Q 118 92 132 68'
+                        ? 'M 64 104 Q 132 72 124 26'
+                        : 'M 76 100 Q 118 92 132 68'
                   }
                   fill="none"
                   stroke="#ffffff"
@@ -411,7 +413,7 @@ function TekkenTaekwondoFighter({
             strokeLinejoin="round"
           />
 
-          {/* Belt Waistband + Dynamic Flowing Tails */}
+          {/* Belt Waistband + Dynamic Flowing Tails (supports 2-color / half belts!) */}
           <rect
             x="-23"
             y="-4"
@@ -422,6 +424,16 @@ function TekkenTaekwondoFighter({
             stroke="#0f172a"
             strokeWidth="2"
           />
+          {belt.secondaryHex && (
+            <rect
+              x="-22"
+              y="1"
+              width="44"
+              height="4.5"
+              rx="1.5"
+              fill={belt.secondaryHex}
+            />
+          )}
           {belt.stripeHex && <rect x="8" y="-4" width="6" height="10" fill={belt.stripeHex} />}
           <path
             d={isKicking ? 'M -4 4 L -28 22 L -19 27 L 2 8 Z' : 'M -4 4 L -14 27 L -6 29 L 3 8 Z'}
@@ -431,11 +443,14 @@ function TekkenTaekwondoFighter({
           />
           <path
             d={isKicking ? 'M 4 4 L -18 28 L -9 31 L 8 8 Z' : 'M 4 4 L 13 27 L 20 23 L 9 8 Z'}
-            fill={belt.beltHex}
+            fill={belt.secondaryHex || belt.beltHex}
             stroke="#0f172a"
             strokeWidth="1.6"
           />
           <circle cx="0" cy="1" r="5" fill={belt.beltHex} stroke="#0f172a" strokeWidth="1.8" />
+          {belt.secondaryHex && (
+            <path d="M -4.2 1 A 4.2 4.2 0 0 0 4.2 1 Z" fill={belt.secondaryHex} />
+          )}
 
           {/* Front Guard Arm */}
           <g
@@ -446,7 +461,7 @@ function TekkenTaekwondoFighter({
             <circle cx="0" cy="29" r="7.2" fill="#fde68a" stroke="#92400e" strokeWidth="2" />
           </g>
 
-          {/* Fighter Head with Player Emoji + Belt-Colored Headband */}
+          {/* Fighter Head with Player Emoji + Belt-Colored Headband (supports 2-color!) */}
           <g transform="translate(0, -56)">
             <circle cx="0" cy="0" r="20" fill="#fef3c7" stroke="#78350f" strokeWidth="2.4" />
             <path
@@ -455,9 +470,15 @@ function TekkenTaekwondoFighter({
               stroke="#0f172a"
               strokeWidth="1.6"
             />
+            {belt.secondaryHex && (
+              <path
+                d="M -18 -4 Q 0 -9.5 18 -4 L 18 -1 Q 0 -6.5 -18 -1 Z"
+                fill={belt.secondaryHex}
+              />
+            )}
             <path
               d={isKicking ? 'M -18 -6 L -38 -15 L -33 -5 Z' : 'M -18 -5 L -30 -2 L -28 5 Z'}
-              fill={belt.beltHex}
+              fill={belt.secondaryHex || belt.beltHex}
               stroke="#0f172a"
               strokeWidth="1.4"
             />
@@ -592,7 +613,7 @@ export function TaekwondoModal({
           tone(784, 784, 0.2, 0.1, 'triangle', 0.16);
           tone(1046, 1175, 0.3, 0.28, 'triangle', 0.2);
         }
-        setTimeout(() => ctx.close().catch(() => {}), 750);
+        setTimeout(() => ctx.close().catch(() => { }), 750);
       } catch {
         // ignore
       }
@@ -811,18 +832,22 @@ export function TaekwondoModal({
       if (target.kind === 'golden' && loadout.ultimate) {
         return loadout.ultimate;
       }
-      if (target.kind === 'board' && belt.tier >= 2) {
+      const unlockedIds = new Set(unlockedMoves.map((m) => m.id));
+      if (target.kind === 'board' && unlockedIds.has('piercing_side_kick')) {
+        return getMoveById('piercing_side_kick');
+      }
+      if (target.kind === 'board' && unlockedIds.has('axe_kick')) {
         return getMoveById('axe_kick');
       }
-      if (nextCombo >= 5 && belt.tier >= 3) {
+      if (nextCombo >= 5 && unlockedIds.has('back_kick')) {
         return getMoveById('back_kick');
       }
-      if (target.yPct < 42 && belt.tier >= 1) {
+      if (target.yPct < 42 && unlockedIds.has('high_roundhouse')) {
         return getMoveById('high_roundhouse');
       }
       return loadout.mid && target.yPct < 52 ? loadout.mid : loadout.basic;
     },
-    [belt.tier, loadout.basic, loadout.mid, loadout.ultimate]
+    [loadout.basic, loadout.mid, loadout.ultimate, unlockedMoves]
   );
 
   const executeMoveOnTargets = useCallback(
@@ -910,13 +935,13 @@ export function TaekwondoModal({
           move.slot === 'ultimate'
             ? `${move.emoji} +${gained}`
             : isPerfect
-            ? `⚡ PERFECT! +${gained}`
-            : `💥 +${gained}`,
+              ? `⚡ PERFECT! +${gained}`
+              : `💥 +${gained}`,
           move.slot === 'ultimate'
             ? 'text-yellow-300'
             : isPerfect
-            ? 'text-amber-300'
-            : 'text-sky-300',
+              ? 'text-amber-300'
+              : 'text-sky-300',
           hitTargets.length > 1 ? `MULTI-HIT x${hitTargets.length}!` : undefined
         );
       }
@@ -1023,9 +1048,8 @@ export function TaekwondoModal({
   return (
     <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 select-none">
       <div
-        className={`relative w-full max-w-3xl max-h-[95dvh] flex flex-col rounded-2xl border-2 border-red-500/90 bg-gradient-to-b from-zinc-950 via-slate-950 to-black shadow-[0_0_50px_rgba(220,38,38,0.45)] overflow-hidden transition-transform duration-75 ${
-          arenaShake ? 'translate-x-1.5 -translate-y-1' : ''
-        }`}
+        className={`relative w-full max-w-3xl max-h-[95dvh] flex flex-col rounded-2xl border-2 border-red-500/90 bg-gradient-to-b from-zinc-950 via-slate-950 to-black shadow-[0_0_50px_rgba(220,38,38,0.45)] overflow-hidden transition-transform duration-75 ${arenaShake ? 'translate-x-1.5 -translate-y-1' : ''
+          }`}
       >
         {/* Top Tekken Arcade Title Strip */}
         <div className="px-4 py-2.5 bg-gradient-to-r from-red-950 via-zinc-900 to-blue-950 border-b-2 border-amber-400/80 flex items-center justify-between gap-2">
@@ -1061,7 +1085,10 @@ export function TaekwondoModal({
           <div className="flex items-center justify-between text-[10.5px] font-extrabold gap-2">
             <span className="text-amber-200 truncate">
               {nextBelt
-                ? `สายถัดไป: ${nextBelt.name} (${nextBelt.minXp.toLocaleString()} XP) • ปลดล็อกท่า ${getMoveById(nextBelt.unlockMoveId).emoji} ${getMoveById(nextBelt.unlockMoveId).thName} +${nextBelt.promotionCoins}💰`
+                ? `สายถัดไป: ${nextBelt.name} (${nextBelt.minXp.toLocaleString()} XP)${nextBelt.unlockMoveId
+                  ? ` • ปลดล็อกท่า ${getMoveById(nextBelt.unlockMoveId).emoji} ${getMoveById(nextBelt.unlockMoveId).thName}`
+                  : ''
+                } +${nextBelt.promotionCoins}💰`
                 : '👑 GRANDMASTER BLACK BELT — ปลดล็อกครบทุกท่าไม้ตายแล้ว!'}
             </span>
             <span className="text-yellow-300 shrink-0">{progressPct}%</span>
@@ -1137,52 +1164,52 @@ export function TaekwondoModal({
                 </div>
               </div>
 
-              {/* Command List / Unlockable Moves by Belt */}
+              {/* Command List / Unlockable Moves by Belt (including 2-color belts & Brown belt!) */}
               <div className="rounded-xl bg-zinc-950/90 border border-zinc-800 p-3">
                 <div className="text-xs font-black italic uppercase tracking-wide text-amber-300 mb-2">
-                  🥋 COMMAND LIST • ลำดับสาย & ท่าเตะที่ปลดล็อก (จิ้มท่าที่ปลดล็อกเพื่อลองดูท่า!)
+                  🥋 BELT & COMMAND LIST • ลำดับ 14 สาย (ครบสาย 2 สี + สายน้ำตาล! จิ้มสายที่มีท่าเพื่อลองเตะ)
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[210px] overflow-y-auto pr-1">
                   {TAEKWONDO_BELTS.map((b) => {
-                    const move = getMoveById(b.unlockMoveId);
+                    const move = b.unlockMoveId ? getMoveById(b.unlockMoveId) : null;
                     const unlocked = totalXp >= b.minXp;
                     const isCur = b.tier === belt.tier;
                     return (
                       <button
                         key={b.id}
                         type="button"
-                        disabled={!unlocked}
+                        disabled={!unlocked || !move}
                         onClick={() => {
-                          if (!unlocked) return;
+                          if (!unlocked || !move) return;
                           setLobbyPreviewMove(move);
                           playKickSfx(move.slot === 'ultimate' ? 'ultimate' : 'perfect');
                           setTimeout(() => setLobbyPreviewMove(null), 420);
                         }}
-                        className={`text-left rounded-lg px-2.5 py-2 border text-[11px] flex items-center gap-2.5 transition ${
-                          isCur
-                            ? 'bg-red-950/60 border-yellow-400 ring-1 ring-yellow-400 cursor-pointer'
+                        className={`text-left rounded-lg px-2.5 py-1.5 border text-[11px] flex items-center gap-2.5 transition ${isCur
+                            ? 'bg-red-950/60 border-yellow-400 ring-1 ring-yellow-400'
                             : unlocked
-                            ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60 cursor-pointer'
-                            : 'bg-zinc-900/60 border-zinc-800 opacity-55 cursor-not-allowed'
-                        }`}
+                              ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60'
+                              : 'bg-zinc-900/60 border-zinc-800 opacity-55'
+                          } ${unlocked && move ? 'cursor-pointer' : 'cursor-default'}`}
                       >
                         <span
-                          className="w-5 h-5 rounded-sm border border-white/80 shrink-0 flex items-center justify-center text-[11px]"
-                          style={{ backgroundColor: b.beltHex }}
+                          className="w-5 h-5 rounded-sm border border-white/80 shrink-0 flex items-center justify-center text-[10px]"
+                          style={getBeltSwatchStyle(b.beltHex, b.secondaryHex)}
                         >
                           {unlocked ? '' : '🔒'}
                         </span>
                         <div className="min-w-0 flex-1 leading-tight">
                           <div className="flex items-center justify-between gap-1">
                             <span className="font-extrabold text-white truncate">
-                              {b.name} • {move.emoji} {move.thName}
+                              {b.name}
+                              {move ? ` • ${move.emoji} ${move.thName}` : ''}
                             </span>
                             <span className="text-[9.5px] text-amber-300 shrink-0 font-bold">
                               {b.minXp} XP
                             </span>
                           </div>
                           <div className="text-[10px] text-zinc-300/85 truncate mt-0.5">
-                            {move.bonusDesc}
+                            {move ? move.bonusDesc : 'สายขั้นเตรียมเลื่อนระดับ (สาย 2 สี)'}
                             {b.promotionCoins > 0 ? ` • +${b.promotionCoins}💰` : ''}
                           </div>
                         </div>
@@ -1209,8 +1236,8 @@ export function TaekwondoModal({
                           <span>{entry.emoji}</span>
                           <span className="font-bold text-white truncate">{entry.name}</span>
                           <span
-                            className="w-3 h-3 rounded-sm border border-white/70 shrink-0"
-                            style={{ backgroundColor: entry.beltHex }}
+                            className="w-3.5 h-3.5 rounded-sm border border-white/70 shrink-0"
+                            style={getBeltSwatchStyle(entry.beltHex, entry.secondaryHex)}
                             title={entry.beltName}
                           />
                         </div>
@@ -1248,11 +1275,10 @@ export function TaekwondoModal({
                   </div>
                   <div className="h-4 sm:h-5 w-full bg-zinc-900 border-2 border-zinc-300/80 -skew-x-12 overflow-hidden p-0.5 shadow-inner">
                     <div
-                      className={`h-full transition-all duration-300 ${
-                        hearts === 1
+                      className={`h-full transition-all duration-300 ${hearts === 1
                           ? 'bg-gradient-to-r from-red-600 to-rose-400 animate-pulse'
                           : 'bg-gradient-to-r from-red-500 via-amber-400 to-yellow-300'
-                      }`}
+                        }`}
                       style={{ width: `${hpPct}%` }}
                     />
                   </div>
@@ -1261,9 +1287,8 @@ export function TaekwondoModal({
                 <div className="flex flex-col items-center justify-center px-2.5 py-1 rounded-lg bg-gradient-to-b from-zinc-800 to-black border-2 border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.4)] min-w-[58px]">
                   <span className="text-[8px] font-black tracking-widest text-amber-300 uppercase">TIME</span>
                   <span
-                    className={`font-[family-name:var(--font-kanit)] font-black italic text-xl sm:text-2xl leading-none ${
-                      timeLeft <= 7 ? 'text-red-500 animate-pulse' : 'text-yellow-300'
-                    }`}
+                    className={`font-[family-name:var(--font-kanit)] font-black italic text-xl sm:text-2xl leading-none ${timeLeft <= 7 ? 'text-red-500 animate-pulse' : 'text-yellow-300'
+                      }`}
                   >
                     {timeLeft}
                   </span>
@@ -1278,11 +1303,10 @@ export function TaekwondoModal({
                   </div>
                   <div className="h-4 sm:h-5 w-full bg-zinc-900 border-2 border-zinc-300/80 skew-x-12 overflow-hidden p-0.5 shadow-inner">
                     <div
-                      className={`h-full ml-auto transition-all duration-200 ${
-                        isRageMode
+                      className={`h-full ml-auto transition-all duration-200 ${isRageMode
                           ? 'bg-gradient-to-l from-red-600 via-orange-500 to-yellow-300 animate-pulse'
                           : 'bg-gradient-to-l from-blue-600 via-sky-400 to-cyan-300'
-                      }`}
+                        }`}
                       style={{ width: `${Math.max(8, ragePct)}%` }}
                     />
                   </div>
@@ -1291,11 +1315,10 @@ export function TaekwondoModal({
 
               {/* Tekken 3D-Perspective Dojang Stage */}
               <div
-                className={`relative w-full h-[330px] sm:h-[370px] rounded-xl border-2 border-amber-500/80 overflow-hidden shadow-2xl ${
-                  isRageMode
+                className={`relative w-full h-[330px] sm:h-[370px] rounded-xl border-2 border-amber-500/80 overflow-hidden shadow-2xl ${isRageMode
                     ? 'ring-2 ring-red-500 shadow-[0_0_30px_rgba(239,68,68,0.5)]'
                     : ''
-                }`}
+                  }`}
                 style={{
                   background:
                     'linear-gradient(180deg, #1a0b0e 0%, #3b1319 32%, #7c2d12 56%, #1e293b 57%, #0f172a 100%)',
@@ -1363,30 +1386,28 @@ export function TaekwondoModal({
                       {t.kind !== 'decoy' && (
                         <span
                           style={{ transform: `scale(${ringScale})` }}
-                          className={`absolute inset-0 rounded-full border-3 pointer-events-none ${
-                            isSweetSpot ? 'border-yellow-300 shadow-[0_0_12px_#facc15]' : 'border-white/55'
-                          }`}
+                          className={`absolute inset-0 rounded-full border-3 pointer-events-none ${isSweetSpot ? 'border-yellow-300 shadow-[0_0_12px_#facc15]' : 'border-white/55'
+                            }`}
                         />
                       )}
                       <span
-                        className={`relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-3 shadow-xl flex flex-col items-center justify-center font-extrabold ${
-                          t.kind === 'golden'
+                        className={`relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-3 shadow-xl flex flex-col items-center justify-center font-extrabold ${t.kind === 'golden'
                             ? 'bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-white text-black animate-pulse'
                             : t.kind === 'board'
-                            ? 'bg-gradient-to-br from-amber-600 to-amber-900 border-amber-200 text-amber-100'
-                            : t.kind === 'decoy'
-                            ? 'bg-gradient-to-br from-zinc-900 to-rose-950 border-rose-500 text-rose-200'
-                            : 'bg-gradient-to-br from-red-600 to-rose-800 border-white text-white'
-                        }`}
+                              ? 'bg-gradient-to-br from-amber-600 to-amber-900 border-amber-200 text-amber-100'
+                              : t.kind === 'decoy'
+                                ? 'bg-gradient-to-br from-zinc-900 to-rose-950 border-rose-500 text-rose-200'
+                                : 'bg-gradient-to-br from-red-600 to-rose-800 border-white text-white'
+                          }`}
                       >
                         <span className="text-2xl leading-none">
                           {t.kind === 'golden'
                             ? '⚡'
                             : t.kind === 'board'
-                            ? '🪵'
-                            : t.kind === 'decoy'
-                            ? '💣'
-                            : '🥋'}
+                              ? '🪵'
+                              : t.kind === 'decoy'
+                                ? '💣'
+                                : '🥋'}
                         </span>
                         <span className="text-[9px] font-black leading-none mt-0.5">
                           {t.kind === 'decoy' ? 'ห้ามเตะ' : `+${t.basePoints}`}
@@ -1470,11 +1491,10 @@ export function TaekwondoModal({
                   type="button"
                   disabled={!loadout.mid}
                   onPointerDown={() => triggerCommandMove(loadout.mid)}
-                  className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${
-                    loadout.mid
+                  className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${loadout.mid
                       ? 'bg-gradient-to-b from-amber-400 to-orange-600 hover:brightness-110 active:translate-y-0.5 text-black border-yellow-100 shadow-[0_3px_0_#7c2d12] cursor-pointer'
                       : 'bg-zinc-900 text-zinc-500 border-zinc-700 cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   {loadout.mid
                     ? `${loadout.mid.emoji} ${loadout.mid.thName}`
@@ -1486,17 +1506,16 @@ export function TaekwondoModal({
                   type="button"
                   disabled={!loadout.ultimate || ultCdLeftSec > 0}
                   onPointerDown={() => triggerCommandMove(loadout.ultimate)}
-                  className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${
-                    loadout.ultimate && ultCdLeftSec === 0
+                  className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${loadout.ultimate && ultCdLeftSec === 0
                       ? 'bg-gradient-to-b from-red-500 via-rose-600 to-amber-500 hover:brightness-110 active:translate-y-0.5 text-white border-yellow-300 shadow-[0_3px_0_#4c0519] cursor-pointer animate-pulse'
                       : 'bg-zinc-900 text-zinc-400 border-zinc-700 cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   {!loadout.ultimate
                     ? '🔒 สายแดงปลดล็อก'
                     : ultCdLeftSec > 0
-                    ? `⏳ รอ ${ultCdLeftSec} วิ`
-                    : `${loadout.ultimate.emoji} ${loadout.ultimate.thName}`}
+                      ? `⏳ รอ ${ultCdLeftSec} วิ`
+                      : `${loadout.ultimate.emoji} ${loadout.ultimate.thName}`}
                 </button>
               </div>
             </div>
@@ -1532,15 +1551,18 @@ export function TaekwondoModal({
                   <div className="text-sm font-extrabold text-white">
                     เลื่อนขั้นเป็น: {lastResult.promotedBelts.map((b) => b.name).join(' → ')}
                   </div>
-                  <div className="text-xs font-extrabold text-amber-200">
-                    ✨ ปลดล็อกท่าใหม่:{' '}
-                    {lastResult.promotedBelts
-                      .map((b) => {
-                        const mv = getMoveById(b.unlockMoveId);
-                        return `${mv.emoji} ${mv.thName} (${mv.codeName})`;
-                      })
-                      .join(', ')}
-                  </div>
+                  {lastResult.promotedBelts.some((b) => b.unlockMoveId) && (
+                    <div className="text-xs font-extrabold text-amber-200">
+                      ✨ ปลดล็อกท่าใหม่:{' '}
+                      {lastResult.promotedBelts
+                        .filter((b) => Boolean(b.unlockMoveId))
+                        .map((b) => {
+                          const mv = getMoveById(b.unlockMoveId!);
+                          return `${mv.emoji} ${mv.thName} (${mv.codeName})`;
+                        })
+                        .join(', ')}
+                    </div>
+                  )}
                   {lastResult.coinsEarned > 0 && (
                     <div className="text-xs font-extrabold text-emerald-300">
                       🎁 รับโบนัสเลื่อนสายเข้ากระเป๋า +{lastResult.coinsEarned} 💰 Gacha!
