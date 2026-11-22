@@ -98,6 +98,10 @@ const QuestBoardModal = dynamic(
   () => import('@/components/QuestBoardModal').then((m) => m.QuestBoardModal),
   { ssr: false }
 );
+const TaekwondoModal = dynamic(
+  () => import('@/components/TaekwondoModal').then((m) => m.TaekwondoModal),
+  { ssr: false }
+);
 import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
 
 interface Player {
@@ -345,8 +349,10 @@ export default function Arena3DPage() {
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isNearGuard, setIsNearGuard] = useState(false);
   const [isNearCafe, setIsNearCafe] = useState(false);
+  const [isNearDojang, setIsNearDojang] = useState(false);
   const [isNearQuestBoard, setIsNearQuestBoard] = useState(false);
   const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
+  const [isTaekwondoOpen, setIsTaekwondoOpen] = useState(false);
   const [isQuestBoardOpen, setIsQuestBoardOpen] = useState(false);
   const [questBoardFocusId, setQuestBoardFocusId] = useState<number | null>(null);
   const [quests, setQuests] = useState<QuestBoardItem[]>([]);
@@ -402,6 +408,7 @@ export default function Arena3DPage() {
   const nearbySpectatorIdRef = useRef<number | null>(null);
   const isNearGuardRef = useRef<boolean>(false);
   const isNearCafeRef = useRef<boolean>(false);
+  const isNearDojangRef = useRef<boolean>(false);
   const isNearQuestBoardRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
   const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
@@ -507,7 +514,7 @@ export default function Arena3DPage() {
   const lunchCoinsRef = useRef<Array<{ slotId: number; spawnToken: string; x: number; z: number }>>([]);
   const claimedTokensRef = useRef<Set<string>>(new Set());
   const [isLunchRush, setIsLunchRush] = useState<boolean>(false);
-  const [claimingCheckin, setClaimingCheckin] = useState<boolean>(false);
+  const autoCheckinTriedRef = useRef<Set<number>>(new Set());
   const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [vbSession, setVbSession] = useState<{
@@ -884,11 +891,13 @@ export default function Arena3DPage() {
           ? '🏐 กำลังตีวอลเลย์บอล...'
           : isPetCafeOpen
             ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
-            : isQuestBoardOpen
-              ? '📋 กำลังดูกระดานภารกิจ...'
-              : isJoinOpen
-                ? '👗 กำลังแต่งตัว...'
-                : '';
+            : isTaekwondoOpen
+              ? '🥋 กำลังฝึกเตะเทควันโด...'
+              : isQuestBoardOpen
+                ? '📋 กำลังดูกระดานภารกิจ...'
+                : isJoinOpen
+                  ? '👗 กำลังแต่งตัว...'
+                  : '';
     myBusyLabelRef.current = label;
     if (currentUserId && currentUserId > 0) {
       broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
@@ -898,6 +907,7 @@ export default function Arena3DPage() {
     isShabuOpen,
     isVolleyballOpen,
     isPetCafeOpen,
+    isTaekwondoOpen,
     isQuestBoardOpen,
     isJoinOpen,
     currentUserId,
@@ -1296,6 +1306,8 @@ export default function Arena3DPage() {
       setIsNearOcean(false);
       isNearCafeRef.current = false;
       setIsNearCafe(false);
+      isNearDojangRef.current = false;
+      setIsNearDojang(false);
       isNearQuestBoardRef.current = false;
       setIsNearQuestBoard(false);
       setFishingResult(null);
@@ -2852,6 +2864,138 @@ export default function Arena3DPage() {
     `;
     labelsContainer.appendChild(cafeTagEl);
 
+    // 3D Taekwondo Dojang Pavilion (สนามหลังจุดเริ่มต้น ฝั่งตรงข้าม Pet Café — เดินเข้ามาฝึกเตะเป้าเลื่อนสาย!)
+    const rawDojangX = -halfLen - 8.5;
+    const rawDojangZ = -(trackWidth / 2 + 5.2);
+    const dojangPos = new THREE.Vector3(
+      Math.max(islandCenterX - islandW / 2 + 4.2, Math.min(islandCenterX + islandW / 2 - 4.2, rawDojangX)),
+      0.2,
+      Math.max(-(islandD / 2 - 4.2), Math.min(islandD / 2 - 4.2, rawDojangZ))
+    );
+    const dojangGroup = new THREE.Group();
+    dojangGroup.position.copy(dojangPos);
+    dojangGroup.rotation.y = Math.PI * 0.15; // หันหน้าสำนักเข้าหาลานด้านหลังจุดเริ่มต้น
+
+    // Wooden Raised Stage
+    const dojangDeck = new THREE.Mesh(
+      new THREE.BoxGeometry(5.6, 0.24, 5.0),
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 })
+    );
+    dojangDeck.position.y = 0.12;
+    dojangDeck.receiveShadow = true;
+    dojangGroup.add(dojangDeck);
+
+    // Classic Blue & Red Taekwondo Competition Mat
+    const matBlue = new THREE.Mesh(
+      new THREE.BoxGeometry(4.6, 0.08, 4.0),
+      new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.7 })
+    );
+    matBlue.position.set(0, 0.28, 0);
+    matBlue.receiveShadow = true;
+    const matRed = new THREE.Mesh(
+      new THREE.BoxGeometry(2.8, 0.09, 2.4),
+      new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.7 })
+    );
+    matRed.position.set(0, 0.285, 0);
+    dojangGroup.add(matBlue, matRed);
+
+    // Traditional White Back Wall & 4 Red Wooden Pillars
+    const dojangBackWall = new THREE.Mesh(
+      new THREE.BoxGeometry(4.6, 2.6, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.75 })
+    );
+    dojangBackWall.position.set(0, 1.54, -1.9);
+    dojangBackWall.castShadow = true;
+    dojangBackWall.receiveShadow = true;
+    dojangGroup.add(dojangBackWall);
+
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.6 });
+    const pillarCoords: [number, number][] = [
+      [-2.25, -1.85],
+      [2.25, -1.85],
+      [-2.25, 1.85],
+      [2.25, 1.85],
+    ];
+    for (const [px, pz] of pillarCoords) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 2.7, 10), pillarMat);
+      pillar.position.set(px, 1.58, pz);
+      pillar.castShadow = true;
+      dojangGroup.add(pillar);
+    }
+
+    // Traditional Dark-Slate Korean Dojang Roof + Gold Trim
+    const dojangRoofBase = new THREE.Mesh(
+      new THREE.BoxGeometry(6.1, 0.26, 5.4),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 })
+    );
+    dojangRoofBase.position.set(0, 2.98, 0);
+    dojangRoofBase.castShadow = true;
+    const dojangRoofTop = new THREE.Mesh(
+      new THREE.ConeGeometry(4.15, 1.45, 4),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.55 })
+    );
+    dojangRoofTop.rotation.y = Math.PI / 4;
+    dojangRoofTop.position.set(0, 3.82, 0);
+    dojangRoofTop.castShadow = true;
+    const dojangTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(6.2, 0.1, 0.16),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.35 })
+    );
+    dojangTrim.position.set(0, 2.94, 2.72);
+    dojangGroup.add(dojangRoofBase, dojangRoofTop, dojangTrim);
+
+    // Taegeuk Crest Emblem on Front Roof
+    const crestRed = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.52, 0.52, 0.14, 18),
+      new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.35 })
+    );
+    crestRed.rotation.x = Math.PI / 2;
+    crestRed.position.set(0, 3.45, 1.95);
+    const crestBlue = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.32, 0.17, 16),
+      new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1d4ed8, emissiveIntensity: 0.35 })
+    );
+    crestBlue.rotation.x = Math.PI / 2;
+    crestBlue.position.set(0, 3.45, 1.97);
+    dojangGroup.add(crestRed, crestBlue);
+
+    // Standing Kicking Target Pad on Front-Right Corner
+    const padStand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.42, 0.32, 12),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 })
+    );
+    padStand.position.set(1.35, 0.44, 0.95);
+    const padBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.24, 1.35, 12),
+      new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.45 })
+    );
+    padBody.position.set(1.35, 1.28, 0.95);
+    padBody.castShadow = true;
+    const padStripe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.255, 0.255, 0.22, 12),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xf59e0b, emissiveIntensity: 0.4 })
+    );
+    padStripe.position.set(1.35, 1.38, 0.95);
+    dojangGroup.add(padStand, padBody, padStripe);
+
+    scene.add(dojangGroup);
+
+    const dojangTagEl = document.createElement('div');
+    dojangTagEl.className = 'player-tag cursor-pointer';
+    dojangTagEl.onclick = () => {
+      cameraLookAtRef.current.set(dojangPos.x, 1.9, dojangPos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(dojangPos.x + 2.4, 4.6, dojangPos.z + 6.8);
+      if (isNearDojangRef.current) {
+        setIsTaekwondoOpen(true);
+      }
+    };
+    dojangTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        🥋 สำนักเทควันโด (เดินเข้ามาเตะเป้าเลื่อนสาย!)
+      </div>
+    `;
+    labelsContainer.appendChild(dojangTagEl);
+
     // 3D Ragnarok Mobile Style Wooden Quest Board (วางไว้ใกล้พี่ยามแบบมีระยะห่างกำลังดี — กดเปิดกระดานเควสได้ทันที!)
     const rawBoardPos = guardPostPos
       .clone()
@@ -2946,18 +3090,9 @@ export default function Arena3DPage() {
     scene.add(questBoardGroup);
 
     const questBoardTagEl = document.createElement('div');
-    questBoardTagEl.className = 'player-tag cursor-pointer';
-    questBoardTagEl.onclick = () => {
-      cameraLookAtRef.current.set(questBoardPos.x, 1.8, questBoardPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(questBoardPos.x + 2.4, 3.8, questBoardPos.z + 5.8);
-      if (isNearQuestBoardRef.current) {
-        openQuestBoardRef.current(null);
-      } else {
-        showToast('📜', 'เดินเข้ามาใกล้กระดานเควสก่อนนะ!', 'ปักป้ายเดินเล่นแล้วเดินมาหน้ากระดานเควสเพื่อเปิดดูได้เลย!');
-      }
-    };
+    questBoardTagEl.className = 'player-tag pointer-events-none';
     questBoardTagEl.innerHTML = `
-      <div class="bg-gradient-to-r from-[#ffdf6b] via-[#f5a623] to-[#d97706] text-[#3d1b06] border-2 border-[#fff7d6] rounded-xl px-2.5 py-0.5 shadow-[0_3px_0_#5c2d0c,0_4px_10px_rgba(0,0,0,0.5)] text-[10.5px] font-black whitespace-nowrap hover:scale-105 transition">
+      <div class="bg-gradient-to-r from-[#ffdf6b] via-[#f5a623] to-[#d97706] text-[#3d1b06] border-2 border-[#fff7d6] rounded-xl px-2.5 py-0.5 shadow-[0_3px_0_#5c2d0c,0_4px_10px_rgba(0,0,0,0.5)] text-[10.5px] font-black whitespace-nowrap">
         📜 กระดานเควส • Mission Board
       </div>
     `;
@@ -4092,6 +4227,13 @@ export default function Arena3DPage() {
             setIsNearCafe(nearCafeNow);
           }
 
+          const distToDojang = c.rootGroup.position.distanceTo(dojangPos);
+          const nearDojangNow = distToDojang < 5.8;
+          if (nearDojangNow !== isNearDojangRef.current) {
+            isNearDojangRef.current = nearDojangNow;
+            setIsNearDojang(nearDojangNow);
+          }
+
           const distToBoard = c.rootGroup.position.distanceTo(questBoardPos);
           const nearBoardNow = distToBoard < 5.0;
           if (nearBoardNow !== isNearQuestBoardRef.current) {
@@ -4960,6 +5102,16 @@ export default function Arena3DPage() {
         cafeTagEl.style.opacity = '0';
       }
 
+      tempProjVec.set(dojangPos.x, dojangPos.y + 4.75, dojangPos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        dojangTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        dojangTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        dojangTagEl.style.opacity = '1';
+      } else {
+        dojangTagEl.style.opacity = '0';
+      }
+
       tempProjVec.set(questBoardPos.x, questBoardPos.y + 3.85, questBoardPos.z);
       tempProjVec.project(camera);
       if (tempProjVec.z < 1) {
@@ -5093,19 +5245,6 @@ export default function Arena3DPage() {
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-
-      // คลิกกระดานเควสไม้ 3D: เปิดได้เฉพาะตอนเดินมาอยู่ใกล้กระดานแล้วเท่านั้น!
-      const questBoardHits = raycaster.intersectObject(questBoardGroup, true);
-      if (questBoardHits.length > 0) {
-        if (isNearQuestBoardRef.current) {
-          openQuestBoardRef.current(null);
-        } else {
-          cameraLookAtRef.current.set(questBoardPos.x, 1.8, questBoardPos.z);
-          cameraTargetPosRef.current = new THREE.Vector3(questBoardPos.x + 2.4, 3.8, questBoardPos.z + 5.8);
-          showToast('📜', 'อยู่ไกลจากกระดานเควสเกินไป!', 'เดินมาใกล้ๆ กระดานเควสก่อนแล้วปุ่มเปิดกระดานจะเด้งขึ้นครับ');
-        }
-        return;
-      }
 
       // คลิกเก็บเหรียญทองนำโชค 3D บนชายหาด! (+10 💰)
       const visibleCoins = beachCoins.filter((bc) => bc.group.visible).map((bc) => bc.group);
@@ -5346,33 +5485,42 @@ export default function Arena3DPage() {
     }
   };
 
-  const handleDailyCheckin = async () => {
-    if (!currentUserId || currentUserId <= 0 || claimingCheckin) return;
-    setClaimingCheckin(true);
-    try {
-      const res = await fetch('/api/rewards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUserId, type: 'daily_checkin' }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast('🌅', 'เช็คอินวันนี้แล้ว', data.error || 'พรุ่งนี้มารับใหม่นะ');
-      } else {
+  // Auto-claim daily +10 GP login bonus once per day when entering the arena
+  useEffect(() => {
+    if (!initialArenaReady || !currentUserId || currentUserId <= 0) return;
+    const me = players.find((p) => p.id === currentUserId);
+    if (!me || me.checkedInToday) return;
+    if (autoCheckinTriedRef.current.has(me.id)) return;
+    autoCheckinTriedRef.current.add(me.id);
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/rewards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: me.id, type: 'daily_checkin' }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
         confetti({ particleCount: 75, spread: 70, origin: { y: 0.28 } });
         showToast(
           '🎁',
-          `รับโบนัสเช็คอินรายวัน +${data.earned} 💰!`,
-          `สะสมเป็น ${data.points} 💰 แล้ว! (อย่าลืมมาแย่งเหรียญพักเที่ยง จ.-ศ. 12:00-13:00 น. นะ!)`
+          `รับโบนัสเข้าเกมรายวัน +${data.earned} 💰!`,
+          `สะสมเป็น ${data.points} 💰 แล้ว! (รีเซ็ตใหม่ทุกวัน 07:00 น.)`
         );
         await fetchArenaData({ force: true });
+      } catch {
+        // Silent fail for automatic login bonus
       }
-    } catch {
-      showToast('❌', 'เช็คอินไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
-    } finally {
-      setClaimingCheckin(false);
-    }
-  };
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialArenaReady, currentUserId, players]);
 
   claimBeachCoinRef.current = async (slotId: number, spawnToken: string) => {
     const uid = currentUserIdRef.current;
@@ -6332,17 +6480,6 @@ export default function Arena3DPage() {
             const gMeta = getGoalTypeMeta(currentUser.goalType);
             return (
               <>
-                {!currentUser.checkedInToday && (
-                  <button
-                    onClick={handleDailyCheckin}
-                    disabled={claimingCheckin}
-                    className="neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-xs px-2.5 py-2 rounded-xl flex items-center gap-1 cursor-pointer animate-bounce"
-                    title="รับโบนัสเช็คอินรายวันฟรี +10 💰!"
-                  >
-                    <span>🎁</span>
-                    <span>เช็คอิน +10💰</span>
-                  </button>
-                )}
                 {currentUser.role !== 'spectator' && (
                   <button
                     onClick={() => {
@@ -7930,17 +8067,6 @@ export default function Arena3DPage() {
                   <span>แย่งเหรียญเที่ยง LIVE!</span>
                 </div>
               )}
-              {currentUser && !currentUser.checkedInToday && (
-                <button
-                  type="button"
-                  onClick={handleDailyCheckin}
-                  disabled={claimingCheckin}
-                  className="neo-btn rpg-btn-gold font-[family-name:var(--font-kanit)] font-extrabold text-xs px-3 py-1.5 rounded-full flex items-center gap-1 cursor-pointer animate-bounce"
-                >
-                  <span>🎁</span>
-                  <span>เช็คอิน +10💰</span>
-                </button>
-              )}
               {currentUser && currentUser.role !== 'spectator' && (
                 <button
                   type="button"
@@ -8225,6 +8351,16 @@ export default function Arena3DPage() {
                   className="neo-btn bg-gradient-to-r from-pink-400 via-amber-300 to-rose-400 text-stone-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
                 >
                   ☕🐾 คาเฟ่<span className="hidden sm:inline">สัตว์เลี้ยง (Pet Café)!</span>
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearDojang && (
+                <button
+                  type="button"
+                  onClick={() => setIsTaekwondoOpen(true)}
+                  className="neo-btn bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  🥋 สำนักเทควันโด<span className="hidden sm:inline"> (เตะเป้าเลื่อนสาย!)</span>
                 </button>
               )}
 
@@ -8605,6 +8741,17 @@ export default function Arena3DPage() {
           onClose={() => setIsPetCafeOpen(false)}
           qualityMode={qualityMode}
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
+        />
+      )}
+
+      {isTaekwondoOpen && (
+        <TaekwondoModal
+          isOpen={isTaekwondoOpen}
+          onClose={() => setIsTaekwondoOpen(false)}
+          currentUserId={currentUserId}
+          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
+          playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🥋'}
+          onPointsUpdated={() => void fetchArenaData({ force: true })}
         />
       )}
 

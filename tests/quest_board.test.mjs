@@ -5,6 +5,7 @@ import {
   QUEST_MIN_STAKE,
   QUEST_MAX_STAKE,
   computeBetPayouts,
+  computeBettingWindowMs,
   computeBettingWindowState,
   computeCoopMultiplier,
   computePerMemberQuestReward,
@@ -14,9 +15,13 @@ import {
   buildFallbackQuestSummary,
 } from '../lib/quest_board.ts';
 
-test('validateQuestDateRange enforces 30-day minimum and valid calendar dates', () => {
-  const shortRange = validateQuestDateRange('2026-05-01', '2026-05-30');
-  assert.equal(shortRange.ok, false);
+test('validateQuestDateRange enforces minimum duration and valid calendar dates', () => {
+  const zeroRange = validateQuestDateRange('2026-05-01', '2026-05-01');
+  assert.equal(zeroRange.ok, false);
+
+  const exact1 = validateQuestDateRange('2026-05-01', '2026-05-02');
+  assert.equal(exact1.ok, true);
+  if (exact1.ok) assert.equal(exact1.days, 1);
 
   const exact30 = validateQuestDateRange('2026-05-01', '2026-05-31');
   assert.equal(exact30.ok, true);
@@ -27,6 +32,12 @@ test('validateQuestDateRange enforces 30-day minimum and valid calendar dates', 
 
   const customMin45 = validateQuestDateRange('2026-05-01', '2026-06-05', 45);
   assert.equal(customMin45.ok, false);
+});
+
+test('computeBettingWindowMs computes 25% of total quest duration', () => {
+  assert.equal(computeBettingWindowMs(1), 6 * 3_600_000);
+  assert.equal(computeBettingWindowMs(4), 24 * 3_600_000);
+  assert.equal(computeBettingWindowMs(30), 7.5 * 86_400_000);
 });
 
 test('computeCoopMultiplier and computePerMemberQuestReward add +10% per extra member', () => {
@@ -112,8 +123,8 @@ test('computeBettingWindowState checks active status and expiry', () => {
   assert.equal(voting.isBettingOpen, false);
 });
 
-test('buildFallbackQuestSummary always produces non-empty Thai summary with >=30 days', () => {
+test('buildFallbackQuestSummary always produces non-empty Thai summary', () => {
   const res = buildFallbackQuestSummary('งดน้ำหวาน', 'ไม่กินชาไข่มุก', 10);
-  assert.ok(res.summary.includes(`${QUEST_MIN_DURATION_DAYS}`));
+  assert.ok(res.summary.includes('งดน้ำหวาน'));
   assert.ok(res.verificationTip.length > 10);
 });

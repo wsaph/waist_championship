@@ -82,6 +82,49 @@ interface HumanSlotMember {
   emoji: string;
 }
 
+interface CompactNetPlayer {
+  s: VbSlotId;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  f: 1 | -1;
+  dt: number;
+  dd: 1 | -1;
+  sf: number;
+}
+
+interface CompactNetState {
+  ph: VbMatchState['phase'];
+  pt: number;
+  sl: number;
+  sr: number;
+  sv: VbTeam;
+  w: VbTeam | null;
+  bx: number;
+  by: number;
+  bvx: number;
+  bvy: number;
+  bsp: boolean;
+  pl: CompactNetPlayer[];
+  ev?: { h?: 1; sp?: 1; dv?: 1; sc?: VbTeam };
+  consumed?: boolean;
+}
+
+interface GuestSyncPacket {
+  slot: VbSlotId;
+  input: VbInputState;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  f?: 1 | -1;
+  dt?: number;
+  dd?: 1 | -1;
+}
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
 const EMPTY_INPUT: VbInputState = { left: false, right: false, jump: false, action: false };
 
 function buildVolleyballTexture(): THREE.CanvasTexture {
@@ -169,9 +212,10 @@ export function BeachVolleyballModal({
       window.innerWidth <= 1280
     );
   });
-  const [slideKnobX, setSlideKnobX] = useState<number>(0);
+  const slideKnobDomRef = useRef<HTMLDivElement | null>(null);
   const slidePointerIdRef = useRef<number | null>(null);
   const slideOriginXRef = useRef<number>(0);
+  const slideOriginYRef = useRef<number>(0);
 
   const myClientIdRef = useRef<string>(`vb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   const [mySlot, setMySlot] = useState<VbSlotId>(initialIsHost ? 'L1' : 'R1');
@@ -193,12 +237,17 @@ export function BeachVolleyballModal({
     R1: { ...EMPTY_INPUT },
     R2: { ...EMPTY_INPUT },
   });
+  const remoteKinematicsRef = useRef<Partial<Record<VbSlotId, GuestSyncPacket>>>({});
   const matchStateRef = useRef<VbMatchState | null>(null);
-  const netTargetStateRef = useRef<VbMatchState | null>(null);
+  const netTargetStateRef = useRef<CompactNetState | null>(null);
   const lastSentInputSigRef = useRef<string>('');
   const rewardClaimedRef = useRef<boolean>(false);
+  const winHandledRef = useRef<boolean>(false);
   const mutedRef = useRef<boolean>(false);
   mutedRef.current = muted;
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const claimWinRewardRef = useRef<() => Promise<void>>(async () => {});
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabaseRef = useRef<SupabaseClient | null>(null);
@@ -270,6 +319,7 @@ export function BeachVolleyballModal({
       // ignore
     }
   }, [currentUserId, onRewardEarned]);
+  claimWinRewardRef.current = claimWinReward;
 
   // Connect to PvP Room immediately on open & Auto-start when full!
   useEffect(() => {
@@ -375,27 +425,54 @@ export function BeachVolleyballModal({
           setMySlot(myAssigned);
           mySlotRef.current = myAssigned;
         }
+        // Reset active match state cleanly (supports Rematch without rebuilding WebGL!)
+        if (matchStateRef.current && matchStateRef.current.court.mode === incomingMode) {
+          matchStateRef.current.scoreLeft = 0;
+          matchStateRef.current.scoreRight = 0;
+          matchStateRef.current.winner = null;
+          resetRallyPositions(matchStateRef.current, 'left');
+        }
+        netTargetStateRef.current = null;
+        remoteKinematicsRef.current = {};
+        winHandledRef.current = false;
+        rewardClaimedRef.current = false;
         setWinnerTeam(null);
         setRewardStatus('');
+        setPointBanner('');
         setScoreLeft(0);
         setScoreRight(0);
-        rewardClaimedRef.current = false;
+        screenRef.current = 'playing';
         setScreen('playing');
       } else if (event === 'vb_input' && isHostRef.current) {
-        const slot = payload.slot as VbSlotId;
-        const inp = payload.input as VbInputState;
-        if (slot && inp) {
-          remoteInputsRef.current[slot] = inp;
+        const pkt = payload as unknown as GuestSyncPacket;
+        if (pkt.slot && pkt.input) {
+          remoteInputsRef.current[pkt.slot] = pkt.input;
+          remoteKinematicsRef.current[pkt.slot] = pkt;
         }
       } else if (event === 'vb_state' && !isHostRef.current) {
-        const snap = payload.state as VbMatchState | undefined;
+        const snap = payload.s as CompactNetState | undefined;
         if (snap) {
+          snap.consumed = false;
           netTargetStateRef.current = snap;
-          // Update React score/winner state only when values actually change (no 20Hz re-renders!)
-          setScoreLeft((prev) => (prev !== snap.scoreLeft ? snap.scoreLeft : prev));
-          setScoreRight((prev) => (prev !== snap.scoreRight ? snap.scoreRight : prev));
-          if (snap.phase === 'finished' && snap.winner) {
-            setWinnerTeam((prev) => (prev !== snap.winner ? snap.winner : prev));
+          setScoreLeft((prev) => (prev !== snap.sl ? snap.sl : prev));
+          setScoreRight((prev) => (prev !== snap.sr ? snap.sr : prev));
+          if (snap.ev) {
+            if (snap.ev.sp) {
+              playVbSound('spike', mutedRef.current);
+              setShakeActive(true);
+              setTimeout(() => setShakeActive(false), 260);
+            } else if (snap.ev.h) {
+              playVbSound('hit', mutedRef.current);
+            }
+            if (snap.ev.dv) playVbSound('dive', mutedRef.current);
+            if (snap.ev.sc) {
+              playVbSound('score', mutedRef.current);
+              setPointBanner(snap.ev.sc === 'left' ? '🔥 ทีมซ้ายได้แต้ม!' : '⚡ ทีมขวาได้แต้ม!');
+              setTimeout(() => setPointBanner(''), 1050);
+            }
+          }
+          if (snap.ph === 'finished' && snap.w) {
+            setWinnerTeam((prev) => (prev !== snap.w ? snap.w : prev));
           }
         }
       }
@@ -417,7 +494,7 @@ export function BeachVolleyballModal({
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (url && key) {
       const sb = createClient(url, key, {
-        realtime: { params: { eventsPerSecond: 25 } },
+        realtime: { params: { eventsPerSecond: 45 } },
       });
       const ch = sb.channel(`waist-volleyball-room-${initialRoomCode}`, {
         config: { broadcast: { self: false } },
@@ -478,14 +555,22 @@ export function BeachVolleyballModal({
   useEffect(() => {
     if (!isOpen || screen !== 'playing') return;
     const onKey = (e: KeyboardEvent, down: boolean) => {
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space'].includes(e.code)) {
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) {
         e.preventDefault();
       }
       const c = e.code;
       if (c === 'KeyA' || c === 'ArrowLeft') localInputRef.current.left = down;
       if (c === 'KeyD' || c === 'ArrowRight') localInputRef.current.right = down;
       if (c === 'KeyW' || c === 'ArrowUp' || c === 'Space') localInputRef.current.jump = down;
-      if (c === 'ShiftLeft' || c === 'ShiftRight' || c === 'Enter' || c === 'KeyJ' || c === 'KeyK') {
+      if (c === 'KeyS' || c === 'ArrowDown') localInputRef.current.down = down;
+      if (
+        c === 'ShiftLeft' ||
+        c === 'ShiftRight' ||
+        c === 'Enter' ||
+        c === 'KeyZ' ||
+        c === 'KeyJ' ||
+        c === 'KeyK'
+      ) {
         localInputRef.current.action = down;
       }
     };
@@ -525,16 +610,25 @@ export function BeachVolleyballModal({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x38bdf8);
-    scene.fog = new THREE.FogExp2(0x7dd3fc, 0.012);
+    scene.fog = new THREE.FogExp2(0x7dd3fc, 0.0055);
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 140);
+    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 180);
     const updateCameraForAspect = (w: number, h: number) => {
-      const aspect = Math.max(0.45, w / Math.max(1, h));
-      const baseZ = mode === '2v2' ? 18.8 : 15.6;
-      const aspectBoost = aspect < 1.15 ? (1.15 / aspect) * 0.72 : 1;
+      const aspect = Math.max(0.42, w / Math.max(1, h));
+      const isPortrait = aspect < 0.95;
+      const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+      // Exact trigonometry so 100% of both sidelines + high ball arc always fit on Phone (Portrait & Landscape), iPad, and PC!
+      const reqHalfW = court.halfWidth + 1.15;
+      const reqHalfH = isPortrait ? 6.4 : 5.6;
+      const zForWidth = reqHalfW / (tanHalfFov * aspect);
+      const zForHeight = reqHalfH / tanHalfFov;
+      const camZ = Math.max(zForWidth, zForHeight);
+      // On portrait phones/iPads, look slightly lower so the court sits higher up on screen, clear of bottom touch pads!
+      const lookY = isPortrait ? 0.55 : 2.25;
+      const camY = isPortrait ? 3.6 + camZ * 0.06 : mode === '2v2' ? 4.8 : 4.3;
       camera.aspect = aspect;
-      camera.position.set(0, mode === '2v2' ? 4.8 : 4.3, baseZ * Math.max(1, aspectBoost));
-      camera.lookAt(0, 2.35, 0);
+      camera.position.set(0, camY, camZ);
+      camera.lookAt(0, lookY, 0);
       camera.updateProjectionMatrix();
     };
     updateCameraForAspect(width, height);
@@ -664,6 +758,18 @@ export function BeachVolleyballModal({
     spikeGlow.visible = false;
     ballMesh.add(spikeGlow);
 
+    // Classic Pikachu Volleyball Afterimage Trail Spheres on Power Spike!
+    const trailHistory: Array<{ x: number; y: number }> = [];
+    const trailMeshes = [0.42, 0.26, 0.14].map((op, ti) => {
+      const tm = new THREE.Mesh(
+        new THREE.SphereGeometry(court.ballRadius * (0.9 - ti * 0.14), 12, 10),
+        new THREE.MeshBasicMaterial({ color: ti === 0 ? 0xfb923c : 0xfacc15, transparent: true, opacity: op })
+      );
+      tm.visible = false;
+      scene.add(tm);
+      return tm;
+    });
+
     // Build Real Player Meshes with all Equipped Cosmetics
     const activeMySlot = mySlotRef.current;
     const myTeam: VbTeam = activeMySlot.startsWith('L') ? 'left' : 'right';
@@ -679,7 +785,10 @@ export function BeachVolleyballModal({
     const visuals: SlotVisual[] = activeSlotIds.map((slotId, idx) => {
       const wrapper = new THREE.Group();
       const member = humanSlotsRef.current[slotId];
-      const found = players.find((p) => p.id === member?.playerId) || players[idx % Math.max(1, players.length)];
+      const curPlayers = playersRef.current;
+      const found =
+        curPlayers.find((p) => p.id === member?.playerId) ||
+        curPlayers[idx % Math.max(1, curPlayers.length)];
       const team: VbTeam = slotId.startsWith('L') ? 'left' : 'right';
 
       const charParts = buildCharacterMesh({
@@ -735,7 +844,13 @@ export function BeachVolleyballModal({
     let lastNetSend = 0;
     let lastScoreL = 0;
     let lastScoreR = 0;
-    let winHandled = false;
+    winHandledRef.current = false;
+
+    // Visual-space smoothing offsets (eliminates sawtooth rubber-banding & packet-arrival pops on Guest!)
+    let ballErrX = 0;
+    let ballErrY = 0;
+    const playerErrX: Record<VbSlotId, number> = { L1: 0, L2: 0, R1: 0, R2: 0 };
+    const playerErrY: Record<VbSlotId, number> = { L1: 0, L2: 0, R1: 0, R2: 0 };
 
     const animate = () => {
       frameId = requestAnimationFrame(animate);
@@ -764,6 +879,27 @@ export function BeachVolleyballModal({
             inputs[p.slotId] = localInputRef.current;
           } else {
             inputs[p.slotId] = remoteInputsRef.current[p.slotId] || EMPTY_INPUT;
+            // Apply Guest's client-authoritative position (clamped safely to Guest's side of the court!)
+            const rk = remoteKinematicsRef.current[p.slotId];
+            if (rk && st.phase !== 'serve_wait' && typeof rk.x === 'number' && typeof rk.y === 'number') {
+              const minX =
+                p.team === 'left'
+                  ? -st.court.halfWidth + st.court.playerRadius
+                  : st.court.netHalfThickness + st.court.playerRadius;
+              const maxX =
+                p.team === 'left'
+                  ? -st.court.netHalfThickness - st.court.playerRadius
+                  : st.court.halfWidth - st.court.playerRadius;
+              p.x = Math.max(minX, Math.min(maxX, rk.x));
+              p.y = Math.max(0, Math.min(5.5, rk.y));
+              if (typeof rk.vx === 'number') p.vx = rk.vx;
+              if (typeof rk.vy === 'number') p.vy = rk.vy;
+              if (rk.f) p.facing = rk.f;
+              if (typeof rk.dt === 'number') p.diveTimer = rk.dt;
+              if (rk.dd) p.diveDir = rk.dd;
+              // Consume position sample once; stepVolleyballMatch continues dead-reckoning with rk.input until next packet
+              rk.x = undefined;
+            }
           }
         }
 
@@ -781,13 +917,13 @@ export function BeachVolleyballModal({
           setPointBanner(ev.score === 'left' ? '🔥 ทีมซ้ายได้แต้ม!' : '⚡ ทีมขวาได้แต้ม!');
           setTimeout(() => setPointBanner(''), 1050);
         }
-        if (ev.win && !winHandled) {
-          winHandled = true;
+        if (ev.win && !winHandledRef.current) {
+          winHandledRef.current = true;
           playVbSound('win', mutedRef.current);
           setWinnerTeam(ev.win);
           if (ev.win === myTeam) {
             confetti({ particleCount: 95, spread: 80, origin: { y: 0.55 } });
-            void claimWinReward();
+            void claimWinRewardRef.current();
           }
         }
 
@@ -798,116 +934,214 @@ export function BeachVolleyballModal({
           setScoreRight(st.scoreRight);
         }
 
-        if (nowMs - lastNetSend > 33) {
+        const hasImportantEvent = Boolean(ev.hit || ev.spike || ev.dive || ev.score || ev.win);
+        if (hasImportantEvent || nowMs - lastNetSend >= 50) {
           lastNetSend = nowMs;
-          sendRoomMessage('vb_state', { state: st });
+          const compact: CompactNetState = {
+            ph: st.phase,
+            pt: r2(st.phaseTimer),
+            sl: st.scoreLeft,
+            sr: st.scoreRight,
+            sv: st.servingTeam,
+            w: st.winner,
+            bx: r2(st.ball.x),
+            by: r2(st.ball.y),
+            bvx: r2(st.ball.vx),
+            bvy: r2(st.ball.vy),
+            bsp: st.ball.isSpiked,
+            pl: st.players.map((p) => ({
+              s: p.slotId,
+              x: r2(p.x),
+              y: r2(p.y),
+              vx: r2(p.vx),
+              vy: r2(p.vy),
+              f: p.facing,
+              dt: r2(p.diveTimer),
+              dd: p.diveDir,
+              sf: r2(p.spikeFlash),
+            })),
+            ev: hasImportantEvent
+              ? {
+                  h: ev.hit ? 1 : undefined,
+                  sp: ev.spike ? 1 : undefined,
+                  dv: ev.dive ? 1 : undefined,
+                  sc: ev.score,
+                }
+              : undefined,
+          };
+          sendRoomMessage('vb_state', { s: compact });
         }
       } else {
-        // Guest: send local input IMMEDIATELY on any change + lightweight 65ms keepalive
-        const curInp = localInputRef.current;
-        const inpSig = `${curInp.left ? 1 : 0}${curInp.right ? 1 : 0}${curInp.jump ? 1 : 0}${curInp.action ? 1 : 0}`;
-        if (inpSig !== lastSentInputSigRef.current || nowMs - lastNetSend > 65) {
-          lastSentInputSigRef.current = inpSig;
-          lastNetSend = nowMs;
-          sendRoomMessage('vb_input', {
-            slot: activeMySlot,
-            input: { ...curInp },
-          });
+        // Guest: decay visual smoothing offsets smoothly at display refresh rate (60-120fps)
+        const errDecay = Math.exp(-15 * delta);
+        ballErrX *= errDecay;
+        ballErrY *= errDecay;
+        for (const sid of activeSlotIds) {
+          playerErrX[sid] *= errDecay;
+          playerErrY[sid] *= errDecay;
         }
 
-        // Guest 60FPS Smooth Local Prediction + Authoritative Reconciliation (eliminates network stutter!)
+        // 1. Consume NEW Host packet ONCE when it arrives (zero sawtooth yanks on intermediate frames!)
+        const netSnap = netTargetStateRef.current;
+        if (netSnap && !netSnap.consumed) {
+          netSnap.consumed = true;
+          const prevPhase = st.phase;
+          st.phase = netSnap.ph;
+          st.phaseTimer = netSnap.pt;
+          st.scoreLeft = netSnap.sl;
+          st.scoreRight = netSnap.sr;
+          st.servingTeam = netSnap.sv;
+          st.winner = netSnap.w;
+          st.ball.isSpiked = netSnap.bsp;
+
+          const curRenderBx = st.ball.x + ballErrX;
+          const curRenderBy = st.ball.y + ballErrY;
+          st.ball.x = netSnap.bx;
+          st.ball.y = netSnap.by;
+          st.ball.vx = netSnap.bvx;
+          st.ball.vy = netSnap.bvy;
+
+          const jumpDist = Math.hypot(curRenderBx - netSnap.bx, curRenderBy - netSnap.by);
+          if (netSnap.ph === 'serve_wait' || prevPhase === 'serve_wait' || jumpDist > 3.8) {
+            ballErrX = 0;
+            ballErrY = 0;
+          } else {
+            ballErrX = curRenderBx - netSnap.bx;
+            ballErrY = curRenderBy - netSnap.by;
+          }
+
+          for (const netP of netSnap.pl) {
+            const localP = st.players.find((lp) => lp.slotId === netP.s);
+            if (!localP) continue;
+            const isLocal = netP.s === activeMySlot;
+            if (isLocal) {
+              // Local player is 100% client-authoritative during active play (zero rubber-banding!); snap only on rally reset!
+              if (netSnap.ph === 'serve_wait' && prevPhase !== 'serve_wait') {
+                localP.x = netP.x;
+                localP.y = netP.y;
+                localP.vx = 0;
+                localP.vy = 0;
+                playerErrX[netP.s] = 0;
+                playerErrY[netP.s] = 0;
+              }
+            } else {
+              const curRx = localP.x + playerErrX[netP.s];
+              const curRy = localP.y + playerErrY[netP.s];
+              localP.x = netP.x;
+              localP.y = netP.y;
+              localP.vx = netP.vx;
+              localP.vy = netP.vy;
+              localP.facing = netP.f;
+              localP.diveTimer = netP.dt;
+              localP.diveDir = netP.dd;
+              localP.spikeFlash = netP.sf;
+              const pJump = Math.hypot(curRx - netP.x, curRy - netP.y);
+              if (netSnap.ph === 'serve_wait' || pJump > 3.0) {
+                playerErrX[netP.s] = 0;
+                playerErrY[netP.s] = 0;
+              } else {
+                playerErrX[netP.s] = curRx - netP.x;
+                playerErrY[netP.s] = curRy - netP.y;
+              }
+            }
+          }
+        }
+
+        // 2. Step pure 60fps local physics (local player uses live input; remote players extrapolate velocity smoothly!)
+        const curInp = localInputRef.current;
         const guestInputs: Record<VbSlotId, VbInputState> = {
           L1: { ...EMPTY_INPUT },
           L2: { ...EMPTY_INPUT },
           R1: { ...EMPTY_INPUT },
           R2: { ...EMPTY_INPUT },
         };
-        guestInputs[activeMySlot] = curInp;
-        stepVolleyballMatch(st, guestInputs, delta);
-
-        const netSnap = netTargetStateRef.current;
-        if (netSnap) {
-          // Sync discrete match phase & scores from Host
-          st.phase = netSnap.phase;
-          st.phaseTimer = netSnap.phaseTimer;
-          st.scoreLeft = netSnap.scoreLeft;
-          st.scoreRight = netSnap.scoreRight;
-          st.winner = netSnap.winner;
-          st.ball.isSpiked = netSnap.ball.isSpiked;
-
-          // Smoothly reconcile ball position & velocity (snap only on serve reset / huge jump)
-          const bDist = Math.hypot(netSnap.ball.x - st.ball.x, netSnap.ball.y - st.ball.y);
-          if (bDist > 3.2 || netSnap.phase === 'serve_wait') {
-            st.ball.x = netSnap.ball.x;
-            st.ball.y = netSnap.ball.y;
-            st.ball.vx = netSnap.ball.vx;
-            st.ball.vy = netSnap.ball.vy;
+        for (const p of st.players) {
+          if (p.slotId === activeMySlot) {
+            guestInputs[p.slotId] = curInp;
           } else {
-            const bBlend = 0.32;
-            st.ball.x += (netSnap.ball.x - st.ball.x) * bBlend;
-            st.ball.y += (netSnap.ball.y - st.ball.y) * bBlend;
-            st.ball.vx += (netSnap.ball.vx - st.ball.vx) * 0.45;
-            st.ball.vy += (netSnap.ball.vy - st.ball.vy) * 0.45;
-          }
-
-          // Smoothly reconcile players (keep local player responsive, smooth remote players)
-          for (const netP of netSnap.players) {
-            const localP = st.players.find((lp) => lp.slotId === netP.slotId);
-            if (!localP) continue;
-            const isLocal = netP.slotId === activeMySlot;
-            const pDist = Math.hypot(netP.x - localP.x, netP.y - localP.y);
-            if (pDist > 2.8 || netSnap.phase === 'serve_wait') {
-              localP.x = netP.x;
-              localP.y = netP.y;
-              localP.vx = netP.vx;
-              localP.vy = netP.vy;
-            } else {
-              const pBlend = isLocal ? 0.22 : 0.35;
-              localP.x += (netP.x - localP.x) * pBlend;
-              localP.y += (netP.y - localP.y) * pBlend;
-              if (!isLocal) {
-                localP.vx = netP.vx;
-                localP.vy = netP.vy;
-                localP.facing = netP.facing;
-                localP.diveTimer = netP.diveTimer;
-                localP.diveDir = netP.diveDir;
-                localP.spikeFlash = netP.spikeFlash;
-              }
-            }
+            // Reconstruct horizontal hold from latest remote velocity so remote players don't decelerate to 0 between packets!
+            guestInputs[p.slotId] = {
+              left: p.vx < -1.5,
+              right: p.vx > 1.5,
+              jump: false,
+              action: false,
+            };
           }
         }
+        stepVolleyballMatch(st, guestInputs, delta);
 
-        if (st.phase === 'finished' && st.winner && !winHandled) {
-          winHandled = true;
+        // 3. Send local input + exact local kinematics to Host (immediate on input change + 45ms while moving/airborne)
+        const myP = st.players.find((lp) => lp.slotId === activeMySlot);
+        const inpSig = `${curInp.left ? 1 : 0}${curInp.right ? 1 : 0}${curInp.jump ? 1 : 0}${curInp.down ? 1 : 0}${curInp.action ? 1 : 0}`;
+        const isMovingOrAir = Boolean(
+          myP && (Math.abs(myP.vx) > 0.1 || myP.y > 0.01 || myP.diveTimer > 0)
+        );
+        const sendInterval = isMovingOrAir ? 45 : 140;
+        if (inpSig !== lastSentInputSigRef.current || nowMs - lastNetSend >= sendInterval) {
+          lastSentInputSigRef.current = inpSig;
+          lastNetSend = nowMs;
+          sendRoomMessage('vb_input', {
+            slot: activeMySlot,
+            input: { ...curInp },
+            x: myP ? r2(myP.x) : undefined,
+            y: myP ? r2(myP.y) : undefined,
+            vx: myP ? r2(myP.vx) : undefined,
+            vy: myP ? r2(myP.vy) : undefined,
+            f: myP?.facing,
+            dt: myP ? r2(myP.diveTimer) : undefined,
+            dd: myP?.diveDir,
+          });
+        }
+
+        if (st.phase === 'finished' && st.winner && !winHandledRef.current) {
+          winHandledRef.current = true;
           playVbSound('win', mutedRef.current);
           setWinnerTeam(st.winner);
           if (st.winner === myTeam) {
             confetti({ particleCount: 95, spread: 80, origin: { y: 0.55 } });
-            void claimWinReward();
+            void claimWinRewardRef.current();
           }
         }
       }
 
-      // Sync 3D Ball & Shadow
-      ballMesh.position.set(st.ball.x, st.ball.y, 0);
+      // Sync 3D Ball & Shadow (with visual smoothing offset)
+      const renderBx = st.ball.x + ballErrX;
+      const renderBy = Math.max(st.court.ballRadius, st.ball.y + ballErrY);
+      ballMesh.position.set(renderBx, renderBy, 0);
       ballMesh.rotation.z = -st.ball.spin;
       ballMesh.rotation.x = st.ball.spin * 0.4;
       spikeGlow.visible = st.ball.isSpiked;
       if (st.ball.isSpiked) {
         spikeGlow.scale.setScalar(1.25 + Math.sin(elapsed * 28) * 0.16);
+        trailHistory.unshift({ x: renderBx, y: renderBy });
+        if (trailHistory.length > 7) trailHistory.pop();
+        trailMeshes.forEach((tm, ti) => {
+          const hist = trailHistory[Math.min(trailHistory.length - 1, (ti + 1) * 2)];
+          if (hist) {
+            tm.position.set(hist.x, hist.y, -0.05);
+            tm.visible = true;
+          }
+        });
+      } else {
+        trailHistory.length = 0;
+        trailMeshes.forEach((tm) => {
+          tm.visible = false;
+        });
       }
 
-      ballShadow.position.set(st.ball.x, 0.03, 0);
-      const hFactor = Math.max(0.35, 1 - st.ball.y / 11);
+      ballShadow.position.set(renderBx, 0.03, 0);
+      const hFactor = Math.max(0.35, 1 - renderBy / 11);
       ballShadow.scale.setScalar(hFactor);
       (ballShadow.material as THREE.MeshBasicMaterial).opacity = 0.45 * hFactor;
 
-      // Sync 3D Characters
+      // Sync 3D Characters (with visual smoothing offset on remote slots)
       for (const vis of visuals) {
         const p = st.players.find((pl) => pl.slotId === vis.slotId);
         if (!p) continue;
-        vis.root.position.set(p.x, p.y, vis.zOffset);
-        vis.ring.position.set(p.x, 0.035, vis.zOffset);
+        const rx = p.x + playerErrX[vis.slotId];
+        const ry = Math.max(0, p.y + playerErrY[vis.slotId]);
+        vis.root.position.set(rx, ry, vis.zOffset);
+        vis.ring.position.set(rx, 0.035, vis.zOffset);
 
         const targetYaw = p.facing > 0 ? 0.2 : Math.PI - 0.2;
         vis.root.rotation.y += (targetYaw - vis.root.rotation.y) * 0.25;
@@ -941,7 +1175,7 @@ export function BeachVolleyballModal({
       disposeObject3D(scene);
       renderer.dispose();
     };
-  }, [isOpen, screen, mode, qualityMode, players, sendRoomMessage, claimWinReward]);
+  }, [isOpen, screen, mode, qualityMode, sendRoomMessage]);
 
   if (!isOpen) return null;
 
@@ -955,32 +1189,43 @@ export function BeachVolleyballModal({
     localInputRef.current[key] = val;
   };
 
+  const setSlideKnobDom = (px: number, py: number) => {
+    if (slideKnobDomRef.current) {
+      slideKnobDomRef.current.style.transform = `translate(${px}px, ${py}px)`;
+    }
+  };
+
   const handleSlideDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     slidePointerIdRef.current = e.pointerId;
     slideOriginXRef.current = e.clientX;
-    setSlideKnobX(0);
-    setShowTouchControls(true);
+    slideOriginYRef.current = e.clientY;
+    setSlideKnobDom(0, 0);
   };
 
   const handleSlideMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (slidePointerIdRef.current !== e.pointerId) return;
     e.preventDefault();
     const dx = e.clientX - slideOriginXRef.current;
-    const clamped = Math.max(-44, Math.min(44, dx));
-    setSlideKnobX(clamped);
+    const dy = e.clientY - slideOriginYRef.current;
+    const dist = Math.hypot(dx, dy);
+    const maxR = 40;
+    const scale = dist > maxR ? maxR / dist : 1;
+    setSlideKnobDom(dx * scale, dy * scale);
     const deadzone = 12;
     localInputRef.current.left = dx < -deadzone;
     localInputRef.current.right = dx > deadzone;
+    localInputRef.current.down = dy > 16;
   };
 
   const handleSlideEnd = (e: React.PointerEvent<HTMLDivElement>) => {
     if (slidePointerIdRef.current !== e.pointerId) return;
     slidePointerIdRef.current = null;
-    setSlideKnobX(0);
+    setSlideKnobDom(0, 0);
     localInputRef.current.left = false;
     localInputRef.current.right = false;
+    localInputRef.current.down = false;
   };
 
   return (
@@ -1132,11 +1377,15 @@ export function BeachVolleyballModal({
                   const curSlots = humanSlotsRef.current;
                   broadcastArenaLobby('started', mode, curSlots);
                   sendRoomMessage('start_match', { mode, humanSlots: curSlots });
+                  winHandledRef.current = false;
+                  rewardClaimedRef.current = false;
+                  remoteKinematicsRef.current = {};
                   setWinnerTeam(null);
                   setRewardStatus('');
+                  setPointBanner('');
                   setScoreLeft(0);
                   setScoreRight(0);
-                  rewardClaimedRef.current = false;
+                  screenRef.current = 'playing';
                   setScreen('playing');
                 }}
                 className="w-full rpg-btn-gold font-[family-name:var(--font-kanit)] py-3 rounded-xl text-sm sm:text-base font-extrabold cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
@@ -1228,68 +1477,70 @@ export function BeachVolleyballModal({
           {/* Desktop Controls Hint (shown when touch controls are off) */}
           {!showTouchControls && (
             <div className="hidden lg:flex fixed bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-              <div className="rpg-panel rounded-full px-4 py-1.5 text-xs font-bold text-amber-100 flex items-center gap-3">
-                <span>⬅️➡️ หรือ A/D เดิน</span>
+              <div className="rpg-panel rounded-full px-4 py-1.5 text-xs font-bold text-amber-100 flex items-center gap-2.5">
+                <span>⬅️➡️ / A,D เดิน</span>
                 <span>•</span>
-                <span>⬆️ หรือ Space กระโดด</span>
+                <span>⬆️ / W / Space กระโดด</span>
                 <span>•</span>
-                <span>💥 Shift / Enter ตบลูกไฟ (กลางอากาศ) &amp; พุ่งรับ (บนพื้น)</span>
+                <span>💥 Enter / Z / Shift + ทิศทาง (⬆️โด่ง / ➡️พุ่ง / ⬇️ตบปักพื้น!)</span>
               </div>
             </div>
           )}
 
-          {/* Multi-Touch Controls: Left Finger-Slide Pad + Right Jump & Spike Buttons (Auto-shown on Mobile & iPad) */}
+          {/* Multi-Touch Controls: 2D Pikachu Directional Pad + Right Jump & Spike Buttons */}
           {!winnerTeam && showTouchControls && (
-            <div className="flex fixed bottom-4 inset-x-4 pb-safe z-30 items-end justify-between pointer-events-none">
-              {/* Left Thumb: Slide Finger Left / Right to Move */}
+            <div className="flex fixed bottom-3 sm:bottom-4 inset-x-3 sm:inset-x-5 pb-safe z-30 items-end justify-between pointer-events-none">
+              {/* Left Thumb: 2D Pad (Left/Right to Move & Aim, Down to Aim Steep Smash!) */}
               <div
                 onPointerDown={handleSlideDown}
                 onPointerMove={handleSlideMove}
                 onPointerUp={handleSlideEnd}
                 onPointerCancel={handleSlideEnd}
-                className="pointer-events-auto relative w-40 sm:w-48 h-20 sm:h-24 rounded-full bg-slate-900/65 border-2 border-amber-300/80 shadow-xl flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+                className="pointer-events-auto relative w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-slate-900/65 border-2 border-amber-300/80 shadow-xl flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
               >
-                <span className="absolute left-3.5 text-amber-300/85 text-lg font-black pointer-events-none">
+                <span className="absolute left-2 text-amber-300/85 text-xs sm:text-sm font-black pointer-events-none">
                   ◀
                 </span>
-                <span className="absolute right-3.5 text-amber-300/85 text-lg font-black pointer-events-none">
+                <span className="absolute right-2 text-amber-300/85 text-xs sm:text-sm font-black pointer-events-none">
                   ▶
                 </span>
+                <span className="absolute bottom-1 text-rose-300/90 text-[9px] sm:text-[10px] font-black pointer-events-none">
+                  ▼ ตบปัก
+                </span>
                 <div
-                  style={{ transform: `translateX(${slideKnobX}px)` }}
-                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 border-2 border-white shadow-lg flex flex-col items-center justify-center text-stone-950 font-black pointer-events-none transition-transform duration-75"
+                  ref={slideKnobDomRef}
+                  className="w-11 h-11 sm:w-14 sm:h-14 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 border-2 border-white shadow-lg flex flex-col items-center justify-center text-stone-950 font-black pointer-events-none"
                 >
-                  <span className="text-base leading-none">👆</span>
-                  <span className="text-[9px] leading-none mt-0.5">เลื่อน</span>
+                  <span className="text-sm sm:text-base leading-none">🕹️</span>
                 </div>
               </div>
 
               {/* Right Thumb: Spike/Dive + Jump */}
-              <div className="flex gap-3 pointer-events-auto">
+              <div className="flex gap-2.5 sm:gap-3.5 pointer-events-auto">
                 <button
                   type="button"
                   onPointerDown={(e) => {
                     e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
                     setTouchKey('action', true);
                   }}
                   onPointerUp={() => setTouchKey('action', false)}
                   onPointerCancel={() => setTouchKey('action', false)}
-                  onPointerLeave={() => setTouchKey('action', false)}
-                  className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-gradient-to-b from-orange-500/95 to-rose-600/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
+                  className="w-16 h-16 sm:w-21 sm:h-21 rounded-full bg-gradient-to-b from-orange-500/95 to-rose-600/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
-                  <span className="text-2xl leading-none">💥</span>
-                  <span className="text-[10.5px] sm:text-xs mt-0.5">ตบ/พุ่ง</span>
+                  <span className="text-xl sm:text-2xl leading-none">💥</span>
+                  <span className="text-[10px] sm:text-xs mt-0.5">ตบ/พุ่ง</span>
                 </button>
                 <button
                   type="button"
                   onPointerDown={(e) => {
                     e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
                     setTouchKey('jump', true);
                   }}
                   onPointerUp={() => setTouchKey('jump', false)}
                   onPointerCancel={() => setTouchKey('jump', false)}
-                  onPointerLeave={() => setTouchKey('jump', false)}
-                  className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-gradient-to-b from-sky-500/95 to-blue-700/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
+                  className="w-16 h-16 sm:w-21 sm:h-21 rounded-full bg-gradient-to-b from-sky-500/95 to-blue-700/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
                   <span className="text-2xl leading-none">⬆</span>
                   <span className="text-[10.5px] sm:text-xs mt-0.5">กระโดด</span>
@@ -1324,11 +1575,14 @@ export function BeachVolleyballModal({
                         matchStateRef.current.winner = null;
                         resetRallyPositions(matchStateRef.current, 'left');
                       }
+                      winHandledRef.current = false;
+                      rewardClaimedRef.current = false;
+                      remoteKinematicsRef.current = {};
                       setScoreLeft(0);
                       setScoreRight(0);
                       setWinnerTeam(null);
+                      setPointBanner('');
                       setRewardStatus('');
-                      rewardClaimedRef.current = false;
                       sendRoomMessage('start_match', { mode, humanSlots: humanSlotsRef.current });
                     }}
                     className="w-full rpg-btn-gold py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"

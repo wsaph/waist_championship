@@ -1115,6 +1115,7 @@ export function WardrobeShopModal({
   const [mobileSheetTab, setMobileSheetTab] = useState<'species' | 'shop' | 'bmi'>(
     initialRightTab === 'gacha' ? 'shop' : 'species'
   );
+  const [mobileSheetCollapsed, setMobileSheetCollapsed] = useState<boolean>(false);
   const [previewBelly, setPreviewBelly] = useState<number>(1.0);
   const [shopBusyId, setShopBusyId] = useState<string | null>(null);
   const [shopMsg, setShopMsg] = useState<string>('');
@@ -1948,98 +1949,124 @@ export function WardrobeShopModal({
           </div>
         </div>
 
-        {/* MOBILE / IPAD PORTRAIT (< lg): Compact 360° Pill + Tab Bar sitting cleanly below the open top 3D stage */}
+        {/* MOBILE / IPAD PORTRAIT (< lg): Clean 2-tier controls (Spin + Full-View + Save on row 1, 3-col Tab Bar on row 2) */}
         <div className="lg:hidden mt-auto flex flex-col gap-1.5 pointer-events-none">
           <div className="flex items-center justify-between gap-2 pointer-events-auto">
-            <button
-              type="button"
-              onClick={() => {
-                const next = !autoSpinRef.current;
-                autoSpinRef.current = next;
-                setAutoSpinUi(next);
-              }}
-              className={`px-2.5 py-1 rounded-full border-2 flex items-center gap-1 text-[11px] font-extrabold shadow-lg cursor-pointer ${
-                autoSpinUi
-                  ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950'
-                  : 'bg-slate-900/90 border-amber-400/80 text-amber-200'
-              }`}
-            >
-              <span>🔄</span>
-              <span>หมุน 360°</span>
-            </button>
-
-            <div className="flex md:hidden items-center gap-1 rpg-panel rounded-xl p-1">
-              {(
-                [
-                  { id: 'species', label: '🐾 สายพันธุ์' },
-                  { id: 'shop', label: '👕 ชุด/ร้าน' },
-                  { id: 'bmi', label: '⚖️ BMI' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setMobileSheetTab(tab.id)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold cursor-pointer transition ${
-                    mobileSheetTab === tab.id
-                      ? 'rpg-btn-gold'
-                      : 'text-amber-100/90'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !autoSpinRef.current;
+                  autoSpinRef.current = next;
+                  setAutoSpinUi(next);
+                }}
+                className={`px-2.5 py-1.5 rounded-full border-2 flex items-center gap-1 text-[11px] font-extrabold shadow-lg cursor-pointer ${
+                  autoSpinUi
+                    ? 'bg-gradient-to-b from-amber-300 to-amber-500 border-amber-100 text-stone-950'
+                    : 'bg-slate-900/90 border-amber-400/80 text-amber-200'
+                }`}
+              >
+                <span>🔄</span>
+                <span>360°</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileSheetCollapsed((v) => !v)}
+                className={`md:hidden px-2.5 py-1.5 rounded-full border-2 flex items-center gap-1 text-[11px] font-extrabold shadow-lg cursor-pointer ${
+                  mobileSheetCollapsed
+                    ? 'bg-emerald-500 border-emerald-100 text-slate-950'
+                    : 'bg-slate-900/90 border-slate-500/80 text-amber-100'
+                }`}
+              >
+                <span>{mobileSheetCollapsed ? '▲' : '👁️'}</span>
+                <span>{mobileSheetCollapsed ? 'เปิดแผง' : 'เต็มตัว'}</span>
+              </button>
             </div>
 
             <button
               type="button"
               onClick={() => setShowConfirmModal(true)}
-              className="md:hidden rpg-btn-blue px-3 py-1 rounded-full text-[11px] font-extrabold cursor-pointer shadow-lg"
+              className="md:hidden rpg-btn-blue px-3.5 py-1.5 rounded-full text-xs font-extrabold cursor-pointer shadow-lg"
             >
-              🚀 บันทึก
+              🚀 บันทึกชุด
             </button>
+          </div>
+
+          {/* Full-width 3-Column Mobile Segmented Tab Bar */}
+          <div className="grid md:hidden grid-cols-3 gap-1 rpg-panel rounded-xl p-1 pointer-events-auto shadow-lg">
+            {(
+              [
+                { id: 'species', label: '🐾 สายพันธุ์' },
+                { id: 'shop', label: '👕 ชุด/ร้าน' },
+                { id: 'bmi', label: '⚖️ รูปร่าง' },
+              ] as const
+            ).map((tab) => {
+              const active = !mobileSheetCollapsed && mobileSheetTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setMobileSheetTab(tab.id);
+                    setMobileSheetCollapsed(false);
+                    if (tab.id === 'bmi') setShowBmiCard(true);
+                  }}
+                  className={`py-1.5 px-2 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+                    active ? 'rpg-btn-gold shadow' : 'text-amber-100/90 hover:bg-white/10'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* MIDDLE ROW: LEFT STONE PANEL + OPEN SKY CENTER STAGE + RIGHT STONE PANEL */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2.5 lg:gap-4 items-end lg:items-center lg:flex-1 my-1 lg:my-2 min-h-0">
+        <div
+          className={`${
+            mobileSheetCollapsed ? 'hidden md:grid' : 'grid'
+          } grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2.5 lg:gap-4 items-end lg:items-center lg:flex-1 my-1 lg:my-2 min-h-0`}
+        >
           {/* LEFT PANEL: Carved Stone & Gold Selector (🐾 120 Animals vs 🏰 56 Disney vs 🎌 56 Anime) */}
-          <div className={`${mobileSheetTab === 'species' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto h-[48dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
+          <div className={`${mobileSheetTab === 'species' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-2 sm:pt-2.5 space-y-1.5 sm:space-y-2 pointer-events-auto h-[46dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
             <StoneFrameCorners />
-            <RpgWingedHeaderPlaque
-              title={
-                leftTab === 'species'
-                  ? 'เลือกสายพันธุ์สัตว์'
-                  : leftTab === 'anime'
-                  ? 'เลือกตัวละครอนิเมะดัง'
-                  : leftTab === 'monster'
-                  ? 'เลือกผี & สัตว์ประหลาด'
-                  : leftTab === 'job'
-                  ? 'เลือกอาชีพสายเกม RPG'
-                  : 'เลือกตัวละครดิสนีย์ & พิกซาร์'
-              }
-              subtitle={
-                leftTab === 'species'
-                  ? '(เลี้ยง • ป่า • สูญพันธุ์ • เทพนิยาย 🐉)'
-                  : leftTab === 'anime'
-                  ? '(โชเน็น • นางเอก • วัยเด็ก • ตัวตึง 🎌)'
-                  : leftTab === 'monster'
-                  ? '(ผีไทย • ฮาโลวีน • ไคจู • โยไค 👻)'
-                  : leftTab === 'job'
-                  ? '(นักรบ • สายเวท • ว่องไว • คราฟต์ ⚔️)'
-                  : '(เจ้าหญิง • คลาสสิก • พิกซาร์ • วายร้าย 🏰)'
-              }
-            />
+            <div className="hidden md:block">
+              <RpgWingedHeaderPlaque
+                title={
+                  leftTab === 'species'
+                    ? 'เลือกสายพันธุ์สัตว์'
+                    : leftTab === 'anime'
+                    ? 'เลือกตัวละครอนิเมะดัง'
+                    : leftTab === 'monster'
+                    ? 'เลือกผี & สัตว์ประหลาด'
+                    : leftTab === 'job'
+                    ? 'เลือกอาชีพสายเกม RPG'
+                    : 'เลือกตัวละครดิสนีย์ & พิกซาร์'
+                }
+                subtitle={
+                  leftTab === 'species'
+                    ? '(เลี้ยง • ป่า • สูญพันธุ์ • เทพนิยาย 🐉)'
+                    : leftTab === 'anime'
+                    ? '(โชเน็น • นางเอก • วัยเด็ก • ตัวตึง 🎌)'
+                    : leftTab === 'monster'
+                    ? '(ผีไทย • ฮาโลวีน • ไคจู • โยไค 👻)'
+                    : leftTab === 'job'
+                    ? '(นักรบ • สายเวท • ว่องไว • คราฟต์ ⚔️)'
+                    : '(เจ้าหญิง • คลาสสิก • พิกซาร์ • วายร้าย 🏰)'
+                }
+              />
+            </div>
 
-            {/* 5 Side Tabs on wide desktop (protruding right edge of stone frame), compact strip on tablet/mobile */}
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 xl:absolute xl:left-full xl:top-10 xl:flex xl:flex-col xl:gap-1.5 xl:ml-[5px] z-10">
+            {/* 5 Side Tabs on wide desktop (protruding right edge), single horizontal scrollable strip on mobile/tablet */}
+            <div className="flex overflow-x-auto no-scrollbar gap-1 shrink-0 pb-0.5 xl:pb-0 xl:overflow-visible xl:absolute xl:left-full xl:top-10 xl:flex-col xl:gap-1.5 xl:ml-[5px] z-10">
               <button
                 type="button"
                 onClick={() => {
                   setLeftTab('species');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                className={`shrink-0 py-1 px-2.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'species'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -2053,7 +2080,7 @@ export function WardrobeShopModal({
                   setLeftTab('hero');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                className={`shrink-0 py-1 px-2.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'hero'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -2067,7 +2094,7 @@ export function WardrobeShopModal({
                   setLeftTab('anime');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                className={`shrink-0 py-1 px-2.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'anime'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -2081,7 +2108,7 @@ export function WardrobeShopModal({
                   setLeftTab('monster');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                className={`shrink-0 py-1 px-2.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'monster'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -2095,7 +2122,7 @@ export function WardrobeShopModal({
                   setLeftTab('job');
                   setLeftSearch('');
                 }}
-                className={`py-1.5 px-1.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition xl:whitespace-nowrap xl:text-left shadow-md ${
+                className={`shrink-0 py-1 px-2.5 xl:py-2 xl:px-3 rounded-lg xl:rounded-l-none xl:rounded-r-xl text-[11px] xl:text-xs font-extrabold border-2 cursor-pointer transition whitespace-nowrap xl:text-left shadow-md ${
                   leftTab === 'job'
                     ? 'rpg-btn-gold'
                     : 'bg-slate-900/95 text-amber-100 border-amber-700 hover:border-amber-400'
@@ -2792,9 +2819,11 @@ export function WardrobeShopModal({
           </div>
 
           {/* RIGHT PANEL: Carved Stone & Gold Props + Vertical Category Sidebar */}
-          <div className={`${mobileSheetTab === 'shop' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-3 pb-3 pt-2.5 space-y-2 pointer-events-auto h-[48dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
+          <div className={`${mobileSheetTab === 'shop' ? 'flex' : 'hidden'} md:flex lg:col-span-4 xl:col-span-3 rpg-stone-frame rounded-2xl px-2.5 sm:px-3 pb-2.5 sm:pb-3 pt-2 sm:pt-2.5 space-y-1.5 sm:space-y-2 pointer-events-auto h-[46dvh] md:h-[46dvh] lg:h-[68dvh] flex-col relative`}>
             <StoneFrameCorners />
-            <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha 💰)" />
+            <div className="hidden md:block">
+              <RpgWingedHeaderPlaque title="พรอพตกแต่ง & ร้านค้า" subtitle="(ปลดล็อกด้วย Gacha 💰)" />
+            </div>
 
             {/* Vertical Bookmark Sidebar on Wide Desktop (xl:, protruding left edge of right panel), horizontal scroll strip on tablet/mobile so it never overlaps Center Stage */}
             <div className="flex gap-1 overflow-x-auto pb-1 xl:pb-0 xl:overflow-visible xl:absolute xl:right-full xl:top-6 xl:flex-col xl:gap-1 xl:mr-[5px] z-10 shrink-0">
@@ -3424,7 +3453,7 @@ export function WardrobeShopModal({
             <button
               type="button"
               onClick={() => setShowConfirmModal(true)}
-              className="w-full rpg-btn-blue font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base py-3 rounded-2xl cursor-pointer"
+              className="hidden md:block w-full rpg-btn-blue font-[family-name:var(--font-kanit)] font-extrabold text-sm sm:text-base py-3 rounded-2xl cursor-pointer"
             >
               {mode === 'edit' ? '🚀 บันทึกชุด & ลงสนามแข่ง!' : '🚀 อัญเชิญลงสนามแข่ง!'}
             </button>

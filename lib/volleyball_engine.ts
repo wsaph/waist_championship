@@ -6,8 +6,9 @@ export type VbSlotId = 'L1' | 'L2' | 'R1' | 'R2';
 export interface VbInputState {
   left: boolean;
   right: boolean;
-  jump: boolean;
-  action: boolean; // Spike (in air) or Dive (on ground)
+  jump: boolean; // Up / Jump (also aims upward lob on mid-air spike)
+  down?: boolean; // Down (aims steep downward slam on mid-air spike, Pikachu 1997 style!)
+  action: boolean; // Power Hit / Spike (in air) or Torpedo Dive (on ground)
 }
 
 export interface VbPlayerPhysics {
@@ -78,23 +79,24 @@ export function getCourtConfig(mode: VbMode): VbCourtConfig {
   if (mode === '2v2') {
     return {
       mode: '2v2',
-      halfWidth: 8.4,
+      halfWidth: 8.2,
       netHeight: 2.55,
       netHalfThickness: 0.16,
-      ballRadius: 0.52,
-      playerRadius: 0.68,
-      playerHeight: 1.55,
+      ballRadius: 0.56,
+      playerRadius: 0.72,
+      playerHeight: 1.6,
       winScore: VB_WIN_SCORE,
     };
   }
+  // Authentic 1997 Pikachu Volleyball 1v1 proportions (432x304 court ratio)
   return {
     mode: '1v1',
-    halfWidth: 6.8,
-    netHeight: 2.4,
+    halfWidth: 6.6,
+    netHeight: 2.45,
     netHalfThickness: 0.16,
-    ballRadius: 0.52,
-    playerRadius: 0.68,
-    playerHeight: 1.55,
+    ballRadius: 0.56,
+    playerRadius: 0.72,
+    playerHeight: 1.6,
     winScore: VB_WIN_SCORE,
   };
 }
@@ -207,13 +209,14 @@ export function resetRallyPositions(state: VbMatchState, servingTeam: VbTeam): v
   state.ball.lastTouchSlot = null;
 }
 
-const GRAVITY_PLAYER = 29.5;
-const GRAVITY_BALL = 14.2;
-const PLAYER_SPEED = 7.4;
-const PLAYER_JUMP_VY = 12.2;
-const DIVE_SPEED = 12.2;
-const DIVE_DURATION = 0.24;
-const DIVE_COOLDOWN = 0.58;
+// Tuned to match 1997 Pikachu Volleyball: floaty ball + high snappy jump + torpedo dive!
+const GRAVITY_PLAYER = 31.0;
+const GRAVITY_BALL = 13.2;
+const PLAYER_SPEED = 7.8;
+const PLAYER_JUMP_VY = 13.6;
+const DIVE_SPEED = 13.0;
+const DIVE_DURATION = 0.28;
+const DIVE_COOLDOWN = 0.52;
 
 /**
  * Predict where the ball will cross y = targetY (used by AI bots).
@@ -392,13 +395,13 @@ export function stepVolleyballMatch(
         p.vy = PLAYER_JUMP_VY;
       }
 
-      // Ground dive (Pikachu Volleyball slide!)
+      // Ground dive (1997 Pikachu Volleyball torpedo dive!)
       if (inp.action && p.y <= 0.001 && p.diveCooldown <= 0 && moveDir !== 0) {
         p.diveTimer = DIVE_DURATION;
         p.diveCooldown = DIVE_COOLDOWN;
         p.diveDir = moveDir > 0 ? 1 : -1;
         p.facing = p.diveDir;
-        p.vy = 4.2;
+        p.vy = 5.2;
         events.dive = true;
       }
     }
@@ -502,25 +505,58 @@ export function stepVolleyballMatch(
       ball.x = p.x + nx * (hitRadius + 0.03);
       ball.y = pCenterY + ny * (hitRadius + 0.03);
 
-      const isAirSpike = inp.action && p.y > 0.35;
+      const isAirSpike = inp.action && p.y > 0.32;
       if (isAirSpike) {
-        // Pikachu Volleyball Power Spike!
+        // Authentic 1997 Pikachu Volleyball 5-Direction Power Spike!
         const forward = p.team === 'left' ? 1 : -1;
-        const aimUp = inp.jump;
         const aimDir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
-        const horizontalPower = aimDir === forward ? 13.8 : aimDir === -forward ? 8.2 : 11.8;
-        ball.vx = forward * horizontalPower;
-        ball.vy = aimUp ? 6.2 : -3.8;
+        const holdingForward = aimDir === forward;
+        const holdingBack = aimDir === -forward;
+        const holdingUp = Boolean(inp.jump);
+        const holdingDown = Boolean(inp.down);
+
+        if (holdingDown && holdingForward) {
+          // Diagonal fast slam
+          ball.vx = forward * 15.2;
+          ball.vy = -7.8;
+        } else if (holdingDown) {
+          // Steep vertical net-front slam!
+          ball.vx = forward * 9.2;
+          ball.vy = -12.6;
+        } else if (holdingUp) {
+          // High power lob over blockers to deep backline
+          ball.vx = forward * (holdingForward ? 13.6 : 11.2);
+          ball.vy = 8.4;
+        } else if (holdingForward) {
+          // Flat high-speed rocket across the tape
+          ball.vx = forward * 16.4;
+          ball.vy = 0.7;
+        } else if (holdingBack) {
+          // Cheeky soft drop-shot feint
+          ball.vx = forward * 6.8;
+          ball.vy = 3.6;
+        } else {
+          // Classic neutral downward spike
+          ball.vx = forward * 12.6;
+          ball.vy = -4.2;
+        }
         ball.isSpiked = true;
         p.spikeFlash = 0.35;
         state.screenShake = 0.55;
         events.spike = true;
+      } else if (p.diveTimer > 0) {
+        // Pikachu Torpedo Diving Save -> pops ball high up for a clean recovery set!
+        const centerBias = p.team === 'left' ? 1.4 : -1.4;
+        ball.vx = nx * 4.5 + centerBias;
+        ball.vy = 11.4;
+        ball.isSpiked = false;
+        events.hit = true;
       } else {
-        // Classic soft volleyball bump/set
-        const forwardBias = p.team === 'left' ? 0.9 : -0.9;
-        ball.vx = nx * 7.6 + p.vx * 0.42 + forwardBias;
-        ball.vx = Math.max(-10.5, Math.min(10.5, ball.vx));
-        ball.vy = Math.max(8.8, Math.min(12.2, 9.6 + ny * 2.2 + Math.max(0, p.vy) * 0.2));
+        // Classic Pikachu rounded head bounce / set
+        const forwardBias = p.team === 'left' ? 0.85 : -0.85;
+        ball.vx = nx * 7.4 + p.vx * 0.38 + forwardBias;
+        ball.vx = Math.max(-10.2, Math.min(10.2, ball.vx));
+        ball.vy = Math.max(9.2, Math.min(12.6, 10.0 + ny * 2.2 + Math.max(0, p.vy) * 0.18));
         ball.isSpiked = false;
         events.hit = true;
       }

@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { fetchAllQuests } from '@/lib/quest_board_db';
 import {
-  QUEST_BETTING_WINDOW_DAYS,
   QUEST_MIN_DURATION_DAYS,
   computeBetPayouts,
+  computeBettingWindowMs,
   computeBettingWindowState,
   computePerMemberQuestReward,
   computeSponsorPayout,
+  formatCountdownTh,
   validateQuestDateRange,
   validateStakeIncrement,
   type BetSide,
@@ -122,9 +123,8 @@ export async function POST(
         return NextResponse.json({ error: rangeCheck.error }, { status: 400 });
       }
 
-      const bettingEndsAt = new Date(
-        Date.now() + QUEST_BETTING_WINDOW_DAYS * 86_400_000
-      ).toISOString();
+      const bettingWindowMs = computeBettingWindowMs(rangeCheck.days);
+      const bettingEndsAt = new Date(Date.now() + bettingWindowMs).toISOString();
 
       const claimRes = await turso.execute({
         sql: `
@@ -174,7 +174,7 @@ export async function POST(
 
       const quests = await fetchAllQuests();
       return NextResponse.json({
-        message: 'รับเควสสำเร็จ! เปิดช่วงวางเดิมพัน 7 วันแรกแล้ว 🎲',
+        message: `รับเควสสำเร็จ! เปิดช่วงวางเดิมพัน 25% แรก (${formatCountdownTh(bettingWindowMs)}) แล้ว 🎲`,
         quests,
       });
     }

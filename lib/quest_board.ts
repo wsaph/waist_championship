@@ -1,5 +1,6 @@
 export const QUEST_MIN_DURATION_DAYS = 1;
-export const QUEST_BETTING_WINDOW_DAYS = 7;
+export const QUEST_BETTING_WINDOW_RATIO = 0.25; // 25% of total quest duration
+export const QUEST_BETTING_WINDOW_DAYS = 7; // legacy fallback constant
 export const QUEST_MIN_STAKE = 10;
 export const QUEST_MAX_STAKE = 500;
 export const QUEST_COOP_BONUS_STEP = 0.1; // +10% per additional party member
@@ -313,7 +314,15 @@ export function computeBetPayouts(
 }
 
 /**
- * Checks whether a quest's 7-day betting window is currently open.
+ * Computes betting window duration in ms as 25% of total quest duration (min 1 day => 6 hours).
+ */
+export function computeBettingWindowMs(durationDays: number): number {
+  const safeDays = Math.max(QUEST_MIN_DURATION_DAYS, Number.isFinite(durationDays) ? durationDays : QUEST_MIN_DURATION_DAYS);
+  return Math.round(safeDays * 86_400_000 * QUEST_BETTING_WINDOW_RATIO);
+}
+
+/**
+ * Checks whether a quest's betting window (first 25% of quest duration) is currently open.
  */
 export function computeBettingWindowState(
   status: QuestStatus,

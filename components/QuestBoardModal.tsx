@@ -6,6 +6,7 @@ import {
   QUEST_MAX_STAKE,
   QUEST_MIN_STAKE,
   computeBetPayouts,
+  computeBettingWindowMs,
   computeCoopMultiplier,
   computeDateRangeDays,
   computePerMemberQuestReward,
@@ -941,7 +942,7 @@ export function QuestBoardModal({
                       }
                       className="ro-gold-btn w-full py-2.5 rounded-xl font-[family-name:var(--font-kanit)] font-extrabold text-sm cursor-pointer disabled:opacity-50"
                     >
-                      ⚔️ รับเควสนี้เลย! (เปิดช่วงเดิมพัน 7 วันทันที)
+                      ⚔️ รับเควสนี้เลย! (เปิดเดิมพัน 25% แรก • {formatCountdownTh(computeBettingWindowMs(Math.max(1, rangeDays || q.durationDays)))})
                     </button>
                   </div>
                 ) : (
@@ -1036,7 +1037,7 @@ export function QuestBoardModal({
               <div className="rounded-xl bg-[#f9eed6] border-2 border-[#c69d63] p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="font-[family-name:var(--font-kanit)] font-extrabold text-sm text-[#5b320e]">
-                    🎲 เดิมพันทายผล (สัปดาห์แรก 7 วัน)
+                    🎲 เดิมพันทายผล (25% แรกของเวลาเควส)
                   </h4>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10.5px] font-extrabold ${
