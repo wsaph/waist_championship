@@ -126,15 +126,15 @@ export function createInitialMatchState(
   const slotList: Array<{ id: VbSlotId; team: VbTeam; role: 0 | 1 }> =
     mode === '2v2'
       ? [
-          { id: 'L1', team: 'left', role: 0 },
-          { id: 'L2', team: 'left', role: 1 },
-          { id: 'R1', team: 'right', role: 0 },
-          { id: 'R2', team: 'right', role: 1 },
-        ]
+        { id: 'L1', team: 'left', role: 0 },
+        { id: 'L2', team: 'left', role: 1 },
+        { id: 'R1', team: 'right', role: 0 },
+        { id: 'R2', team: 'right', role: 1 },
+      ]
       : [
-          { id: 'L1', team: 'left', role: 0 },
-          { id: 'R1', team: 'right', role: 0 },
-        ];
+        { id: 'L1', team: 'left', role: 0 },
+        { id: 'R1', team: 'right', role: 0 },
+      ];
 
   const players: VbPlayerPhysics[] = slotList.map((s) => ({
     slotId: s.id,
@@ -342,7 +342,8 @@ export function computeBotInput(
 export function stepVolleyballMatch(
   state: VbMatchState,
   inputs: Record<VbSlotId, VbInputState>,
-  dtRaw: number
+  dtRaw: number,
+  isClientPrediction = false
 ): VbStepEvents {
   const dt = Math.min(0.033, Math.max(0.001, dtRaw));
   const events: VbStepEvents = {};
@@ -367,7 +368,7 @@ export function stepVolleyballMatch(
       ball.vy = Math.abs(ball.vy) * 0.45;
       ball.vx *= 0.82;
     }
-    if (state.phaseTimer <= 0) {
+    if (!isClientPrediction && state.phaseTimer <= 0) {
       resetRallyPositions(state, state.lastScorer || 'left');
     }
     return events;
@@ -431,7 +432,7 @@ export function stepVolleyballMatch(
   // Wait briefly before dropping ball for serve
   if (state.phase === 'serve_wait') {
     state.phaseTimer -= dt;
-    if (state.phaseTimer <= 0) {
+    if (!isClientPrediction && state.phaseTimer <= 0) {
       state.phase = 'playing';
       ball.vy = -1.2;
     }
@@ -488,7 +489,8 @@ export function stepVolleyballMatch(
     }
   }
 
-  // Player-ball collisions
+  // Player-ball collisions (Host-authoritative only so Guest never sees fake/divergent bounces!)
+  if (!isClientPrediction) {
   for (const p of state.players) {
     if (p.hitCooldown > 0) continue;
     const inp = inputs[p.slotId] || { left: false, right: false, jump: false, action: false };
@@ -568,10 +570,16 @@ export function stepVolleyballMatch(
       break;
     }
   }
+  }
 
-  // Ground touch -> Point scored!
+  // Ground touch -> Point scored! (Host-authoritative only; Guest prediction never mutates score/phase!)
   if (ball.y - court.ballRadius <= 0) {
     ball.y = court.ballRadius;
+    if (isClientPrediction) {
+      ball.vy = Math.abs(ball.vy) * 0.42;
+      ball.vx *= 0.6;
+      return events;
+    }
     const scorer: VbTeam = ball.x < 0 ? 'right' : 'left';
     if (scorer === 'left') state.scoreLeft++;
     else state.scoreRight++;
@@ -608,7 +616,7 @@ function getAudioCtx(): AudioContext | null {
     if (Ctx) vbAudioCtx = new Ctx();
   }
   if (vbAudioCtx && vbAudioCtx.state === 'suspended') {
-    vbAudioCtx.resume().catch(() => {});
+    vbAudioCtx.resume().catch(() => { });
   }
   return vbAudioCtx;
 }

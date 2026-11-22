@@ -14,6 +14,7 @@ import {
   type TaekwondoKickPose,
   type TaekwondoMove,
 } from '@/lib/taekwondo_catalog';
+import { TaekwondoPvpArena } from '@/components/TaekwondoPvpArena';
 
 interface TaekwondoModalProps {
   isOpen: boolean;
@@ -506,9 +507,11 @@ export function TaekwondoModal({
   playerEmoji = '🥋',
   onPointsUpdated,
 }: TaekwondoModalProps) {
-  const [phase, setPhase] = useState<'lobby' | 'playing' | 'result'>('lobby');
+  const [phase, setPhase] = useState<'lobby' | 'playing' | 'result' | 'pvp'>('lobby');
   const [totalXp, setTotalXp] = useState<number>(0);
   const [bestScore, setBestScore] = useState<number>(0);
+  const [equippedBeltTier, setEquippedBeltTier] = useState<number | null>(null);
+  const [savingBeltTier, setSavingBeltTier] = useState<number | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
 
@@ -541,13 +544,14 @@ export function TaekwondoModal({
     promotedBelts: TaekwondoBelt[];
     coinsEarned: number;
     endedByKo?: boolean;
+    cappedToOneBelt?: boolean;
   } | null>(null);
 
   const scoreRef = useRef<number>(0);
   const comboRef = useRef<number>(0);
   const maxComboRef = useRef<number>(0);
   const heartsRef = useRef<number>(MAX_HEARTS);
-  const phaseRef = useRef<'lobby' | 'playing' | 'result'>('lobby');
+  const phaseRef = useRef<'lobby' | 'playing' | 'result' | 'pvp'>('lobby');
   const targetsRef = useRef<FloatingTarget[]>([]);
   targetsRef.current = targets;
   const targetIdRef = useRef<number>(1);
@@ -555,6 +559,11 @@ export function TaekwondoModal({
   const kickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { belt, nextBelt, progressPct } = resolveTaekwondoBelt(totalXp);
+  const wornBelt =
+    equippedBeltTier !== null && equippedBeltTier >= 0 && equippedBeltTier <= belt.tier
+      ? TAEKWONDO_BELTS[equippedBeltTier] ?? belt
+      : belt;
+  const isWearingLowerBelt = wornBelt.tier < belt.tier;
   const unlockedMoves = getUnlockedTaekwondoMoves(belt.tier);
   const loadout = getBeltCommandLoadout(belt.tier);
   const isRageMode = combo >= 5;
@@ -629,6 +638,11 @@ export function TaekwondoModal({
         const data = await res.json();
         setTotalXp(Number(data.totalXp ?? 0));
         setBestScore(Number(data.bestScore ?? 0));
+        setEquippedBeltTier(
+          data.equippedBeltTier === null || data.equippedBeltTier === undefined
+            ? null
+            : Number(data.equippedBeltTier)
+        );
         if (Array.isArray(data.leaderboard)) {
           setLeaderboard(data.leaderboard);
         }
@@ -639,6 +653,31 @@ export function TaekwondoModal({
       setLoadingProfile(false);
     }
   }, [currentUserId]);
+
+  const handleEquipBelt = useCallback(
+    async (tier: number | null) => {
+      if (tier !== null && tier > belt.tier) return;
+      const targetTier = tier === belt.tier ? null : tier;
+      setSavingBeltTier(tier ?? belt.tier);
+      setEquippedBeltTier(targetTier);
+      try {
+        await fetch('/api/taekwondo', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUserId,
+            tier: targetTier,
+          }),
+        });
+        void loadProfile();
+      } catch {
+        // keep optimistic local state
+      } finally {
+        setSavingBeltTier(null);
+      }
+    },
+    [belt.tier, currentUserId, loadProfile]
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -689,6 +728,11 @@ export function TaekwondoModal({
         if (res.ok && data?.success) {
           setTotalXp(Number(data.totalXp ?? 0));
           setBestScore(Number(data.bestScore ?? finalScore));
+          setEquippedBeltTier(
+            data.equippedBeltTier === null || data.equippedBeltTier === undefined
+              ? null
+              : Number(data.equippedBeltTier)
+          );
           const promoted: TaekwondoBelt[] = Array.isArray(data.promotedBelts) ? data.promotedBelts : [];
           const coinsEarned = Number(data.coinsEarned ?? 0);
           setLastResult({
@@ -696,6 +740,7 @@ export function TaekwondoModal({
             promotedBelts: promoted,
             coinsEarned,
             endedByKo,
+            cappedToOneBelt: Boolean(data.cappedToOneBelt),
           });
           if (promoted.length > 0) {
             playKickSfx('rankup');
@@ -1059,10 +1104,19 @@ export function TaekwondoModal({
               <h2 className="font-[family-name:var(--font-kanit)] font-black italic tracking-wide text-base sm:text-lg text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-red-500 truncate">
                 TEKKEN DOJANG • เตะเป้าลอยปลดล็อกท่าสาย!
               </h2>
-              <div className="flex items-center gap-2 text-[11px] font-bold text-zinc-200">
-                <span className={`px-2 py-0.5 rounded-sm border text-[10px] font-black uppercase ${belt.badgeClass}`}>
-                  {belt.name} ({belt.enName})
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-zinc-200">
+                <span className={`px-2 py-0.5 rounded-sm border text-[10px] font-black uppercase ${wornBelt.badgeClass}`}>
+                  {wornBelt.name}
                 </span>
+                {isWearingLowerBelt && (
+                  <button
+                    type="button"
+                    onClick={() => void handleEquipBelt(null)}
+                    className="px-1.5 py-0.5 rounded-sm bg-amber-400/20 hover:bg-amber-400/35 border border-amber-300/70 text-[9.5px] font-extrabold text-amber-200 cursor-pointer"
+                  >
+                    กลับสายสูงสุด ({belt.name})
+                  </button>
+                )}
                 <span className="text-amber-300 font-black">XP: {totalXp.toLocaleString()}</span>
                 <span className="text-sky-300 hidden sm:inline">
                   • ท่าที่ปลดล็อก: {unlockedMoves.length}/{TAEKWONDO_MOVES.length}
@@ -1129,7 +1183,7 @@ export function TaekwondoModal({
                 >
                   <TekkenTaekwondoFighter
                     emoji={playerEmoji}
-                    belt={belt}
+                    belt={wornBelt}
                     pose={lobbyPreviewMove?.pose || 'idle'}
                     facing="right"
                     trailHex={lobbyPreviewMove?.trailHex}
@@ -1164,33 +1218,44 @@ export function TaekwondoModal({
                 </div>
               </div>
 
-              {/* Command List / Unlockable Moves by Belt (including 2-color belts & Brown belt!) */}
+              {/* Command List / Unlockable Moves by Belt (including 2-color belts, Brown belt & equip/downgrade!) */}
               <div className="rounded-xl bg-zinc-950/90 border border-zinc-800 p-3">
-                <div className="text-xs font-black italic uppercase tracking-wide text-amber-300 mb-2">
-                  🥋 BELT & COMMAND LIST • ลำดับ 14 สาย (ครบสาย 2 สี + สายน้ำตาล! จิ้มสายที่มีท่าเพื่อลองเตะ)
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-xs font-black italic uppercase tracking-wide text-amber-300">
+                    🥋 BELT & COMMAND LIST • เลือกย้อนสายที่ปลดล็อกแล้วได้ตลอด (XP และท่าไม่หาย!)
+                  </div>
+                  {isWearingLowerBelt && (
+                    <button
+                      type="button"
+                      onClick={() => void handleEquipBelt(null)}
+                      className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-yellow-400 text-black hover:brightness-110 cursor-pointer shrink-0"
+                    >
+                      ⬆️ ใส่สายสูงสุด
+                    </button>
+                  )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[210px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[215px] overflow-y-auto pr-1">
                   {TAEKWONDO_BELTS.map((b) => {
                     const move = b.unlockMoveId ? getMoveById(b.unlockMoveId) : null;
                     const unlocked = totalXp >= b.minXp;
-                    const isCur = b.tier === belt.tier;
+                    const isWorn = b.tier === wornBelt.tier;
+                    const isMax = b.tier === belt.tier;
                     return (
-                      <button
+                      <div
                         key={b.id}
-                        type="button"
-                        disabled={!unlocked || !move}
                         onClick={() => {
                           if (!unlocked || !move) return;
                           setLobbyPreviewMove(move);
                           playKickSfx(move.slot === 'ultimate' ? 'ultimate' : 'perfect');
                           setTimeout(() => setLobbyPreviewMove(null), 420);
                         }}
-                        className={`text-left rounded-lg px-2.5 py-1.5 border text-[11px] flex items-center gap-2.5 transition ${isCur
-                            ? 'bg-red-950/60 border-yellow-400 ring-1 ring-yellow-400'
+                        className={`text-left rounded-lg px-2.5 py-1.5 border text-[11px] flex items-center gap-2 transition ${
+                          isWorn
+                            ? 'bg-red-950/65 border-yellow-400 ring-1 ring-yellow-400'
                             : unlocked
-                              ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60'
-                              : 'bg-zinc-900/60 border-zinc-800 opacity-55'
-                          } ${unlocked && move ? 'cursor-pointer' : 'cursor-default'}`}
+                            ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60'
+                            : 'bg-zinc-900/60 border-zinc-800 opacity-55'
+                        } ${unlocked && move ? 'cursor-pointer' : 'cursor-default'}`}
                       >
                         <span
                           className="w-5 h-5 rounded-sm border border-white/80 shrink-0 flex items-center justify-center text-[10px]"
@@ -1208,12 +1273,31 @@ export function TaekwondoModal({
                               {b.minXp} XP
                             </span>
                           </div>
-                          <div className="text-[10px] text-zinc-300/85 truncate mt-0.5">
-                            {move ? move.bonusDesc : 'สายขั้นเตรียมเลื่อนระดับ (สาย 2 สี)'}
-                            {b.promotionCoins > 0 ? ` • +${b.promotionCoins}💰` : ''}
+                          <div className="flex items-center justify-between gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-zinc-300/85 truncate">
+                              {move ? move.bonusDesc : 'สายขั้นเตรียมเลื่อนระดับ (สาย 2 สี)'}
+                              {b.promotionCoins > 0 ? ` • +${b.promotionCoins}💰` : ''}
+                            </span>
+                            {unlocked && (
+                              <button
+                                type="button"
+                                disabled={isWorn || savingBeltTier !== null}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleEquipBelt(isMax ? null : b.tier);
+                                }}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 transition ${
+                                  isWorn
+                                    ? 'bg-yellow-400 text-black cursor-default'
+                                    : 'bg-zinc-800 hover:bg-amber-400 hover:text-black text-amber-200 border border-amber-400/60 cursor-pointer'
+                                }`}
+                              >
+                                {isWorn ? '✓ กำลังใส่' : 'ใส่สายนี้'}
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1250,15 +1334,65 @@ export function TaekwondoModal({
                 </div>
               )}
 
-              <button
-                type="button"
-                disabled={loadingProfile}
-                onClick={startRound}
-                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-red-600 via-amber-500 to-yellow-400 hover:brightness-110 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-black italic tracking-wider text-lg shadow-[0_4px_0_#7f1d1d] cursor-pointer uppercase"
-              >
-                🥊 GET READY FOR THE NEXT BATTLE! — เริ่มเตะ ({ROUND_SECONDS} วิ)
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  disabled={loadingProfile}
+                  onClick={startRound}
+                  className="py-3.5 px-3 rounded-xl bg-gradient-to-r from-red-600 via-amber-500 to-yellow-400 hover:brightness-110 text-black border-2 border-white font-[family-name:var(--font-kanit)] font-black italic tracking-wide text-sm sm:text-base shadow-[0_4px_0_#7f1d1d] cursor-pointer uppercase"
+                >
+                  🎯 ฝึกเตะเป้าลอย ({ROUND_SECONDS} วิ)
+                </button>
+                <button
+                  type="button"
+                  disabled={loadingProfile}
+                  onClick={() => {
+                    phaseRef.current = 'pvp';
+                    setPhase('pvp');
+                  }}
+                  className="py-3.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400 hover:brightness-110 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-black italic tracking-wide text-sm sm:text-base shadow-[0_4px_0_#1e3a8a] cursor-pointer uppercase"
+                >
+                  🥊 ประลอง Tekken 1v1 กับเพื่อน!
+                </button>
+              </div>
             </div>
+          )}
+
+          {phase === 'pvp' && (
+            <TaekwondoPvpArena
+              currentUserId={currentUserId}
+              playerName={playerName}
+              playerEmoji={playerEmoji}
+              realBelt={belt}
+              wornBelt={wornBelt}
+              onBackToLobby={() => {
+                phaseRef.current = 'lobby';
+                setPhase('lobby');
+                void loadProfile();
+              }}
+              onMatchXpEarned={(xpScore) => {
+                void (async () => {
+                  try {
+                    const res = await fetch('/api/taekwondo', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ userId: currentUserId, score: xpScore, maxCombo: 1 }),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data?.success) {
+                      setTotalXp(Number(data.totalXp ?? 0));
+                      if (Array.isArray(data.promotedBelts) && data.promotedBelts.length > 0) {
+                        playKickSfx('rankup');
+                        onPointsUpdated?.();
+                      }
+                      void loadProfile();
+                    }
+                  } catch {
+                    // ignore
+                  }
+                })();
+              }}
+            />
           )}
 
           {phase === 'playing' && (
@@ -1465,7 +1599,7 @@ export function TaekwondoModal({
                   )}
                   <TekkenTaekwondoFighter
                     emoji={playerEmoji}
-                    belt={belt}
+                    belt={wornBelt}
                     pose={fighter.pose}
                     facing={fighter.facing}
                     trailHex={fighter.trailHex}
@@ -1566,6 +1700,11 @@ export function TaekwondoModal({
                   {lastResult.coinsEarned > 0 && (
                     <div className="text-xs font-extrabold text-emerald-300">
                       🎁 รับโบนัสเลื่อนสายเข้ากระเป๋า +{lastResult.coinsEarned} 💰 Gacha!
+                    </div>
+                  )}
+                  {lastResult.cappedToOneBelt && (
+                    <div className="text-[11px] font-bold text-sky-200">
+                      ⚡ แต่ละรอบเลื่อนได้สูงสุด 1 สาย — เตะรอบถัดไปเพื่อสอบเลื่อนสายขั้นต่อไปได้เลย!
                     </div>
                   )}
                 </div>

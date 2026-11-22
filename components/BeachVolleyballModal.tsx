@@ -95,6 +95,7 @@ interface CompactNetPlayer {
 }
 
 interface CompactNetState {
+  seq: number;
   ph: VbMatchState['phase'];
   pt: number;
   sl: number;
@@ -240,6 +241,8 @@ export function BeachVolleyballModal({
   const remoteKinematicsRef = useRef<Partial<Record<VbSlotId, GuestSyncPacket>>>({});
   const matchStateRef = useRef<VbMatchState | null>(null);
   const netTargetStateRef = useRef<CompactNetState | null>(null);
+  const netSeqRef = useRef<number>(0);
+  const lastRecvSeqRef = useRef<number>(0);
   const lastSentInputSigRef = useRef<string>('');
   const rewardClaimedRef = useRef<boolean>(false);
   const winHandledRef = useRef<boolean>(false);
@@ -247,7 +250,7 @@ export function BeachVolleyballModal({
   mutedRef.current = muted;
   const playersRef = useRef(players);
   playersRef.current = players;
-  const claimWinRewardRef = useRef<() => Promise<void>>(async () => {});
+  const claimWinRewardRef = useRef<() => Promise<void>>(async () => { });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabaseRef = useRef<SupabaseClient | null>(null);
@@ -433,6 +436,8 @@ export function BeachVolleyballModal({
           resetRallyPositions(matchStateRef.current, 'left');
         }
         netTargetStateRef.current = null;
+        lastRecvSeqRef.current = 0;
+        netSeqRef.current = 0;
         remoteKinematicsRef.current = {};
         winHandledRef.current = false;
         rewardClaimedRef.current = false;
@@ -452,10 +457,23 @@ export function BeachVolleyballModal({
       } else if (event === 'vb_state' && !isHostRef.current) {
         const snap = payload.s as CompactNetState | undefined;
         if (snap) {
+          // Drop out-of-order delayed packets so ball & score never jump backward on mobile 4G/5G!
+          if (typeof snap.seq === 'number' && snap.seq <= lastRecvSeqRef.current) return;
+          if (typeof snap.seq === 'number') lastRecvSeqRef.current = snap.seq;
           snap.consumed = false;
+          const prevSnap = netTargetStateRef.current;
           netTargetStateRef.current = snap;
+
+          // Always sync authoritative scores immediately (even if an earlier event packet was dropped!)
+          let scoredTeam: VbTeam | null = snap.ev?.sc ?? null;
+          if (!scoredTeam && prevSnap) {
+            if (snap.sl > prevSnap.sl) scoredTeam = 'left';
+            else if (snap.sr > prevSnap.sr) scoredTeam = 'right';
+          }
+
           setScoreLeft((prev) => (prev !== snap.sl ? snap.sl : prev));
           setScoreRight((prev) => (prev !== snap.sr ? snap.sr : prev));
+
           if (snap.ev) {
             if (snap.ev.sp) {
               playVbSound('spike', mutedRef.current);
@@ -465,11 +483,11 @@ export function BeachVolleyballModal({
               playVbSound('hit', mutedRef.current);
             }
             if (snap.ev.dv) playVbSound('dive', mutedRef.current);
-            if (snap.ev.sc) {
-              playVbSound('score', mutedRef.current);
-              setPointBanner(snap.ev.sc === 'left' ? '🔥 ทีมซ้ายได้แต้ม!' : '⚡ ทีมขวาได้แต้ม!');
-              setTimeout(() => setPointBanner(''), 1050);
-            }
+          }
+          if (scoredTeam) {
+            playVbSound('score', mutedRef.current);
+            setPointBanner(scoredTeam === 'left' ? '🔥 ทีมซ้ายได้แต้ม!' : '⚡ ทีมขวาได้แต้ม!');
+            setTimeout(() => setPointBanner(''), 1050);
           }
           if (snap.ph === 'finished' && snap.w) {
             setWinnerTeam((prev) => (prev !== snap.w ? snap.w : prev));
@@ -935,9 +953,11 @@ export function BeachVolleyballModal({
         }
 
         const hasImportantEvent = Boolean(ev.hit || ev.spike || ev.dive || ev.score || ev.win);
-        if (hasImportantEvent || nowMs - lastNetSend >= 50) {
+        if (hasImportantEvent || nowMs - lastNetSend >= 62) {
           lastNetSend = nowMs;
+          netSeqRef.current += 1;
           const compact: CompactNetState = {
+            seq: netSeqRef.current,
             ph: st.phase,
             pt: r2(st.phaseTimer),
             sl: st.scoreLeft,
@@ -962,11 +982,11 @@ export function BeachVolleyballModal({
             })),
             ev: hasImportantEvent
               ? {
-                  h: ev.hit ? 1 : undefined,
-                  sp: ev.spike ? 1 : undefined,
-                  dv: ev.dive ? 1 : undefined,
-                  sc: ev.score,
-                }
+                h: ev.hit ? 1 : undefined,
+                sp: ev.spike ? 1 : undefined,
+                dv: ev.dive ? 1 : undefined,
+                sc: ev.score,
+              }
               : undefined,
           };
           sendRoomMessage('vb_state', { s: compact });
@@ -1068,15 +1088,15 @@ export function BeachVolleyballModal({
             };
           }
         }
-        stepVolleyballMatch(st, guestInputs, delta);
+        stepVolleyballMatch(st, guestInputs, delta, true);
 
-        // 3. Send local input + exact local kinematics to Host (immediate on input change + 45ms while moving/airborne)
+        // 3. Send local input + exact local kinematics to Host (immediate on input change + 65ms while moving/airborne)
         const myP = st.players.find((lp) => lp.slotId === activeMySlot);
         const inpSig = `${curInp.left ? 1 : 0}${curInp.right ? 1 : 0}${curInp.jump ? 1 : 0}${curInp.down ? 1 : 0}${curInp.action ? 1 : 0}`;
         const isMovingOrAir = Boolean(
           myP && (Math.abs(myP.vx) > 0.1 || myP.y > 0.01 || myP.diveTimer > 0)
         );
-        const sendInterval = isMovingOrAir ? 45 : 140;
+        const sendInterval = isMovingOrAir ? 65 : 160;
         if (inpSig !== lastSentInputSigRef.current || nowMs - lastNetSend >= sendInterval) {
           lastSentInputSigRef.current = inpSig;
           lastNetSend = nowMs;
@@ -1285,8 +1305,8 @@ export function BeachVolleyballModal({
                     broadcastArenaLobby('waiting', opt.id, nextSlots);
                   }}
                   className={`flex-1 py-2 rounded-lg text-xs font-extrabold cursor-pointer transition disabled:cursor-default ${mode === opt.id
-                      ? 'rpg-btn-gold'
-                      : 'text-amber-100/75 hover:bg-slate-800 disabled:hover:bg-transparent'
+                    ? 'rpg-btn-gold'
+                    : 'text-amber-100/75 hover:bg-slate-800 disabled:hover:bg-transparent'
                     }`}
                 >
                   {opt.label}
@@ -1297,8 +1317,8 @@ export function BeachVolleyballModal({
             {/* Live Waiting Status */}
             <div
               className={`border-2 rounded-xl p-3 text-center space-y-1 ${joinedCount >= maxPlayers
-                  ? 'bg-emerald-950/75 border-emerald-400/80'
-                  : 'bg-sky-950/75 border-sky-400/70'
+                ? 'bg-emerald-950/75 border-emerald-400/80'
+                : 'bg-sky-950/75 border-sky-400/70'
                 }`}
             >
               <div className="font-[family-name:var(--font-kanit)] text-base sm:text-lg font-extrabold text-amber-300">
@@ -1379,6 +1399,8 @@ export function BeachVolleyballModal({
                   sendRoomMessage('start_match', { mode, humanSlots: curSlots });
                   winHandledRef.current = false;
                   rewardClaimedRef.current = false;
+                  netSeqRef.current = 0;
+                  lastRecvSeqRef.current = 0;
                   remoteKinematicsRef.current = {};
                   setWinnerTeam(null);
                   setRewardStatus('');
