@@ -8776,6 +8776,8 @@ export default function Arena3DPage() {
         <TaekwondoModal
           isOpen={isTaekwondoOpen}
           onClose={() => setIsTaekwondoOpen(false)}
+          players={players}
+          qualityMode={qualityMode}
           currentUserId={currentUserId}
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
           playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🥋'}

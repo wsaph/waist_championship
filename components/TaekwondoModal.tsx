@@ -14,11 +14,14 @@ import {
   type TaekwondoKickPose,
   type TaekwondoMove,
 } from '@/lib/taekwondo_catalog';
-import { TaekwondoPvpArena } from '@/components/TaekwondoPvpArena';
+import { TaekwondoPvpArena, type TkdCharacterAppearance } from '@/components/TaekwondoPvpArena';
+import type { QualityMode } from '@/lib/device_perf';
 
 interface TaekwondoModalProps {
   isOpen: boolean;
   onClose: () => void;
+  players?: TkdCharacterAppearance[];
+  qualityMode?: QualityMode;
   currentUserId: number | null;
   playerName?: string;
   playerEmoji?: string;
@@ -502,6 +505,8 @@ function TekkenTaekwondoFighter({
 export function TaekwondoModal({
   isOpen,
   onClose,
+  players = [],
+  qualityMode = 'auto',
   currentUserId,
   playerName = 'ผู้กล้า',
   playerEmoji = '🥋',
@@ -1249,13 +1254,12 @@ export function TaekwondoModal({
                           playKickSfx(move.slot === 'ultimate' ? 'ultimate' : 'perfect');
                           setTimeout(() => setLobbyPreviewMove(null), 420);
                         }}
-                        className={`text-left rounded-lg px-2.5 py-1.5 border text-[11px] flex items-center gap-2 transition ${
-                          isWorn
+                        className={`text-left rounded-lg px-2.5 py-1.5 border text-[11px] flex items-center gap-2 transition ${isWorn
                             ? 'bg-red-950/65 border-yellow-400 ring-1 ring-yellow-400'
                             : unlocked
-                            ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60'
-                            : 'bg-zinc-900/60 border-zinc-800 opacity-55'
-                        } ${unlocked && move ? 'cursor-pointer' : 'cursor-default'}`}
+                              ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/60'
+                              : 'bg-zinc-900/60 border-zinc-800 opacity-55'
+                          } ${unlocked && move ? 'cursor-pointer' : 'cursor-default'}`}
                       >
                         <span
                           className="w-5 h-5 rounded-sm border border-white/80 shrink-0 flex items-center justify-center text-[10px]"
@@ -1286,11 +1290,10 @@ export function TaekwondoModal({
                                   e.stopPropagation();
                                   void handleEquipBelt(isMax ? null : b.tier);
                                 }}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 transition ${
-                                  isWorn
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 transition ${isWorn
                                     ? 'bg-yellow-400 text-black cursor-default'
                                     : 'bg-zinc-800 hover:bg-amber-400 hover:text-black text-amber-200 border border-amber-400/60 cursor-pointer'
-                                }`}
+                                  }`}
                               >
                                 {isWorn ? '✓ กำลังใส่' : 'ใส่สายนี้'}
                               </button>
@@ -1350,9 +1353,9 @@ export function TaekwondoModal({
                     phaseRef.current = 'pvp';
                     setPhase('pvp');
                   }}
-                  className="py-3.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400 hover:brightness-110 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-black italic tracking-wide text-sm sm:text-base shadow-[0_4px_0_#1e3a8a] cursor-pointer uppercase"
+                  className="py-3.5 px-3 rounded-xl bg-gradient-to-r from-orange-600 via-amber-500 to-rose-600 hover:brightness-110 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-black italic tracking-wide text-sm sm:text-base shadow-[0_4px_0_#7c2d12] cursor-pointer uppercase"
                 >
-                  🥊 ประลอง Tekken 1v1 กับเพื่อน!
+                  ⛩️ ดวลตัวละคร 1v1 หน้าเสาโทริอิ!
                 </button>
               </div>
             </div>
@@ -1360,6 +1363,8 @@ export function TaekwondoModal({
 
           {phase === 'pvp' && (
             <TaekwondoPvpArena
+              players={players}
+              qualityMode={qualityMode}
               currentUserId={currentUserId}
               playerName={playerName}
               playerEmoji={playerEmoji}
@@ -1410,8 +1415,8 @@ export function TaekwondoModal({
                   <div className="h-4 sm:h-5 w-full bg-zinc-900 border-2 border-zinc-300/80 -skew-x-12 overflow-hidden p-0.5 shadow-inner">
                     <div
                       className={`h-full transition-all duration-300 ${hearts === 1
-                          ? 'bg-gradient-to-r from-red-600 to-rose-400 animate-pulse'
-                          : 'bg-gradient-to-r from-red-500 via-amber-400 to-yellow-300'
+                        ? 'bg-gradient-to-r from-red-600 to-rose-400 animate-pulse'
+                        : 'bg-gradient-to-r from-red-500 via-amber-400 to-yellow-300'
                         }`}
                       style={{ width: `${hpPct}%` }}
                     />
@@ -1438,8 +1443,8 @@ export function TaekwondoModal({
                   <div className="h-4 sm:h-5 w-full bg-zinc-900 border-2 border-zinc-300/80 skew-x-12 overflow-hidden p-0.5 shadow-inner">
                     <div
                       className={`h-full ml-auto transition-all duration-200 ${isRageMode
-                          ? 'bg-gradient-to-l from-red-600 via-orange-500 to-yellow-300 animate-pulse'
-                          : 'bg-gradient-to-l from-blue-600 via-sky-400 to-cyan-300'
+                        ? 'bg-gradient-to-l from-red-600 via-orange-500 to-yellow-300 animate-pulse'
+                        : 'bg-gradient-to-l from-blue-600 via-sky-400 to-cyan-300'
                         }`}
                       style={{ width: `${Math.max(8, ragePct)}%` }}
                     />
@@ -1450,8 +1455,8 @@ export function TaekwondoModal({
               {/* Tekken 3D-Perspective Dojang Stage */}
               <div
                 className={`relative w-full h-[330px] sm:h-[370px] rounded-xl border-2 border-amber-500/80 overflow-hidden shadow-2xl ${isRageMode
-                    ? 'ring-2 ring-red-500 shadow-[0_0_30px_rgba(239,68,68,0.5)]'
-                    : ''
+                  ? 'ring-2 ring-red-500 shadow-[0_0_30px_rgba(239,68,68,0.5)]'
+                  : ''
                   }`}
                 style={{
                   background:
@@ -1526,12 +1531,12 @@ export function TaekwondoModal({
                       )}
                       <span
                         className={`relative z-10 w-14 h-14 sm:w-16 sm:h-16 rounded-full border-3 shadow-xl flex flex-col items-center justify-center font-extrabold ${t.kind === 'golden'
-                            ? 'bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-white text-black animate-pulse'
-                            : t.kind === 'board'
-                              ? 'bg-gradient-to-br from-amber-600 to-amber-900 border-amber-200 text-amber-100'
-                              : t.kind === 'decoy'
-                                ? 'bg-gradient-to-br from-zinc-900 to-rose-950 border-rose-500 text-rose-200'
-                                : 'bg-gradient-to-br from-red-600 to-rose-800 border-white text-white'
+                          ? 'bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-white text-black animate-pulse'
+                          : t.kind === 'board'
+                            ? 'bg-gradient-to-br from-amber-600 to-amber-900 border-amber-200 text-amber-100'
+                            : t.kind === 'decoy'
+                              ? 'bg-gradient-to-br from-zinc-900 to-rose-950 border-rose-500 text-rose-200'
+                              : 'bg-gradient-to-br from-red-600 to-rose-800 border-white text-white'
                           }`}
                       >
                         <span className="text-2xl leading-none">
@@ -1626,8 +1631,8 @@ export function TaekwondoModal({
                   disabled={!loadout.mid}
                   onPointerDown={() => triggerCommandMove(loadout.mid)}
                   className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${loadout.mid
-                      ? 'bg-gradient-to-b from-amber-400 to-orange-600 hover:brightness-110 active:translate-y-0.5 text-black border-yellow-100 shadow-[0_3px_0_#7c2d12] cursor-pointer'
-                      : 'bg-zinc-900 text-zinc-500 border-zinc-700 cursor-not-allowed'
+                    ? 'bg-gradient-to-b from-amber-400 to-orange-600 hover:brightness-110 active:translate-y-0.5 text-black border-yellow-100 shadow-[0_3px_0_#7c2d12] cursor-pointer'
+                    : 'bg-zinc-900 text-zinc-500 border-zinc-700 cursor-not-allowed'
                     }`}
                 >
                   {loadout.mid
@@ -1641,8 +1646,8 @@ export function TaekwondoModal({
                   disabled={!loadout.ultimate || ultCdLeftSec > 0}
                   onPointerDown={() => triggerCommandMove(loadout.ultimate)}
                   className={`py-2 px-1.5 rounded-lg border-2 font-[family-name:var(--font-kanit)] font-black italic text-[11px] sm:text-xs truncate ${loadout.ultimate && ultCdLeftSec === 0
-                      ? 'bg-gradient-to-b from-red-500 via-rose-600 to-amber-500 hover:brightness-110 active:translate-y-0.5 text-white border-yellow-300 shadow-[0_3px_0_#4c0519] cursor-pointer animate-pulse'
-                      : 'bg-zinc-900 text-zinc-400 border-zinc-700 cursor-not-allowed'
+                    ? 'bg-gradient-to-b from-red-500 via-rose-600 to-amber-500 hover:brightness-110 active:translate-y-0.5 text-white border-yellow-300 shadow-[0_3px_0_#4c0519] cursor-pointer animate-pulse'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-700 cursor-not-allowed'
                     }`}
                 >
                   {!loadout.ultimate
