@@ -41,7 +41,7 @@ import {
   type GuardPrank,
 } from '@/lib/guard_pranks';
 import { createGuardPrankFxRig } from '@/lib/guard_prank_fx';
-import { startBgm, stopBgm } from '@/lib/bgm';
+import { preloadBgm, startBgm, stopBgm } from '@/lib/bgm';
 import {
   SHOP_ITEMS,
   FREE_DEFAULT_ITEMS,
@@ -102,7 +102,24 @@ const TaekwondoModal = dynamic(
   () => import('@/components/TaekwondoModal').then((m) => m.TaekwondoModal),
   { ssr: false }
 );
+const LoyKrathongModal = dynamic(
+  () => import('@/components/LoyKrathongModal').then((m) => m.LoyKrathongModal),
+  { ssr: false }
+);
 import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
+import {
+  AMBIENT_NPC_KRATHONGS,
+  getKrathongStyleMeta,
+  type KrathongItem,
+  type KrathongStyleId,
+} from '@/lib/krathong_catalog';
+import {
+  buildKrathongMesh,
+  animateKrathongParts,
+  sampleIslandKrathongOrbit,
+  computeOrbitSeedFromPoint,
+  type KrathongMeshParts,
+} from '@/lib/krathong_3d';
 
 interface Player {
   id: number;
@@ -382,6 +399,18 @@ export default function Arena3DPage() {
   activeQuestTagByUserIdRef.current = activeQuestTagByUserId;
   const [betBannerDismissed, setBetBannerDismissed] = useState(false);
   const [isNearOcean, setIsNearOcean] = useState(false);
+  const [isKrathongModalOpen, setIsKrathongModalOpen] = useState(false);
+  const [launchingKrathong, setLaunchingKrathong] = useState(false);
+  const [krathongs, setKrathongs] = useState<KrathongItem[]>(AMBIENT_NPC_KRATHONGS);
+  const krathongsRef = useRef<KrathongItem[]>(AMBIENT_NPC_KRATHONGS);
+  const krathongFocusIdxRef = useRef<number>(0);
+  const focusedKrathongIdRef = useRef<string | number | null>(null);
+  const focusedKrathongUntilRef = useRef<number>(0);
+  const islandBoundsRef = useRef<{ centerX: number; w: number; d: number }>({
+    centerX: -2.5,
+    w: 68,
+    d: 38,
+  });
   const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
   const [fishingResult, setFishingResult] = useState<{
     caught: FishingCatch;
@@ -456,6 +485,11 @@ export default function Arena3DPage() {
     label: string;
     emoji: string;
   } | null>(null);
+  const [isFullMoonSky, setIsFullMoonSky] = useState<boolean>(true);
+  const isFullMoonSkyRef = useRef<boolean>(true);
+  useEffect(() => {
+    isFullMoonSkyRef.current = isFullMoonSky;
+  }, [isFullMoonSky]);
   const bkkWeatherRef = useRef<{
     temp: number;
     isDay: boolean;
@@ -637,9 +671,49 @@ export default function Arena3DPage() {
       isShabuOpen ||
       isCardOpen ||
       isQuestBoardOpen ||
+      isKrathongModalOpen ||
       (authChecked && currentUserId === null)
     );
-  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, isQuestBoardOpen, authChecked, currentUserId]);
+  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, isQuestBoardOpen, isKrathongModalOpen, authChecked, currentUserId]);
+
+  const mergeWithAmbientKrathongs = useCallback((serverItems: KrathongItem[]): KrathongItem[] => {
+    const seen = new Set<string>();
+    const merged: KrathongItem[] = [];
+    for (const item of serverItems) {
+      const k = String(item.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      merged.push(item);
+    }
+    for (const npc of AMBIENT_NPC_KRATHONGS) {
+      const k = String(npc.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      merged.push(npc);
+    }
+    return merged;
+  }, []);
+
+  const fetchKrathongs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/krathong', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.krathongs)) {
+        const nextList = mergeWithAmbientKrathongs(data.krathongs);
+        krathongsRef.current = nextList;
+        setKrathongs(nextList);
+      }
+    } catch {
+      // ignore transient network errors
+    }
+  }, [mergeWithAmbientKrathongs]);
+
+  useEffect(() => {
+    void fetchKrathongs();
+    const iv = setInterval(fetchKrathongs, 35_000);
+    return () => clearInterval(iv);
+  }, [fetchKrathongs]);
 
   const fetchQuests = useCallback(async () => {
     try {
@@ -895,9 +969,11 @@ export default function Arena3DPage() {
               ? '🥋 กำลังฝึกเตะเทควันโด...'
               : isQuestBoardOpen
                 ? '📋 กำลังดูกระดานภารกิจ...'
-                : isJoinOpen
-                  ? '👗 กำลังแต่งตัว...'
-                  : '';
+                : isKrathongModalOpen
+                  ? '🪷 กำลังอธิษฐานลอยกระทง...'
+                  : isJoinOpen
+                    ? '👗 กำลังแต่งตัว...'
+                    : '';
     myBusyLabelRef.current = label;
     if (currentUserId && currentUserId > 0) {
       broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
@@ -909,6 +985,7 @@ export default function Arena3DPage() {
     isPetCafeOpen,
     isTaekwondoOpen,
     isQuestBoardOpen,
+    isKrathongModalOpen,
     isJoinOpen,
     currentUserId,
     broadcastRealtimeEvent,
@@ -1310,10 +1387,172 @@ export default function Arena3DPage() {
       setIsNearDojang(false);
       isNearQuestBoardRef.current = false;
       setIsNearQuestBoard(false);
+      setIsKrathongModalOpen(false);
       setFishingResult(null);
       cancelFishing();
     }
   }, [walkingSpectatorId, cancelFishing]);
+
+  const playKrathongSfx = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.09);
+        gain.gain.exponentialRampToValueAtTime(0.11, now + idx * 0.09 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.09 + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.09);
+        osc.stop(now + idx * 0.09 + 0.6);
+      });
+      setTimeout(() => {
+        void ctx.close().catch(() => { });
+      }, 1200);
+    } catch {
+      // ignore audio context restriction
+    }
+  }, []);
+
+  const focusKrathongItem = useCallback((item: KrathongItem) => {
+    const ib = islandBoundsRef.current;
+    const ORBIT_SPEED = 0.0082;
+    const ageSec = Math.max(0, (Date.now() - item.createdAt) / 1000);
+    const orbitPt = sampleIslandKrathongOrbit(
+      item.orbitSeed + ageSec * ORBIT_SPEED,
+      item.laneOffset,
+      ib.centerX,
+      ib.w,
+      ib.d
+    );
+    let kx = orbitPt.x;
+    let kz = orbitPt.z;
+    if (item.startX != null && item.startZ != null && ageSec < 5.0) {
+      const u = Math.min(1, ageSec / 5.0);
+      const smooth = u * u * (3 - 2 * u);
+      kx = item.startX + (orbitPt.x - item.startX) * smooth;
+      kz = item.startZ + (orbitPt.z - item.startZ) * smooth;
+    }
+    focusedKrathongIdRef.current = item.id;
+    focusedKrathongUntilRef.current = performance.now() + 8500;
+    cameraLookAtRef.current.set(kx, 0.2, kz);
+    const dirX = kx - ib.centerX;
+    const dirZ = kz;
+    const len = Math.hypot(dirX, dirZ) || 1;
+    cameraTargetPosRef.current = new THREE.Vector3(
+      kx + (dirX / len) * 11.5,
+      8.5,
+      kz + (dirZ / len) * 11.5 + 4.5
+    );
+  }, []);
+
+  const handleCycleMyKrathongs = useCallback(() => {
+    const myList = krathongsRef.current.filter(
+      (k) => currentUserId !== null && k.userId === currentUserId
+    );
+    if (myList.length === 0) return;
+    const idx = krathongFocusIdxRef.current % myList.length;
+    krathongFocusIdxRef.current = idx + 1;
+    const target = myList[idx];
+    focusKrathongItem(target);
+    const stMeta = getKrathongStyleMeta(target.styleId);
+    showToast(
+      stMeta.emoji,
+      `กระทงใบที่ ${idx + 1}/${myList.length} ของคุณ`,
+      target.caption ? `“${target.caption}”` : stMeta.name
+    );
+  }, [currentUserId, focusKrathongItem, showToast]);
+
+  const handleLaunchKrathong = useCallback(
+    async (styleId: KrathongStyleId, caption: string) => {
+      if (launchingKrathong) return;
+      setLaunchingKrathong(true);
+      try {
+        const activeId = walkingSpectatorIdRef.current ?? currentUserId;
+        const me = playersRef.current.find((pl) => pl.id === activeId);
+        const walkerMesh =
+          activeId !== null ? charMeshesRef.current.find((m) => m.id === activeId) : null;
+        const od = oceanDirRef.current;
+        const ib = islandBoundsRef.current;
+
+        let startX: number | null = null;
+        let startZ: number | null = null;
+        if (walkerMesh) {
+          walkerMesh.rootGroup.rotation.y = Math.atan2(-od.dz, od.dx);
+          startX = Number((walkerMesh.rootGroup.position.x + od.dx * 2.85).toFixed(2));
+          startZ = Number((walkerMesh.rootGroup.position.z + od.dz * 2.85).toFixed(2));
+        }
+
+        const laneOffset = Number((4.0 + Math.random() * 4.4).toFixed(2));
+        const orbitSeed =
+          startX !== null && startZ !== null
+            ? computeOrbitSeedFromPoint(startX, startZ, laneOffset, ib.centerX, ib.w, ib.d)
+            : Number(Math.random().toFixed(4));
+
+        const res = await fetch('/api/krathong', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: me ? me.id : currentUserId,
+            userName: me?.name || 'นักเดินทางริมหาด',
+            userEmoji: me?.emoji || '🪷',
+            styleId,
+            caption,
+            avatarColor: me?.colorHex || '#F472B6',
+            avatarBand: me?.bandColor || '#FFE600',
+            avatarSpecies: me?.species || 'bunny',
+            orbitSeed,
+            laneOffset,
+            startX,
+            startZ,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.krathong) {
+          showToast('🚫', 'ปล่อยกระทงไม่สำเร็จ', data?.error || 'กรุณาลองใหม่อีกครั้งนะ');
+          return;
+        }
+
+        const launched: KrathongItem = data.krathong;
+        const nextList = mergeWithAmbientKrathongs([launched, ...krathongsRef.current]);
+        krathongsRef.current = nextList;
+        setKrathongs(nextList);
+        setIsKrathongModalOpen(false);
+
+        playKrathongSfx();
+        confetti({
+          particleCount: 65,
+          spread: 75,
+          origin: { y: 0.65 },
+          colors: ['#FDE047', '#F472B6', '#38BDF8', '#FB923C'],
+        });
+
+        focusedKrathongIdRef.current = launched.id;
+        focusedKrathongUntilRef.current = performance.now() + 9000;
+
+        const stMeta = getKrathongStyleMeta(launched.styleId);
+        showToast(
+          '🪷',
+          `ปล่อย${stMeta.name}ลงน้ำแล้ว!`,
+          launched.caption ? `“${launched.caption}”` : 'กระทงของคุณกำลังค่อยๆ ลอยวนรอบเกาะ ✨'
+        );
+
+        broadcastRealtimeEvent('krathong_launched', { krathong: launched });
+      } catch {
+        showToast('🚫', 'เชื่อมต่อไม่ได้', 'ไม่สามารถปล่อยกระทงได้ในขณะนี้ ลองใหม่อีกครั้งนะ');
+      } finally {
+        setLaunchingKrathong(false);
+      }
+    },
+    [currentUserId, launchingKrathong, mergeWithAmbientKrathongs, playKrathongSfx, showToast, broadcastRealtimeEvent]
+  );
 
   useEffect(() => {
     const handleIncomingRealtimeEvent = (event: string, payload: any) => {
@@ -1676,6 +1915,22 @@ export default function Arena3DPage() {
             fetchArenaDataRef.current({ force: true });
           }, 1150);
         }
+      } else if (event === 'krathong_launched') {
+        const incoming = payload.krathong as KrathongItem | undefined;
+        if (!incoming || incoming.id === undefined) return;
+        const exists = krathongsRef.current.some((k) => String(k.id) === String(incoming.id));
+        if (!exists) {
+          const nextList = [incoming, ...krathongsRef.current];
+          krathongsRef.current = nextList;
+          setKrathongs(nextList);
+        }
+        focusedKrathongIdRef.current = incoming.id;
+        focusedKrathongUntilRef.current = performance.now() + 7000;
+        showToast(
+          '🪷',
+          `${incoming.userEmoji || '🪷'} ${incoming.userName} ลอยกระทงริมเกาะ!`,
+          incoming.caption ? `“${incoming.caption}”` : 'ปล่อยกระทงลงสู่สายน้ำรอบเกาะแล้ว ✨'
+        );
       }
     };
 
@@ -1765,6 +2020,9 @@ export default function Arena3DPage() {
         )
         .on('broadcast', { event: 'busy_status' }, ({ payload }) =>
           handleIncomingRealtimeEvent('busy_status', payload)
+        )
+        .on('broadcast', { event: 'krathong_launched' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('krathong_launched', payload)
         )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
@@ -1930,14 +2188,56 @@ export default function Arena3DPage() {
     };
   }, []);
 
-  const toggleMusic = () => {
+  const toggleMusic = useCallback(() => {
     setIsMusicOn((prev) => {
       const next = !prev;
-      if (next) startBgm();
+      try {
+        localStorage.setItem('waist_bgm_muted', next ? '0' : '1');
+      } catch {
+        // ignore storage error
+      }
+      if (next) startBgm(isFullMoonSkyRef.current ? 'loy_krathong' : 'arena');
       else stopBgm();
       return next;
     });
-  };
+  }, []);
+
+  // เริ่มบรรเลงทำนองเพลงลอยกระทงคลอเบาๆ อัตโนมัติเมื่อผู้เล่นคลิกเข้าเกาะครั้งแรก (เว้นแต่เคยกดปิดเสียงไว้)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    preloadBgm();
+    let mutedPref = false;
+    try {
+      mutedPref = localStorage.getItem('waist_bgm_muted') === '1';
+    } catch {
+      // ignore
+    }
+    if (mutedPref) return;
+
+    const unlockAndPlay = () => {
+      window.removeEventListener('pointerdown', unlockAndPlay);
+      window.removeEventListener('keydown', unlockAndPlay);
+      try {
+        if (localStorage.getItem('waist_bgm_muted') === '1') return;
+      } catch {
+        // ignore
+      }
+      startBgm(isFullMoonSkyRef.current ? 'loy_krathong' : 'arena');
+      setIsMusicOn(true);
+    };
+    window.addEventListener('pointerdown', unlockAndPlay, { passive: true });
+    window.addEventListener('keydown', unlockAndPlay);
+    return () => {
+      window.removeEventListener('pointerdown', unlockAndPlay);
+      window.removeEventListener('keydown', unlockAndPlay);
+    };
+  }, []);
+
+  // สลับเพลงประกอบตามโหมดคืนวันเพ็ญ / อากาศจริงเมื่อเปิดเพลงอยู่
+  useEffect(() => {
+    if (!isMusicOn) return;
+    startBgm(isFullMoonSky ? 'loy_krathong' : 'arena');
+  }, [isFullMoonSky, isMusicOn]);
 
   const competitors = React.useMemo(
     () => players.filter((p) => p.role !== 'spectator'),
@@ -2345,22 +2645,32 @@ export default function Arena3DPage() {
     leaderIdRef.current = rankedPlayers[0]?.id ?? null;
     loserIdRef.current = rankedPlayers.length > 1 ? rankedPlayers[rankedPlayers.length - 1].id : null;
 
-    const resolveWeatherTargets = (w: typeof bkkWeatherRef.current) => {
+    const resolveWeatherTargets = (w: typeof bkkWeatherRef.current, forceFullMoon = false) => {
+      if (forceFullMoon) {
+        return {
+          targetHex: 0x08122e,
+          targetLightHex: 0xfef3c7,
+          targetHemi: 0.68,
+          targetDir: 0.88,
+          isRaining: false,
+          showNight: true,
+        };
+      }
       let targetHex = 0xbae6fd;
       let targetLightHex = 0xffffff;
       let targetHemi = 0.78;
       let targetDir = 0.95;
       if (w) {
         if (w.dayPhase === 'night') {
-          targetLightHex = 0xcbd5e1;
+          targetLightHex = 0xfef08a;
           if (w.condition === 'rain' || w.condition === 'storm') {
             targetHex = 0x090d16;
-            targetHemi = 0.38;
-            targetDir = 0.35;
+            targetHemi = 0.42;
+            targetDir = 0.38;
           } else {
-            targetHex = 0x0f172a;
-            targetHemi = 0.45;
-            targetDir = 0.48;
+            targetHex = 0x0a1535;
+            targetHemi = 0.62;
+            targetDir = 0.78;
           }
         } else if (w.dayPhase === 'dawn') {
           targetLightHex = 0xffedd5;
@@ -2407,11 +2717,11 @@ export default function Arena3DPage() {
       return { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight };
     };
 
-    const initWeather = resolveWeatherTargets(bkkWeatherRef.current);
+    const initWeather = resolveWeatherTargets(bkkWeatherRef.current, isFullMoonSkyRef.current);
     const scene = new THREE.Scene();
     const skyColor = new THREE.Color(initWeather.targetHex);
     scene.background = skyColor;
-    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.0048);
+    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.0034);
 
     const roamingList = players.filter((pl) => pl.isRoaming || pl.role === 'spectator');
     // ล็อกความกว้างลู่วิ่งสวยๆ ที่ 7 ช่องหลัก (Top 7 ตัวใหญ่เต็มลู่ • อันดับ #8 ลงไปย่อเป็นจิบิมินิวิ่งตามหลัง!)
@@ -2426,6 +2736,7 @@ export default function Arena3DPage() {
     const islandCenterX = -2.5;
     const islandW = halfLen * 2 + 24;
     const islandD = Math.max(38, trackWidth + 21 + (specRows - 1) * 5.0);
+    islandBoundsRef.current = { centerX: islandCenterX, w: islandW, d: islandD };
 
     // Adaptive quality profile (Desktop = High unchanged, iPad = Medium, Mobile = Lite)
     const qCfg = getQualityConfig(qualityMode);
@@ -2450,25 +2761,223 @@ export default function Arena3DPage() {
     rainPoints.visible = initWeather.isRaining;
     scene.add(rainPoints);
 
-    // Night moon + stars (synced with Bangkok is_day)
+    // Full Moon Loy Krathong Night Sky (พระจันทร์วันเพ็ญเต็มดวง + ลำแสงจันทร์ + ดาวรอบฟ้า + เงาจันทร์สะท้อนน้ำ + โคมลอย)
     const nightGroup = new THREE.Group();
+    const moonPos = new THREE.Vector3(-10, 15.5, -(islandD / 2 + 38));
+
+    // Detailed Full Moon texture with subtle golden Moon-Rabbit silhouette
+    const moonCanvas = document.createElement('canvas');
+    moonCanvas.width = 256;
+    moonCanvas.height = 256;
+    const mCtx = moonCanvas.getContext('2d');
+    if (mCtx) {
+      const mGrad = mCtx.createRadialGradient(118, 112, 16, 128, 128, 128);
+      mGrad.addColorStop(0, '#ffffff');
+      mGrad.addColorStop(0.55, '#fef9c3');
+      mGrad.addColorStop(0.88, '#fde047');
+      mGrad.addColorStop(1, '#f59e0b');
+      mCtx.fillStyle = mGrad;
+      mCtx.fillRect(0, 0, 256, 256);
+
+      // Soft lunar maria / cute Moon Rabbit hint
+      mCtx.fillStyle = 'rgba(217, 119, 6, 0.16)';
+      mCtx.beginPath();
+      mCtx.ellipse(134, 146, 34, 24, -0.25, 0, Math.PI * 2);
+      mCtx.fill();
+      mCtx.beginPath();
+      mCtx.ellipse(106, 118, 20, 18, 0.2, 0, Math.PI * 2);
+      mCtx.fill();
+      mCtx.beginPath();
+      mCtx.ellipse(116, 86, 8, 22, 0.35, 0, Math.PI * 2);
+      mCtx.fill();
+      mCtx.beginPath();
+      mCtx.ellipse(130, 90, 7, 20, 0.6, 0, Math.PI * 2);
+      mCtx.fill();
+    }
+    const moonTex = new THREE.CanvasTexture(moonCanvas);
+    moonTex.colorSpace = THREE.SRGBColorSpace;
+
     const moonMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(2.0, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+      new THREE.SphereGeometry(5.2, 32, 32),
+      new THREE.MeshBasicMaterial({ map: moonTex, fog: false })
     );
-    moonMesh.position.set(-24, 28, -(islandD / 2 + 22));
+    moonMesh.position.copy(moonPos);
+    moonMesh.rotation.y = -Math.PI / 2;
     nightGroup.add(moonMesh);
-    const starCount = qCfg.starCount;
+
+    // Multi-layered radiant full-moon corona & outer atmospheric halo
+    const haloCanvas = document.createElement('canvas');
+    haloCanvas.width = 256;
+    haloCanvas.height = 256;
+    const hCtx = haloCanvas.getContext('2d');
+    if (hCtx) {
+      const hGrad = hCtx.createRadialGradient(128, 128, 12, 128, 128, 126);
+      hGrad.addColorStop(0, 'rgba(255, 253, 235, 0.92)');
+      hGrad.addColorStop(0.26, 'rgba(254, 240, 138, 0.52)');
+      hGrad.addColorStop(0.58, 'rgba(251, 191, 36, 0.18)');
+      hGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      hCtx.fillStyle = hGrad;
+      hCtx.fillRect(0, 0, 256, 256);
+    }
+    const moonHaloTex = new THREE.CanvasTexture(haloCanvas);
+    moonHaloTex.colorSpace = THREE.SRGBColorSpace;
+
+    const moonInnerHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: moonHaloTex,
+        color: 0xfef08a,
+        transparent: true,
+        opacity: 0.88,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      })
+    );
+    moonInnerHalo.position.copy(moonPos);
+    moonInnerHalo.scale.set(22, 22, 1);
+    nightGroup.add(moonInnerHalo);
+
+    const moonOuterHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: moonHaloTex,
+        color: 0xbae6fd,
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      })
+    );
+    moonOuterHalo.position.copy(moonPos);
+    moonOuterHalo.scale.set(44, 44, 1);
+    nightGroup.add(moonOuterHalo);
+
+    // Volumetric Moonbeam shafts shining diagonally from the full moon onto the island & sea
+    const beamCanvas = document.createElement('canvas');
+    beamCanvas.width = 64;
+    beamCanvas.height = 256;
+    const bCtx = beamCanvas.getContext('2d');
+    if (bCtx) {
+      const bGrad = bCtx.createLinearGradient(0, 0, 0, 256);
+      bGrad.addColorStop(0, 'rgba(254, 249, 195, 0.42)');
+      bGrad.addColorStop(0.45, 'rgba(254, 240, 138, 0.14)');
+      bGrad.addColorStop(1, 'rgba(254, 240, 138, 0)');
+      bCtx.fillStyle = bGrad;
+      bCtx.fillRect(0, 0, 64, 256);
+    }
+    const beamTex = new THREE.CanvasTexture(beamCanvas);
+    beamTex.colorSpace = THREE.SRGBColorSpace;
+    const moonBeamMeshes: THREE.Mesh[] = [];
+    [
+      { target: new THREE.Vector3(-4, 0, -4), rTop: 2.6, rBot: 13.5, op: 0.13 },
+      { target: new THREE.Vector3(-16, 0, -14), rTop: 2.1, rBot: 9.5, op: 0.09 },
+      { target: new THREE.Vector3(9, 0, -10), rTop: 2.1, rBot: 10.5, op: 0.09 },
+    ].forEach((bm) => {
+      const dir = new THREE.Vector3().subVectors(bm.target, moonPos);
+      const len = dir.length();
+      const mid = new THREE.Vector3().addVectors(moonPos, bm.target).multiplyScalar(0.5);
+      const cone = new THREE.Mesh(
+        new THREE.CylinderGeometry(bm.rTop, bm.rBot, len, 18, 1, true),
+        new THREE.MeshBasicMaterial({
+          map: beamTex,
+          transparent: true,
+          opacity: bm.op,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          fog: false,
+        })
+      );
+      cone.position.copy(mid);
+      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
+      nightGroup.add(cone);
+      moonBeamMeshes.push(cone);
+    });
+
+    // Shimmering Golden Moonlight Reflection Path across the Sea
+    const shimmerCanvas = document.createElement('canvas');
+    shimmerCanvas.width = 128;
+    shimmerCanvas.height = 256;
+    const shCtx = shimmerCanvas.getContext('2d');
+    if (shCtx) {
+      for (let r = 0; r < 46; r++) {
+        const py = (r / 46) * 248 + 4;
+        const spread = 12 + (r / 46) * 38;
+        const alpha = (1 - Math.abs(r / 46 - 0.35)) * 0.48;
+        const g = shCtx.createRadialGradient(64, py, 2, 64, py, spread);
+        g.addColorStop(0, `rgba(254, 249, 195, ${Math.max(0.08, alpha).toFixed(2)})`);
+        g.addColorStop(0.55, `rgba(250, 204, 21, ${(alpha * 0.5).toFixed(2)})`);
+        g.addColorStop(1, 'rgba(250, 204, 21, 0)');
+        shCtx.fillStyle = g;
+        shCtx.fillRect(0, py - 3, 128, 6);
+      }
+    }
+    const shimmerTex = new THREE.CanvasTexture(shimmerCanvas);
+    shimmerTex.colorSpace = THREE.SRGBColorSpace;
+    const moonWaterShimmer = new THREE.Mesh(
+      new THREE.PlaneGeometry(19, 34),
+      new THREE.MeshBasicMaterial({
+        map: shimmerTex,
+        transparent: true,
+        opacity: 0.72,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    moonWaterShimmer.rotation.x = -Math.PI / 2;
+    moonWaterShimmer.position.set(moonPos.x * 0.65, -0.32, -(islandD / 2 + 19));
+    nightGroup.add(moonWaterShimmer);
+
+    // 360° Celestial Starry Dome surrounding the entire island
+    const starCount = Math.max(220, qCfg.starCount * 2);
     const starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
-      starPos[i * 3] = (Math.random() - 0.5) * (islandW + 60);
-      starPos[i * 3 + 1] = 18 + Math.random() * 28;
-      starPos[i * 3 + 2] = -(islandD / 2 + 8) - Math.random() * 45;
+      const theta = Math.random() * Math.PI * 2;
+      const radius = 58 + Math.random() * 85;
+      starPos[i * 3] = islandCenterX + Math.cos(theta) * radius;
+      starPos[i * 3 + 1] = 8 + Math.random() * 56;
+      starPos[i * 3 + 2] = Math.sin(theta) * radius;
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.28, transparent: true, opacity: 0.85 });
+    const starMat = new THREE.PointsMaterial({
+      color: 0xfef9c3,
+      size: 0.42,
+      transparent: true,
+      opacity: 0.92,
+      fog: false,
+    });
     nightGroup.add(new THREE.Points(starGeo, starMat));
+
+    // Distant Floating Sky Lanterns (โคมลอยคืนวันเพ็ญ)
+    const skyLanterns: Array<{ group: THREE.Group; baseX: number; baseZ: number; speed: number; phase: number }> = [];
+    const lanternCount = qCfg.tier === 'lite' ? 8 : 16;
+    const lanternShellMat = new THREE.MeshBasicMaterial({ color: 0xfdba74, fog: false });
+    for (let li = 0; li < lanternCount; li++) {
+      const lg = new THREE.Group();
+      const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.2, 0.62, 8), lanternShellMat);
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: moonHaloTex,
+          color: 0xfb923c,
+          transparent: true,
+          opacity: 0.85,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+        })
+      );
+      glow.scale.set(2.4, 2.4, 1);
+      lg.add(shell, glow);
+      const angle = (li / lanternCount) * Math.PI * 2 + 0.3;
+      const dist = Math.max(islandW, islandD) * 0.62 + (li % 3) * 9;
+      const bx = islandCenterX + Math.cos(angle) * dist;
+      const bz = Math.sin(angle) * dist - 8;
+      lg.position.set(bx, 8 + (li % 5) * 4.5, bz);
+      nightGroup.add(lg);
+      skyLanterns.push({ group: lg, baseX: bx, baseZ: bz, speed: 0.42 + (li % 4) * 0.12, phase: li * 1.7 });
+    }
+
     nightGroup.visible = initWeather.showNight;
     scene.add(nightGroup);
 
@@ -3104,6 +3613,26 @@ export default function Arena3DPage() {
       obj.userData.isQuestBoard = true;
     });
     scene.add(questBoardGroup);
+
+    // 3D Floating Krathongs Orbiting the Island (Dynamic Zero-Flicker Sync)
+    const krathongSceneGroup = new THREE.Group();
+    scene.add(krathongSceneGroup);
+    const maxVisibleKrathongs = qCfg.tier === 'lite' ? 18 : qCfg.tier === 'medium' ? 28 : 42;
+    interface ActiveKrathongEntry {
+      key: string;
+      item: KrathongItem;
+      isMine: boolean;
+      parts: KrathongMeshParts;
+      tagEl: HTMLDivElement;
+    }
+    const activeKrathongMap = new Map<string, ActiveKrathongEntry>();
+    const escapeKrathongHtml = (str: string) =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    let lastKrathongSyncSig = '';
 
     const questBoardTagEl = document.createElement('div');
     questBoardTagEl.className = 'player-tag pointer-events-none';
@@ -4034,25 +4563,43 @@ export default function Arena3DPage() {
       }
 
       const bkkW = bkkWeatherRef.current;
-      if (bkkW) {
-        const { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight } = resolveWeatherTargets(bkkW);
+      const forceFullMoon = isFullMoonSkyRef.current;
+      if (forceFullMoon || bkkW) {
+        const { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight } =
+          resolveWeatherTargets(bkkW, forceFullMoon);
 
         tempSkyCol.setHex(targetHex);
-        skyColor.lerp(tempSkyCol, 0.03);
+        skyColor.lerp(tempSkyCol, 0.04);
         scene.background = skyColor;
         if (scene.fog instanceof THREE.FogExp2) {
-          scene.fog.color.lerp(tempSkyCol, 0.03);
+          scene.fog.color.lerp(tempSkyCol, 0.04);
         }
         tempLightCol.setHex(targetLightHex);
-        dirLight.color.lerp(tempLightCol, 0.04);
-        hemiLight.intensity += (targetHemi - hemiLight.intensity) * 0.04;
+        dirLight.color.lerp(tempLightCol, 0.05);
+        hemiLight.intensity += (targetHemi - hemiLight.intensity) * 0.05;
         const lightningFlash =
-          bkkW.condition === 'storm' && Math.sin(elapsed * 7.3) > 0.97 && Math.sin(elapsed * 19.1) > 0.6 ? 1.5 : 0;
+          !forceFullMoon &&
+            bkkW?.condition === 'storm' &&
+            Math.sin(elapsed * 7.3) > 0.97 &&
+            Math.sin(elapsed * 19.1) > 0.6
+            ? 1.5
+            : 0;
         dirLight.intensity += (targetDir + lightningFlash - dirLight.intensity) * 0.12;
+
+        // ปรับสีน้ำทะเลและเมฆให้เข้ากับแสงจันทร์วันเพ็ญอย่างนุ่มนวล
+        if (oceanMesh) {
+          const oMat = oceanMesh.material as THREE.MeshStandardMaterial;
+          tempLightCol.setHex(showNight ? 0x072b59 : 0x0ea5e9);
+          oMat.color.lerp(tempLightCol, 0.04);
+          tempLightCol.setHex(showNight ? 0x0c4a6e : 0x0369a1);
+          oMat.emissive.lerp(tempLightCol, 0.04);
+        }
+        tempLightCol.setHex(showNight ? 0x475569 : 0xffffff);
+        cloudMat.color.lerp(tempLightCol, 0.04);
 
         rainPoints.visible = isRaining;
         if (isRaining) {
-          const dropSpeed = bkkW.condition === 'storm' ? 0.65 : 0.42;
+          const dropSpeed = bkkW?.condition === 'storm' ? 0.65 : 0.42;
           const posAttr = rainGeo.getAttribute('position') as THREE.BufferAttribute;
           for (let i = 0; i < rainCount; i++) {
             let py = posAttr.getY(i) - dropSpeed;
@@ -4062,6 +4609,27 @@ export default function Arena3DPage() {
           posAttr.needsUpdate = true;
         }
         nightGroup.visible = showNight;
+        if (showNight) {
+          const moonPulse = 1 + Math.sin(elapsed * 1.4) * 0.045;
+          moonInnerHalo.scale.set(22 * moonPulse, 22 * moonPulse, 1);
+          moonOuterHalo.scale.set(44 * (2 - moonPulse), 44 * (2 - moonPulse), 1);
+          starMat.opacity = 0.8 + Math.sin(elapsed * 2.2) * 0.14;
+          moonWaterShimmer.scale.set(1 + Math.sin(elapsed * 1.9) * 0.06, 1, 1);
+          (moonWaterShimmer.material as THREE.MeshBasicMaterial).opacity =
+            0.64 + Math.sin(elapsed * 2.7) * 0.12;
+          moonBeamMeshes.forEach((bm, bi) => {
+            (bm.material as THREE.MeshBasicMaterial).opacity =
+              (bi === 0 ? 0.12 : 0.08) + Math.sin(elapsed * 1.3 + bi * 1.5) * 0.025;
+          });
+          skyLanterns.forEach((sl) => {
+            const h = ((elapsed * sl.speed + sl.phase * 4) % 28) + 6;
+            sl.group.position.set(
+              sl.baseX + Math.sin(elapsed * 0.6 + sl.phase) * 1.6,
+              h,
+              sl.baseZ + Math.cos(elapsed * 0.5 + sl.phase) * 1.2
+            );
+          });
+        }
       }
 
       const now = performance.now();
@@ -5150,6 +5718,161 @@ export default function Arena3DPage() {
         questBoardTagEl.style.opacity = '0';
       }
 
+      // ซิงก์และขยับขบวนกระทง 3D รอบเกาะ + ป้ายคำอธิษฐานลอยน้ำ
+      const rawKrathongs = krathongsRef.current;
+      const viewerUid = currentUserIdRef.current;
+      const syncSig = `${viewerUid ?? 0}|${rawKrathongs.length}|${rawKrathongs[0]?.id ?? ''}|${rawKrathongs[rawKrathongs.length - 1]?.id ?? ''}`;
+      if (syncSig !== lastKrathongSyncSig) {
+        lastKrathongSyncSig = syncSig;
+        const desiredList: KrathongItem[] = [];
+        const pickedKeys = new Set<string>();
+        // ให้ความสำคัญกับกระทงของตัวเองทุกใบก่อนเสมอ
+        if (viewerUid !== null && viewerUid > 0) {
+          for (const k of rawKrathongs) {
+            if (k.userId === viewerUid) {
+              const key = `${k.id}`;
+              if (!pickedKeys.has(key)) {
+                pickedKeys.add(key);
+                desiredList.push(k);
+              }
+            }
+          }
+        }
+        for (const k of rawKrathongs) {
+          if (desiredList.length >= maxVisibleKrathongs) break;
+          const key = `${k.id}`;
+          if (!pickedKeys.has(key)) {
+            pickedKeys.add(key);
+            desiredList.push(k);
+          }
+        }
+
+        // ลบกระทงที่ไม่อยู่ในรายการแสดงผลออกอย่างปลอดภัย
+        Array.from(activeKrathongMap.keys()).forEach((existingKey) => {
+          if (!pickedKeys.has(existingKey)) {
+            const old = activeKrathongMap.get(existingKey);
+            if (old) {
+              krathongSceneGroup.remove(old.parts.group);
+              disposeObject3D(old.parts.group);
+              old.tagEl.remove();
+              activeKrathongMap.delete(existingKey);
+            }
+          }
+        });
+
+        // สร้างโมเดล 3D และป้ายชื่อสำหรับกระทงใบใหม่ทันทีโดยไม่ต้องรีเซ็ตฉาก
+        for (const item of desiredList) {
+          const key = `${item.id}`;
+          const isMine = viewerUid !== null && viewerUid > 0 && item.userId === viewerUid;
+          const existing = activeKrathongMap.get(key);
+          if (existing) {
+            existing.item = item;
+            existing.isMine = isMine;
+            continue;
+          }
+          const parts = buildKrathongMesh(item.styleId, {
+            colorHex: item.avatarColor,
+            bandColor: item.avatarBand,
+            species: item.avatarSpecies,
+            emoji: item.userEmoji,
+          });
+          parts.group.scale.setScalar(isMine ? 1.18 : 1.05);
+          parts.group.traverse((obj) => {
+            obj.userData.krathongKey = key;
+          });
+          krathongSceneGroup.add(parts.group);
+
+          const tagEl = document.createElement('div');
+          tagEl.className = 'player-tag pointer-events-none transition-opacity duration-200';
+          const safeName = escapeKrathongHtml(item.userName || 'นักเดินทาง');
+          const safeEmoji = escapeKrathongHtml(item.userEmoji || '🪷');
+          const safeCaption = escapeKrathongHtml(item.caption || '');
+          if (isMine) {
+            tagEl.innerHTML = `
+              <div class="rounded-2xl bg-gradient-to-r from-amber-950/95 via-rose-950/95 to-indigo-950/95 border-2 border-amber-300 px-2.5 py-1 shadow-[0_3px_12px_rgba(251,191,36,0.55)] text-center max-w-[210px]">
+                <div class="text-[9.5px] font-black text-amber-300 truncate">🪷 กระทงของคุณ • ${safeEmoji} ${safeName}</div>
+                ${safeCaption ? `<div class="text-[10.5px] font-bold text-white truncate">“${safeCaption}”</div>` : ''}
+              </div>
+            `;
+          } else {
+            tagEl.innerHTML = `
+              <div class="rounded-2xl bg-slate-950/85 border border-amber-300/55 px-2.5 py-0.5 shadow-md text-center max-w-[195px]">
+                <div class="text-[9px] font-extrabold text-amber-200 truncate">${safeEmoji} ${safeName}</div>
+                ${safeCaption ? `<div class="text-[10px] font-semibold text-amber-50/95 truncate">“${safeCaption}”</div>` : ''}
+              </div>
+            `;
+          }
+          labelsContainer.appendChild(tagEl);
+          activeKrathongMap.set(key, { key, item, isMine, parts, tagEl });
+        }
+      }
+
+      const ORBIT_SPEED = 0.0082;
+      const nowWallMs = Date.now();
+      const maxTagDist = qCfg.tier === 'lite' ? 36 : 48;
+      activeKrathongMap.forEach((entry, kIdx) => {
+        const { item, parts, tagEl, isMine } = entry;
+        const ageSec = Math.max(0, (nowWallMs - item.createdAt) / 1000);
+        const orbitPt = sampleIslandKrathongOrbit(
+          item.orbitSeed + ageSec * ORBIT_SPEED,
+          item.laneOffset,
+          islandCenterX,
+          islandW,
+          islandD
+        );
+        let kx = orbitPt.x;
+        let kz = orbitPt.z;
+        if (item.startX != null && item.startZ != null && ageSec < 5.0) {
+          const u = Math.min(1, ageSec / 5.0);
+          const smooth = u * u * (3 - 2 * u);
+          kx = item.startX + (orbitPt.x - item.startX) * smooth;
+          kz = item.startZ + (orbitPt.z - item.startZ) * smooth;
+        }
+        const waveH =
+          (Math.sin(kx * 0.18 + elapsed * 1.9) + Math.cos(-kz * 0.21 + elapsed * 1.5)) *
+          0.5 *
+          0.16;
+        const ky = -0.39 + waveH;
+        parts.group.position.set(kx, ky, kz);
+        parts.group.rotation.y = orbitPt.rotY + Math.sin(elapsed * 0.45 + item.orbitSeed * 25) * 0.28;
+
+        const isFocused =
+          focusedKrathongIdRef.current !== null &&
+          String(focusedKrathongIdRef.current) === String(item.id) &&
+          now < focusedKrathongUntilRef.current;
+        animateKrathongParts(
+          parts,
+          elapsed,
+          item.orbitSeed + Number(String(kIdx).length) * 0.07,
+          isFocused ? 0.65 : isMine ? 0.28 : 0
+        );
+
+        const camDist = Math.hypot(
+          camera.position.x - kx,
+          camera.position.y - ky,
+          camera.position.z - kz
+        );
+        const showLabel = isMine || isFocused || camDist < maxTagDist;
+        if (showLabel) {
+          tempProjVec.set(kx, ky + 1.18, kz);
+          tempProjVec.project(camera);
+          if (tempProjVec.z < 1) {
+            tagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+            tagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+            const distAlpha =
+              isMine || isFocused
+                ? 1
+                : Math.max(0, Math.min(1, (maxTagDist - camDist) / 10));
+            tagEl.style.opacity = distAlpha.toFixed(2);
+            tagEl.style.zIndex = isFocused ? '98' : isMine ? '90' : '18';
+          } else {
+            tagEl.style.opacity = '0';
+          }
+        } else {
+          tagEl.style.opacity = '0';
+        }
+      });
+
       if (cameraTargetPosRef.current) {
         camera.position.lerp(cameraTargetPosRef.current, 0.06);
         controls.target.lerp(cameraLookAtRef.current, 0.08);
@@ -5288,6 +6011,30 @@ export default function Arena3DPage() {
         }
       }
 
+      // คลิกส่องกระทงที่ลอยอยู่ในน้ำเพื่ออ่านแคปชั่นคำอธิษฐานเต็มๆ
+      if (krathongSceneGroup.children.length > 0) {
+        const kHits = raycaster.intersectObjects(krathongSceneGroup.children, true);
+        if (kHits.length > 0) {
+          let hitObj: THREE.Object3D | null = kHits[0].object;
+          while (hitObj && hitObj.userData.krathongKey === undefined) {
+            hitObj = hitObj.parent;
+          }
+          const kKey = hitObj?.userData.krathongKey as string | undefined;
+          const kEntry = kKey ? activeKrathongMap.get(kKey) : undefined;
+          if (kEntry) {
+            focusedKrathongIdRef.current = kEntry.item.id;
+            focusedKrathongUntilRef.current = performance.now() + 8500;
+            const stMeta = getKrathongStyleMeta(kEntry.item.styleId);
+            showToast(
+              stMeta.emoji,
+              `กระทงของ ${kEntry.item.userEmoji} ${kEntry.item.userName}`,
+              kEntry.item.caption ? `“${kEntry.item.caption}”` : stMeta.name
+            );
+            return;
+          }
+        }
+      }
+
       if (walkingSpectatorIdRef.current !== null) {
         const groundHits = raycaster.intersectObject(island, false);
         if (groundHits.length > 0) {
@@ -5346,6 +6093,10 @@ export default function Arena3DPage() {
         // ignore
       }
       cancelAnimationFrame(frameId);
+      activeKrathongMap.forEach((entry) => {
+        entry.tagEl.remove();
+      });
+      activeKrathongMap.clear();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
@@ -6464,7 +7215,19 @@ export default function Arena3DPage() {
               <span className="hidden sm:inline bg-emerald-500 text-black text-[9px] font-extrabold px-1.5 py-0.5 rounded">
                 MMO ARENA
               </span>
-              {bkkWeather && (
+              <button
+                type="button"
+                onClick={() => setIsFullMoonSky((prev) => !prev)}
+                className={`border text-[9.5px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0 cursor-pointer transition ${isFullMoonSky
+                  ? 'bg-indigo-950/90 border-amber-300 text-amber-200 shadow-[0_0_10px_rgba(253,224,71,0.45)]'
+                  : 'bg-black/45 border-slate-500 text-slate-200'
+                  }`}
+                title="คลิกสลับโหมดท้องฟ้าคืนวันเพ็ญลอยกระทง / สภาพอากาศจริง"
+              >
+                <span>{isFullMoonSky ? '🌕' : '🌤️'}</span>
+                <span>{isFullMoonSky ? 'คืนวันเพ็ญ' : 'อากาศจริง'}</span>
+              </button>
+              {bkkWeather && !isFullMoonSky && (
                 <span
                   className="bg-black/45 border border-amber-400/50 text-amber-200 text-[9.5px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 sm:gap-1 shrink-0"
                   title={`สภาพอากาศกรุงเทพฯ ล่าสุด: ${bkkWeather.label} ${bkkWeather.temp}°C`}
@@ -6557,8 +7320,8 @@ export default function Arena3DPage() {
             <button
               onClick={() => setIsDrawerOpen((v) => !v)}
               className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1 ${isDrawerOpen
-                  ? 'bg-amber-400/25 text-amber-200'
-                  : 'text-amber-100 hover:bg-amber-400 hover:text-black'
+                ? 'bg-amber-400/25 text-amber-200'
+                : 'text-amber-100 hover:bg-amber-400 hover:text-black'
                 }`}
               title="เปิด/ปิดกระดานอันดับ"
             >
@@ -6590,13 +7353,14 @@ export default function Arena3DPage() {
             </button>
             <button
               onClick={toggleMusic}
-              className={`px-2 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${isMusicOn
-                  ? 'bg-amber-400 text-black'
-                  : 'text-amber-100 hover:bg-amber-400 hover:text-black'
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1 ${isMusicOn
+                ? 'bg-amber-400 text-black'
+                : 'text-amber-100 hover:bg-amber-400 hover:text-black'
                 }`}
-              title="เปิด/ปิดเพลงประกอบ"
+              title="เปิด/ปิดเพลงลอยกระทงประกอบฉาก"
             >
               <span>{isMusicOn ? '🔊' : '🔇'}</span>
+              <span className="hidden lg:inline">{isFullMoonSky ? 'เพลงลอยกระทง' : 'เพลง'}</span>
             </button>
             {players.some((pl) => pl.id === currentUserId) && (
               <button
@@ -6650,8 +7414,8 @@ export default function Arena3DPage() {
                       showToast('⚡', `โหมดกราฟิก: ${opt.label}`, 'ปรับความละเอียดและเอฟเฟกต์ 3D เรียบร้อย');
                     }}
                     className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold border cursor-pointer transition ${qualityMode === opt.id
-                        ? 'bg-amber-400 text-black border-white'
-                        : 'bg-slate-900/90 text-amber-100 border-slate-700'
+                      ? 'bg-amber-400 text-black border-white'
+                      : 'bg-slate-900/90 text-amber-100 border-slate-700'
                       }`}
                   >
                     {opt.short}
@@ -6678,7 +7442,11 @@ export default function Arena3DPage() {
                 className="w-full text-left px-2.5 py-2 rounded-xl bg-slate-900/80 text-amber-100 text-xs font-extrabold flex items-center gap-2 cursor-pointer"
               >
                 <span>{isMusicOn ? '🔊' : '🔇'}</span>
-                <span>{isMusicOn ? 'ปิดเพลงประกอบ' : 'เปิดเพลงประกอบ'}</span>
+                <span>
+                  {isMusicOn
+                    ? 'ปิดเพลงลอยกระทง'
+                    : 'เปิดเพลงลอยกระทง'}
+                </span>
               </button>
               {players.some((pl) => pl.id === currentUserId) && (
                 <button
@@ -6786,10 +7554,10 @@ export default function Arena3DPage() {
                       if (window.innerWidth < 768) setIsDrawerOpen(false);
                     }}
                     className={`rounded-xl p-2 flex items-center justify-between gap-2 cursor-pointer hover:translate-x-0.5 transition border-2 ${isFirst
-                        ? 'bg-amber-500/25 border-amber-300'
-                        : p.isInFoodStall || isLast
-                          ? 'bg-rose-900/40 border-rose-500/60'
-                          : 'bg-slate-900/80 border-slate-700'
+                      ? 'bg-amber-500/25 border-amber-300'
+                      : p.isInFoodStall || isLast
+                        ? 'bg-rose-900/40 border-rose-500/60'
+                        : 'bg-slate-900/80 border-slate-700'
                       }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
@@ -6873,8 +7641,8 @@ export default function Arena3DPage() {
             onClick={() => setActionTargetPlayer(me)}
             title="คลิกเพื่อดูเกจพลัง +/- ประจำวันของคุณ"
             className={`fixed right-3 z-20 pointer-events-auto flex-col gap-1.5 w-[300px] rpg-panel rounded-2xl p-3 cursor-pointer hover:brightness-110 transition ${walkingSpectatorId !== null
-                ? 'hidden xl:flex bottom-20'
-                : 'hidden lg:flex bottom-3'
+              ? 'hidden xl:flex bottom-20'
+              : 'hidden lg:flex bottom-3'
               }`}
           >
             <div className="flex items-center justify-between text-xs font-extrabold text-amber-200">
@@ -6928,8 +7696,8 @@ export default function Arena3DPage() {
                 type="button"
                 onClick={() => setFeedbackTab('submit')}
                 className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${feedbackTab === 'submit'
-                    ? 'bg-amber-400 text-black border-white'
-                    : 'bg-slate-900/80 text-amber-100 border-slate-700'
+                  ? 'bg-amber-400 text-black border-white'
+                  : 'bg-slate-900/80 text-amber-100 border-slate-700'
                   }`}
               >
                 ✍️ ส่งเรื่อง (+5 💰/วัน)
@@ -6941,8 +7709,8 @@ export default function Arena3DPage() {
                   void loadFeedbackItems();
                 }}
                 className={`py-2 rounded-xl text-xs font-extrabold border-2 cursor-pointer transition ${feedbackTab === 'board'
-                    ? 'bg-cyan-400 text-black border-white'
-                    : 'bg-slate-900/80 text-amber-100 border-slate-700'
+                  ? 'bg-cyan-400 text-black border-white'
+                  : 'bg-slate-900/80 text-amber-100 border-slate-700'
                   }`}
               >
                 📋 กระดานติดตาม ({feedbackItems.length})
@@ -6968,8 +7736,8 @@ export default function Arena3DPage() {
                         type="button"
                         onClick={() => setFeedbackCategory(cat.id)}
                         className={`py-2 px-2 rounded-xl border-2 text-[11px] font-extrabold cursor-pointer transition ${feedbackCategory === cat.id
-                            ? 'bg-amber-400 text-black border-white'
-                            : 'bg-slate-900 text-amber-100 border-slate-700'
+                          ? 'bg-amber-400 text-black border-white'
+                          : 'bg-slate-900 text-amber-100 border-slate-700'
                           }`}
                       >
                         {cat.label}
@@ -7037,8 +7805,8 @@ export default function Arena3DPage() {
                       <div
                         key={it.id}
                         className={`rounded-xl p-3 border-2 space-y-1.5 ${it.status === 'resolved'
-                            ? 'bg-emerald-950/45 border-emerald-500/60'
-                            : 'bg-slate-900/85 border-slate-700'
+                          ? 'bg-emerald-950/45 border-emerald-500/60'
+                          : 'bg-slate-900/85 border-slate-700'
                           }`}
                       >
                         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -7054,8 +7822,8 @@ export default function Arena3DPage() {
                               type="button"
                               onClick={() => handleToggleFeedbackStatus(it.id, it.status)}
                               className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border cursor-pointer ${it.status === 'resolved'
-                                  ? 'bg-emerald-500 text-black border-white'
-                                  : 'bg-amber-500/20 text-amber-200 border-amber-400/70 hover:bg-amber-400 hover:text-black'
+                                ? 'bg-emerald-500 text-black border-white'
+                                : 'bg-amber-500/20 text-amber-200 border-amber-400/70 hover:bg-amber-400 hover:text-black'
                                 }`}
                               title="คลิกเพื่อสลับสถานะ รอตรวจสอบ / แก้ไขแล้ว"
                             >
@@ -7135,8 +7903,8 @@ export default function Arena3DPage() {
                         setModalError('');
                       }}
                       className={`border-2 border-black rounded-xl py-2 px-2 text-xs font-extrabold cursor-pointer transition ${logTab === 'steps'
-                          ? 'bg-gradient-to-r from-lime-400 to-emerald-400 text-black shadow-[2px_2px_0px_#000]'
-                          : 'bg-slate-900 text-amber-100/75'
+                        ? 'bg-gradient-to-r from-lime-400 to-emerald-400 text-black shadow-[2px_2px_0px_#000]'
+                        : 'bg-slate-900 text-amber-100/75'
                         }`}
                     >
                       👟 ก้าวเดิน (เป้าหลัก)
@@ -7312,8 +8080,8 @@ export default function Arena3DPage() {
                                           disabled={!syncKey || rotatingSyncKey}
                                           onClick={handleRotateSyncKey}
                                           className={`rounded-lg py-1 text-[10.5px] font-bold border cursor-pointer disabled:opacity-50 ${confirmRotateKey
-                                              ? 'bg-rose-600 text-white border-amber-300'
-                                              : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                                            ? 'bg-rose-600 text-white border-amber-300'
+                                            : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
                                             }`}
                                         >
                                           {rotatingSyncKey
@@ -7386,8 +8154,8 @@ export default function Arena3DPage() {
                                 type="button"
                                 onClick={() => setStepInputMode('daily_sync')}
                                 className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'daily_sync'
-                                    ? 'bg-amber-300 text-black border-white'
-                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                  ? 'bg-amber-300 text-black border-white'
+                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
                                   }`}
                               >
                                 🔄 ยอดวันนี้ (กันเบิ้ล)
@@ -7396,8 +8164,8 @@ export default function Arena3DPage() {
                                 type="button"
                                 onClick={() => setStepInputMode('add')}
                                 className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'add'
-                                    ? 'bg-emerald-400 text-black border-white'
-                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                  ? 'bg-emerald-400 text-black border-white'
+                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
                                   }`}
                               >
                                 ➕ บวกเพิ่มเอง
@@ -7406,8 +8174,8 @@ export default function Arena3DPage() {
                                 type="button"
                                 onClick={() => setStepInputMode('set')}
                                 className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'set'
-                                    ? 'bg-sky-400 text-black border-white'
-                                    : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                  ? 'bg-sky-400 text-black border-white'
+                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
                                   }`}
                               >
                                 📝 รวมทั้งซีซั่น
@@ -7734,10 +8502,10 @@ export default function Arena3DPage() {
                   </span>
                   <span
                     className={`font-[family-name:var(--font-kanit)] font-extrabold text-sm ${pBoost.netPower > 0
-                        ? 'text-amber-300'
-                        : pBoost.netPower < 0
-                          ? 'text-pink-400'
-                          : 'text-slate-300'
+                      ? 'text-amber-300'
+                      : pBoost.netPower < 0
+                        ? 'text-pink-400'
+                        : 'text-slate-300'
                       }`}
                   >
                     เกจรวม: {netLabel}
@@ -7828,8 +8596,8 @@ export default function Arena3DPage() {
                         type="button"
                         onClick={() => setBoardKind('cheer')}
                         className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${boardKind === 'cheer'
-                            ? 'bg-gradient-to-r from-[#A3E635] to-[#FACC15] text-black shadow-[2px_2px_0px_#000]'
-                            : 'bg-zinc-100 text-zinc-600'
+                          ? 'bg-gradient-to-r from-[#A3E635] to-[#FACC15] text-black shadow-[2px_2px_0px_#000]'
+                          : 'bg-zinc-100 text-zinc-600'
                           }`}
                       >
                         🔥 เติมไฟบูสต์ (+1)
@@ -7838,8 +8606,8 @@ export default function Arena3DPage() {
                         type="button"
                         onClick={() => setBoardKind('tempt')}
                         className={`border-2 border-black rounded-xl py-2 text-xs font-extrabold cursor-pointer transition ${boardKind === 'tempt'
-                            ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]'
-                            : 'bg-zinc-100 text-zinc-600'
+                          ? 'bg-[#FF4D8D] text-white shadow-[2px_2px_0px_#000]'
+                          : 'bg-zinc-100 text-zinc-600'
                           }`}
                       >
                         😈 มารผจญ/ขุนพุง (-1)
@@ -7849,8 +8617,8 @@ export default function Arena3DPage() {
                     {/* กติกาวงแชร์ปันผลสายเชียร์ & สายมารแทงสวนรับทรัพย์ */}
                     <div
                       className={`rounded-xl border-2 border-black px-3 py-2 text-[11px] font-bold leading-snug ${boardKind === 'cheer'
-                          ? 'bg-amber-100 text-stone-900'
-                          : 'bg-rose-100 text-rose-950'
+                        ? 'bg-amber-100 text-stone-900'
+                        : 'bg-rose-100 text-rose-950'
                         }`}
                     >
                       {boardKind === 'cheer' ? (
@@ -7883,8 +8651,8 @@ export default function Arena3DPage() {
                       type="submit"
                       disabled={sendingBoard}
                       className={`w-full neo-btn font-[family-name:var(--font-kanit)] font-extrabold text-sm py-2.5 rounded-xl cursor-pointer ${boardKind === 'cheer'
-                          ? 'bg-[#FFE600] hover:bg-[#fef08a] text-black'
-                          : 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white'
+                        ? 'bg-[#FFE600] hover:bg-[#fef08a] text-black'
+                        : 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white'
                         }`}
                     >
                       {sendingBoard
@@ -7975,8 +8743,8 @@ export default function Arena3DPage() {
                       setGiftError('');
                     }}
                     className={`px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border-2 whitespace-nowrap cursor-pointer transition shrink-0 ${giftCategory === cat.id
-                        ? 'rpg-btn-gold'
-                        : 'bg-slate-900/90 text-amber-100 border-slate-700 hover:border-amber-400'
+                      ? 'rpg-btn-gold'
+                      : 'bg-slate-900/90 text-amber-100 border-slate-700 hover:border-amber-400'
                       }`}
                   >
                     {cat.label}
@@ -7999,8 +8767,8 @@ export default function Arena3DPage() {
                     <div
                       key={item.id}
                       className={`rounded-xl p-2.5 border-2 flex flex-col justify-between gap-2 ${friendHas
-                          ? 'bg-slate-900/50 border-slate-700 opacity-65'
-                          : 'bg-slate-900/90 border-amber-500/50 hover:border-amber-300'
+                        ? 'bg-slate-900/50 border-slate-700 opacity-65'
+                        : 'bg-slate-900/90 border-amber-500/50 hover:border-amber-300'
                         }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -8022,10 +8790,10 @@ export default function Arena3DPage() {
                         disabled={friendHas || !canAfford || Boolean(sendingGiftId)}
                         onClick={() => handleSendGiftItem(item)}
                         className={`w-full py-1.5 rounded-xl text-[11px] font-extrabold border cursor-pointer transition ${friendHas
-                            ? 'bg-slate-800 text-slate-400 border-slate-600 cursor-not-allowed'
-                            : !canAfford
-                              ? 'bg-slate-800 text-rose-300 border-rose-500/50 cursor-not-allowed'
-                              : 'bg-gradient-to-r from-fuchsia-500 to-amber-400 text-black border-white hover:brightness-110'
+                          ? 'bg-slate-800 text-slate-400 border-slate-600 cursor-not-allowed'
+                          : !canAfford
+                            ? 'bg-slate-800 text-rose-300 border-rose-500/50 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-fuchsia-500 to-amber-400 text-black border-white hover:brightness-110'
                           }`}
                       >
                         {busy
@@ -8325,12 +9093,12 @@ export default function Arena3DPage() {
                           );
                         }}
                         className={`border-2 border-black rounded-xl px-2.5 py-1.5 text-xs font-extrabold cursor-pointer transition ${act.animType === 'volleyball'
-                            ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
-                            : act.animType === 'picnic_shabu'
-                              ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
-                              : act.animType === 'play_cards'
-                                ? 'bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-black hover:brightness-105 shadow'
-                                : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
+                          ? 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-400 text-black hover:brightness-105 shadow'
+                          : act.animType === 'picnic_shabu'
+                            ? 'bg-gradient-to-r from-orange-300 via-amber-300 to-red-400 text-black hover:brightness-105 shadow'
+                            : act.animType === 'play_cards'
+                              ? 'bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-black hover:brightness-105 shadow'
+                              : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
                           }`}
                       >
                         {act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
@@ -8403,14 +9171,37 @@ export default function Arena3DPage() {
               )}
 
               {!isPairMenuOpen && isNearOcean && (
-                <button
-                  type="button"
-                  onClick={startFishing}
-                  className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                >
-                  🎣 ตกปลา<span className="hidden sm:inline">ริมทะเล!</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={startFishing}
+                    className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  >
+                    🎣 ตกปลา<span className="hidden sm:inline">ริมทะเล!</span>
+                  </button>
+                  {fishingPhase === 'idle' && (
+                    <button
+                      type="button"
+                      onClick={() => setIsKrathongModalOpen(true)}
+                      className="neo-btn bg-gradient-to-r from-amber-300 via-pink-400 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                    >
+                      🪷 ลอยกระทง<span className="hidden sm:inline">ริมหาด!</span>
+                    </button>
+                  )}
+                </>
               )}
+              {!isPairMenuOpen &&
+                currentUserId !== null &&
+                krathongs.some((k) => k.userId === currentUserId) && (
+                  <button
+                    type="button"
+                    onClick={handleCycleMyKrathongs}
+                    className="neo-btn bg-slate-900/95 hover:bg-slate-800 text-amber-200 border-2 border-amber-300 font-[family-name:var(--font-kanit)] font-extrabold text-[11px] sm:text-xs px-3 py-1.5 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  >
+                    🔍 ส่องกระทงฉัน (
+                    {krathongs.filter((k) => k.userId === currentUserId).length})
+                  </button>
+                )}
             </div>
           )}
 
@@ -8782,6 +9573,29 @@ export default function Arena3DPage() {
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
           playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🥋'}
           onPointsUpdated={() => void fetchArenaData({ force: true })}
+        />
+      )}
+
+      {isKrathongModalOpen && (
+        <LoyKrathongModal
+          isOpen={isKrathongModalOpen}
+          onClose={() => setIsKrathongModalOpen(false)}
+          player={(() => {
+            const activeId = walkingSpectatorId ?? currentUserId;
+            const me = players.find((pl) => pl.id === activeId);
+            return {
+              id: me?.id ?? currentUserId,
+              name: me?.name || 'นักเดินทางริมหาด',
+              emoji: me?.emoji || '🪷',
+              colorHex: me?.colorHex || '#F472B6',
+              bandColor: me?.bandColor || '#FFE600',
+              species: me?.species || 'bunny',
+            };
+          })()}
+          submitting={launchingKrathong}
+          isMusicOn={isMusicOn}
+          onToggleMusic={toggleMusic}
+          onLaunch={handleLaunchKrathong}
         />
       )}
 
