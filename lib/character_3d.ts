@@ -8543,13 +8543,30 @@ export function buildCustomGuardCharacter(faceImageUrl = '/images/guard_face_tex
   };
 }
 
+export interface OtaruLampLightRef {
+  glowSprite: THREE.Sprite;
+  bulbMat: THREE.MeshStandardMaterial;
+  isSnowCandle?: boolean;
+}
+
+export interface OnsenSteamPuffRef {
+  sprite: THREE.Sprite;
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  phase: number;
+  speed: number;
+  radius: number;
+}
+
 /**
- * Builds the Tropical Beach Island Arena & Start-Line Food Stall Pavilion:
- * - Sparkling turquoise ocean waves, shallow coral lagoon shelf & white seafoam shoreline
- * - Distant tropical coconut islets, coastal lighthouse & bobbing sailboats
- * - Swaying coconut palm trees, striped beach umbrellas, sun loungers, surfboards & lifebuoys
- * - Left Start Food Zone (ซุ้มอาหารสายตบะแตก): wooden boardwalk deck, striped buffet stall, BBQ grill, shabu/pizza/boba spread & cozy lounging mats
- * - Right Godlike Arena Finish: winged golden crystal arch, portal glow, twin winged trophies
+ * Builds the Hokkaido Winter Resort Island Arena & Sapporo Market / Otaru / Onsen Zones:
+ * - Powder-snow shoreline, frosted ice shelf, deep Okhotsk sea & floating Ryuhyo drift ice + Garinko icebreaker
+ * - Snow-laden Hokkaido Ezo spruce pine trees & Guard Yuki-Daruma snowmen
+ * - Otaru Snow Light Path vintage gas streetlamps & snow-candle domes (auto-lit at Thai dusk/night)
+ * - Outdoor volcanic-rock Rotenburo Onsen with soaking yuzu capybaras, rising steam & ski racks
+ * - Left Start Sapporo Ramen Yokocho & Winter Market Stall (miso butter ramen, king crab, Jingisukan grill, yaki-imo)
+ * - Right Godlike Winter Crystal Finish Arch & twin winged trophies
  */
 export function buildFantasyArenaDecor(
   halfLen: number,
@@ -8570,47 +8587,75 @@ export function buildFantasyArenaDecor(
   oceanMesh: THREE.Mesh;
   foamRings: THREE.Mesh[];
   palmCrowns: THREE.Group[];
+  otaruLamps: OtaruLampLightRef[];
+  onsenSteamPuffs: OnsenSteamPuffRef[];
 } {
   const decorGroup = new THREE.Group();
   const balloons: THREE.Group[] = [];
   const floatingIslands: THREE.Group[] = [];
   const foamRings: THREE.Mesh[] = [];
   const palmCrowns: THREE.Group[] = [];
+  const otaruLamps: OtaruLampLightRef[] = [];
+  const onsenSteamPuffs: OnsenSteamPuffRef[] = [];
 
   const islandCenterX = arenaBounds?.islandCenterX ?? -4.0;
   const islandW = arenaBounds?.islandW ?? halfLen * 2 + 36;
   const islandD = arenaBounds?.islandD ?? Math.max(54, trackWidth + 32);
   const specRows = arenaBounds?.specRows ?? 1;
 
-  // 1. Shallow Lagoon Sandbank, White Seafoam Shoreline & Vast Sparkling Ocean
-  const wetSandMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.82 });
-  const wetSandShelf = new THREE.Mesh(
-    new THREE.BoxGeometry(islandW + 3.2, 0.75, islandD + 3.2),
-    wetSandMat
-  );
-  wetSandShelf.position.set(islandCenterX, -0.52, 0);
-  wetSandShelf.receiveShadow = true;
-  decorGroup.add(wetSandShelf);
-
-  const shallowReefMat = new THREE.MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.18,
-    roughness: 0.25,
+  const snowCapMat = new THREE.MeshStandardMaterial({
+    color: 0xf8fafc,
+    roughness: 0.72,
+    emissive: 0xe0f2fe,
+    emissiveIntensity: 0.08,
   });
-  const shallowLagoon = new THREE.Mesh(
-    new THREE.BoxGeometry(islandW + 11.5, 0.35, islandD + 11.5),
-    shallowReefMat
-  );
-  shallowLagoon.position.set(islandCenterX, -0.78, 0);
-  decorGroup.add(shallowLagoon);
+  const frostIceMat = new THREE.MeshStandardMaterial({
+    color: 0xbae6fd,
+    emissive: 0x38bdf8,
+    emissiveIntensity: 0.16,
+    roughness: 0.22,
+    metalness: 0.08,
+  });
 
-  // Concentric white seafoam rings lapping against the sandy shore
-  [2.2, 5.0].forEach((expand, fi) => {
+  // Shared soft radial glow texture for Otaru gas lamps & Onsen steam puffs
+  const fxGlowCanvas = document.createElement('canvas');
+  fxGlowCanvas.width = 128;
+  fxGlowCanvas.height = 128;
+  const fgCtx = fxGlowCanvas.getContext('2d');
+  if (fgCtx) {
+    const g = fgCtx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    g.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    g.addColorStop(0.35, 'rgba(255, 255, 255, 0.48)');
+    g.addColorStop(0.72, 'rgba(255, 255, 255, 0.12)');
+    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    fgCtx.fillStyle = g;
+    fgCtx.fillRect(0, 0, 128, 128);
+  }
+  const sharedRadialGlowTex = new THREE.CanvasTexture(fxGlowCanvas);
+  sharedRadialGlowTex.colorSpace = THREE.SRGBColorSpace;
+
+  // 1. Hokkaido Frosted Snowbank Shelf, Glacial Ice Rim & Cold Okhotsk Sea
+  const snowShoreShelf = new THREE.Mesh(
+    new THREE.BoxGeometry(islandW + 3.4, 0.76, islandD + 3.4),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe, roughness: 0.76 })
+  );
+  snowShoreShelf.position.set(islandCenterX, -0.52, 0);
+  snowShoreShelf.receiveShadow = true;
+  decorGroup.add(snowShoreShelf);
+
+  const glacialShelf = new THREE.Mesh(
+    new THREE.BoxGeometry(islandW + 11.2, 0.35, islandD + 11.2),
+    frostIceMat
+  );
+  glacialShelf.position.set(islandCenterX, -0.78, 0);
+  decorGroup.add(glacialShelf);
+
+  // Concentric icy sea-frost rings lapping against the snowy shore
+  [2.2, 5.1].forEach((expand, fi) => {
     const foamMat = new THREE.MeshBasicMaterial({
-      color: 0xf0f9ff,
+      color: fi === 0 ? 0xf8fafc : 0xbae6fd,
       transparent: true,
-      opacity: fi === 0 ? 0.72 : 0.42,
+      opacity: fi === 0 ? 0.76 : 0.44,
     });
     const foamPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(islandW + expand * 2, islandD + expand * 2),
@@ -8622,17 +8667,17 @@ export function buildFantasyArenaDecor(
     foamRings.push(foamPlane);
   });
 
-  // Vast animated ocean surface surrounding the grand beach island
+  // Vast animated cold Hokkaido ocean surface surrounding the snowy island
   const oceanSegs = arenaBounds?.oceanSegments ?? 58;
   const oceanGeo = new THREE.PlaneGeometry(540, 540, oceanSegs, oceanSegs);
   const oceanMat = new THREE.MeshStandardMaterial({
-    color: 0x0ea5e9,
-    emissive: 0x0369a1,
+    color: 0x0369a1,
+    emissive: 0x075985,
     emissiveIntensity: 0.22,
     roughness: 0.18,
-    metalness: 0.12,
+    metalness: 0.14,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.92,
   });
   const oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
   oceanMesh.rotation.x = -Math.PI / 2;
@@ -8640,85 +8685,248 @@ export function buildFantasyArenaDecor(
   oceanMesh.receiveShadow = true;
   decorGroup.add(oceanMesh);
 
-  // Helper: Build a swaying Tropical Coconut Palm Tree
-  const buildPalmTree = (leanX: number, leanZ: number, sc = 1) => {
-    const palm = new THREE.Group();
-    const trunkDarkMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.88 });
-    const trunkLightMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.85 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.55, side: THREE.DoubleSide });
-    const leafDarkMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.58, side: THREE.DoubleSide });
-    const coconutMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.75 });
+  // Helper: Build a swaying Snow-Laden Hokkaido Ezo Spruce Pine Tree (ต้นสนฮอกไกโดคลุมหิมะ)
+  const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.88 });
+  const pineDarkMat = new THREE.MeshStandardMaterial({ color: 0x14532d, roughness: 0.72 });
+  const pineMidMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.68 });
+  const buildHokkaidoPineTree = (leanX: number, leanZ: number, sc = 1) => {
+    const tree = new THREE.Group();
 
-    let curX = 0;
-    let curY = 0;
-    let curZ = 0;
-    const segs = 6;
-    for (let s = 0; s < segs; s++) {
-      const t = s / segs;
-      const rBot = (0.34 - t * 0.13) * sc;
-      const rTop = (0.31 - t * 0.13) * sc;
-      const segH = 0.78 * sc;
-      const seg = new THREE.Mesh(
-        new THREE.CylinderGeometry(rTop, rBot, segH, 8),
-        s % 2 === 0 ? trunkLightMat : trunkDarkMat
-      );
-      curX += leanX * (t + 0.25) * 0.28 * sc;
-      curZ += leanZ * (t + 0.25) * 0.28 * sc;
-      seg.position.set(curX, curY + segH / 2, curZ);
-      seg.rotation.z = -leanX * (0.08 + t * 0.14);
-      seg.rotation.x = leanZ * (0.08 + t * 0.14);
-      seg.castShadow = true;
-      palm.add(seg);
-      curY += segH * 0.94;
-    }
+    const baseSnowDrift = new THREE.Mesh(
+      new THREE.SphereGeometry(0.95 * sc, 10, 8),
+      snowCapMat
+    );
+    baseSnowDrift.scale.set(1.2, 0.32, 1.2);
+    baseSnowDrift.position.y = 0.05;
+    tree.add(baseSnowDrift);
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18 * sc, 0.32 * sc, 1.55 * sc, 8),
+      pineTrunkMat
+    );
+    trunk.position.y = 0.76 * sc;
+    trunk.castShadow = true;
+    tree.add(trunk);
 
     const crown = new THREE.Group();
-    crown.position.set(curX, curY + 0.08 * sc, curZ);
+    crown.position.set(0, 1.15 * sc, 0);
+    crown.rotation.z = -leanX * 0.04;
+    crown.rotation.x = leanZ * 0.04;
 
-    // Coconuts cluster under fronds
-    for (let c = 0; c < 3; c++) {
-      const ca = (c / 3) * Math.PI * 2;
-      const nut = new THREE.Mesh(new THREE.SphereGeometry(0.18 * sc, 8, 8), coconutMat);
-      nut.position.set(Math.cos(ca) * 0.22 * sc, -0.1 * sc, Math.sin(ca) * 0.22 * sc);
-      crown.add(nut);
-    }
+    const tiers: [number, number, number][] = [
+      [1.75, 1.48, 0.55],
+      [1.42, 1.36, 1.55],
+      [1.06, 1.24, 2.48],
+      [0.68, 1.12, 3.32],
+    ];
+    tiers.forEach(([radius, height, yOff], ti) => {
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(radius * sc, height * sc, 9),
+        ti % 2 === 0 ? pineDarkMat : pineMidMat
+      );
+      cone.position.y = yOff * sc;
+      cone.rotation.y = ti * 0.35;
+      cone.castShadow = true;
+      cone.receiveShadow = true;
+      crown.add(cone);
 
-    // 7 arched palm fronds fanning out
-    const frondCount = 7;
-    for (let f = 0; f < frondCount; f++) {
-      const fa = (f / frondCount) * Math.PI * 2;
-      const frondPivot = new THREE.Group();
-      frondPivot.rotation.y = fa;
-      const mat = f % 2 === 0 ? leafMat : leafDarkMat;
-      const blade1 = new THREE.Mesh(new THREE.BoxGeometry(1.35 * sc, 0.06 * sc, 0.46 * sc), mat);
-      blade1.position.set(0.68 * sc, 0.12 * sc, 0);
-      blade1.rotation.z = 0.22;
-      const blade2 = new THREE.Mesh(new THREE.BoxGeometry(1.15 * sc, 0.05 * sc, 0.34 * sc), mat);
-      blade2.position.set(1.78 * sc, -0.12 * sc, 0);
-      blade2.rotation.z = -0.38;
-      blade1.castShadow = true;
-      blade2.castShadow = true;
-      frondPivot.add(blade1, blade2);
-      crown.add(frondPivot);
-    }
+      // Fluffy Hokkaido snow blanket resting on each pine tier
+      const snowLayer = new THREE.Mesh(
+        new THREE.ConeGeometry(radius * 0.94 * sc, height * 0.44 * sc, 9),
+        snowCapMat
+      );
+      snowLayer.position.y = (yOff + height * 0.27) * sc;
+      snowLayer.rotation.y = ti * 0.35 + 0.12;
+      crown.add(snowLayer);
+    });
 
-    palm.add(crown);
+    const tipSnow = new THREE.Mesh(new THREE.SphereGeometry(0.18 * sc, 8, 8), snowCapMat);
+    tipSnow.position.y = 3.92 * sc;
+    crown.add(tipSnow);
+
+    tree.add(crown);
     palmCrowns.push(crown);
-    return palm;
+    return tree;
   };
 
-  // 2A. Distant Tropical Lighthouse Atoll & Coconut Islet on the Ocean Horizon
+  // Helper: Cute Guard Yuki-Daruma Snowman (ตุ๊กตาหิมะพี่ยามผูกผ้าพันคอแดง)
+  const buildGuardSnowman = (sc = 1) => {
+    const sm = new THREE.Group();
+    const bodyBot = new THREE.Mesh(new THREE.SphereGeometry(0.68 * sc, 14, 12), snowCapMat);
+    bodyBot.scale.set(1.06, 0.92, 1.06);
+    bodyBot.position.y = 0.58 * sc;
+    bodyBot.castShadow = true;
+
+    const bodyTop = new THREE.Mesh(new THREE.SphereGeometry(0.48 * sc, 14, 12), snowCapMat);
+    bodyTop.position.y = 1.48 * sc;
+    bodyTop.castShadow = true;
+
+    // Cozy knitted red scarf
+    const scarfMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.65 });
+    const scarfRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.41 * sc, 0.1 * sc, 8, 16),
+      scarfMat
+    );
+    scarfRing.rotation.x = Math.PI / 2;
+    scarfRing.position.y = 1.12 * sc;
+    const scarfTail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18 * sc, 0.52 * sc, 0.1 * sc),
+      scarfMat
+    );
+    scarfTail.position.set(0.26 * sc, 0.92 * sc, 0.38 * sc);
+    scarfTail.rotation.z = -0.18;
+
+    // Carrot nose & coal eyes + buttons
+    const coalMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.4 });
+    [-0.16, 0.16].forEach((ex) => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055 * sc, 8, 8), coalMat);
+      eye.position.set(ex * sc, 1.56 * sc, 0.42 * sc);
+      sm.add(eye);
+    });
+    [0.52, 0.78].forEach((by) => {
+      const btn = new THREE.Mesh(new THREE.SphereGeometry(0.05 * sc, 8, 8), coalMat);
+      btn.position.set(0, by * sc, 0.66 * sc);
+      sm.add(btn);
+    });
+    const nose = new THREE.Mesh(
+      new THREE.ConeGeometry(0.075 * sc, 0.36 * sc, 8),
+      new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.5 })
+    );
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, 1.46 * sc, 0.58 * sc);
+
+    // Iconic Security Guard Cap on Snowman's head!
+    const capCrown = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.38 * sc, 0.35 * sc, 0.24 * sc, 12),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+    );
+    capCrown.position.y = 1.94 * sc;
+    const capGoldBand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.365 * sc, 0.365 * sc, 0.06 * sc, 12),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.3 })
+    );
+    capGoldBand.position.y = 1.85 * sc;
+    const capVisor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52 * sc, 0.05 * sc, 0.32 * sc),
+      coalMat
+    );
+    capVisor.position.set(0, 1.83 * sc, 0.28 * sc);
+
+    // Twig arms
+    [-1, 1].forEach((side) => {
+      const twig = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03 * sc, 0.04 * sc, 0.75 * sc, 6),
+        pineTrunkMat
+      );
+      twig.position.set(side * 0.82 * sc, 0.92 * sc, 0);
+      twig.rotation.z = -side * 0.95;
+      sm.add(twig);
+    });
+
+    sm.add(bodyBot, bodyTop, scarfRing, scarfTail, nose, capCrown, capGoldBand, capVisor);
+    return sm;
+  };
+
+  // Helper: Vintage Otaru Canal Gas Streetlamp & Carved Snow Candle Dome
+  const lampIronMat = new THREE.MeshStandardMaterial({
+    color: 0x132a24,
+    metalness: 0.55,
+    roughness: 0.38,
+  });
+  const buildOtaruGasLamp = (x: number, z: number, sc = 1) => {
+    const g = new THREE.Group();
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.22 * sc, 0.3 * sc, 0.32 * sc, 8), lampIronMat);
+    plinth.position.y = 0.16 * sc;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07 * sc, 0.11 * sc, 3.35 * sc, 8), lampIronMat);
+    pole.position.y = 1.82 * sc;
+    pole.castShadow = true;
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.14 * sc, 0.035 * sc, 6, 12), lampIronMat);
+    collar.rotation.x = Math.PI / 2;
+    collar.position.y = 3.28 * sc;
+
+    const bulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfef3c7,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.35,
+      roughness: 0.2,
+    });
+    const glassHousing = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28 * sc, 0.2 * sc, 0.52 * sc, 6),
+      bulbMat
+    );
+    glassHousing.position.y = 3.68 * sc;
+
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.38 * sc, 0.32 * sc, 6), lampIronMat);
+    hood.position.y = 4.08 * sc;
+    const snowHat = new THREE.Mesh(new THREE.ConeGeometry(0.35 * sc, 0.18 * sc, 6), snowCapMat);
+    snowHat.position.y = 4.18 * sc;
+
+    const glowSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: sharedRadialGlowTex,
+        color: 0xfdba74,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    glowSprite.position.y = 3.68 * sc;
+    glowSprite.scale.set(2.9 * sc, 2.9 * sc, 1);
+
+    g.add(plinth, pole, collar, glassHousing, hood, snowHat, glowSprite);
+    g.position.set(x, 0, z);
+    decorGroup.add(g);
+    otaruLamps.push({ glowSprite, bulbMat });
+  };
+
+  const buildSnowCandleDome = (x: number, z: number) => {
+    const domeGroup = new THREE.Group();
+    const igloo = new THREE.Mesh(
+      new THREE.SphereGeometry(0.46, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.58),
+      snowCapMat
+    );
+    igloo.position.y = 0.02;
+    const bulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfde68a,
+      emissive: 0xf97316,
+      emissiveIntensity: 0.45,
+      roughness: 0.25,
+    });
+    const innerFlame = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), bulbMat);
+    innerFlame.position.set(0, 0.18, 0.22);
+
+    const glowSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: sharedRadialGlowTex,
+        color: 0xfb923c,
+        transparent: true,
+        opacity: 0.28,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    glowSprite.position.set(0, 0.26, 0.2);
+    glowSprite.scale.set(1.65, 1.65, 1);
+
+    domeGroup.add(igloo, innerFlame, glowSprite);
+    domeGroup.position.set(x, 0.02, z);
+    decorGroup.add(domeGroup);
+    otaruLamps.push({ glowSprite, bulbMat, isSnowCandle: true });
+  };
+
+  // 2A. Distant Snowy Cape Lighthouse (แหลมหิมะฮอกไกโด) & Snowy Pine Islet on the Horizon
   {
     const lhIsland = new THREE.Group();
-    const sandMound = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.5, 7.2, 1.4, 14),
-      new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.85 })
+    const snowMound = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.6, 7.4, 1.5, 14),
+      snowCapMat
     );
-    sandMound.position.y = 0.35;
-    lhIsland.add(sandMound);
+    snowMound.position.y = 0.35;
+    lhIsland.add(snowMound);
 
     const lhWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 });
-    const lhRedMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.45 });
+    const lhRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.45 });
     for (let b = 0; b < 4; b++) {
       const band = new THREE.Mesh(
         new THREE.CylinderGeometry(1.05 - b * 0.12, 1.18 - b * 0.12, 1.45, 12),
@@ -8732,13 +8940,13 @@ export function buildFantasyArenaDecor(
       new THREE.MeshBasicMaterial({ color: 0xfef08a })
     );
     lantern.position.set(-1.2, 7.2, 0);
-    const lhRoof = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.1, 10), lhRedMat);
+    const lhRoof = new THREE.Mesh(new THREE.ConeGeometry(0.92, 1.1, 10), lhRedMat);
     lhRoof.position.set(-1.2, 8.15, 0);
     lhIsland.add(lantern, lhRoof);
 
-    const miniPalm = buildPalmTree(0.45, 0.2, 0.95);
-    miniPalm.position.set(2.2, 0.85, 1.1);
-    lhIsland.add(miniPalm);
+    const capePine = buildHokkaidoPineTree(0.15, 0.1, 0.95);
+    capePine.position.set(2.2, 0.85, 1.0);
+    lhIsland.add(capePine);
 
     const seaBackZ = -(islandD / 2 + 19);
     lhIsland.position.set(islandCenterX - islandW / 2 - 12, -0.4, seaBackZ);
@@ -8746,89 +8954,126 @@ export function buildFantasyArenaDecor(
   }
 
   {
-    const coralAtoll = new THREE.Group();
-    const atollSand = new THREE.Mesh(
-      new THREE.CylinderGeometry(4.8, 6.4, 1.2, 14),
-      new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.85 })
+    const snowAtoll = new THREE.Group();
+    const atollBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(4.8, 6.5, 1.25, 14),
+      snowCapMat
     );
-    atollSand.position.y = 0.25;
-    coralAtoll.add(atollSand);
-    const p1 = buildPalmTree(-0.4, 0.25, 0.92);
-    p1.position.set(-1.4, 0.75, 0.4);
-    const p2 = buildPalmTree(0.5, -0.2, 0.82);
-    p2.position.set(1.6, 0.75, -0.6);
-    coralAtoll.add(p1, p2);
-    coralAtoll.position.set(islandCenterX + islandW / 2 + 12, -0.4, -(islandD / 2 + 17));
-    decorGroup.add(coralAtoll);
+    atollBase.position.y = 0.25;
+    snowAtoll.add(atollBase);
+    const p1 = buildHokkaidoPineTree(-0.2, 0.15, 0.95);
+    p1.position.set(-1.5, 0.72, 0.4);
+    const p2 = buildHokkaidoPineTree(0.25, -0.15, 0.8);
+    p2.position.set(1.6, 0.72, -0.6);
+    snowAtoll.add(p1, p2);
+    snowAtoll.position.set(islandCenterX + islandW / 2 + 12, -0.4, -(islandD / 2 + 17));
+    decorGroup.add(snowAtoll);
   }
 
-  // 2B. Cute Bobbing Sailboats on the Sea (animated via floatingIslands)
-  const seaSideZ = islandD / 2 + 14;
-  const sailboatSpecs: [number, number, number, number, number][] = [
-    [islandCenterX - islandW / 2 - 14, -0.35, islandD * 0.28, 0xf97316, 0.4],
-    [islandCenterX + islandW / 2 + 14, -0.35, islandD * 0.3, 0xf43f5e, -0.55],
-    [6, -0.35, -seaSideZ - 4, 0xfacc15, 0.15],
+  // 2B. Okhotsk Floating Drift Ice (Ryuhyo แผ่นน้ำแข็งลอยทะเล) & Garinko-go Icebreaker Cruiser
+  const seaSideZ = islandD / 2 + 13;
+  const driftIceSpecs: [number, number, number, number][] = [
+    [islandCenterX - islandW / 2 - 11, -seaSideZ * 0.35, 3.6, 0.2],
+    [islandCenterX - islandW / 2 - 15, seaSideZ * 0.48, 2.8, 1.1],
+    [islandCenterX + islandW / 2 + 11, -seaSideZ * 0.25, 3.4, 0.8],
+    [islandCenterX + islandW / 2 + 14.5, seaSideZ * 0.42, 4.1, -0.5],
+    [-halfLen * 0.35, seaSideZ + 3.5, 3.2, 0.4],
+    [halfLen * 0.42, -(seaSideZ + 3.5), 3.7, -0.9],
   ];
-  sailboatSpecs.forEach(([sx, sy, sz, sailAccent, rotY]) => {
-    const boat = new THREE.Group();
-    const hull = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.5, 0.95, 0.85, 8),
-      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.75 })
+  driftIceSpecs.forEach(([ix, iz, rad, rotY], idx) => {
+    const floe = new THREE.Group();
+    const slabIce = new THREE.Mesh(
+      new THREE.CylinderGeometry(rad, rad * 1.12, 0.42, 7),
+      frostIceMat
     );
-    hull.scale.set(1.9, 1, 0.85);
-    hull.position.y = 0.35;
-    const deck = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.45, 1.45, 0.12, 8),
-      new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.65 })
+    slabIce.position.y = 0.08;
+    const slabSnow = new THREE.Mesh(
+      new THREE.CylinderGeometry(rad * 0.88, rad * 0.96, 0.16, 7),
+      snowCapMat
     );
-    deck.scale.set(1.85, 1, 0.8);
-    deck.position.y = 0.78;
-    const mast = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.1, 4.4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 })
-    );
-    mast.position.set(0.15, 2.9, 0);
-    const mainSail = new THREE.Mesh(
-      new THREE.ConeGeometry(1.45, 3.4, 3),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 })
-    );
-    mainSail.scale.set(1.1, 1, 0.18);
-    mainSail.position.set(-0.45, 3.0, 0);
-    const jibSail = new THREE.Mesh(
-      new THREE.ConeGeometry(0.95, 2.6, 3),
-      new THREE.MeshStandardMaterial({ color: sailAccent, roughness: 0.45 })
-    );
-    jibSail.scale.set(1.0, 1, 0.18);
-    jibSail.position.set(0.95, 2.65, 0);
-    boat.add(hull, deck, mast, mainSail, jibSail);
-    boat.position.set(sx, sy, sz);
-    boat.rotation.y = rotY;
-    decorGroup.add(boat);
-    floatingIslands.push(boat);
+    slabSnow.position.y = 0.32;
+    floe.add(slabIce, slabSnow);
+
+    // Cute snowy seal / penguin guest on two of the drift ice floes!
+    if (idx % 3 === 0) {
+      const seal = new THREE.Group();
+      const sBody = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.28, 0.45, 6, 10),
+        new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.6 })
+      );
+      sBody.rotation.z = Math.PI / 2;
+      sBody.position.y = 0.62;
+      const sEyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+      [-0.1, 0.1].forEach((ez) => {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), sEyeMat);
+        eye.position.set(0.42, 0.68, ez);
+        seal.add(eye);
+      });
+      floe.add(seal);
+    }
+
+    floe.position.set(ix, -0.35, iz);
+    floe.rotation.y = rotY;
+    decorGroup.add(floe);
+    floatingIslands.push(floe);
   });
 
-  // 3. Sunny Beach Hot Air Balloons
+  // Iconic Red-and-White Hokkaido Drift-Ice Sightseeing Icebreaker Cruiser (เรือตัดน้ำแข็งฮอกไกโด)
+  [
+    [islandCenterX - islandW / 2 - 14.5, -0.35, islandD * 0.22, 0.42],
+    [8, -0.35, -seaSideZ - 4.5, 0.12],
+  ].forEach(([bx, by, bz, rotY]) => {
+    const cruiser = new THREE.Group();
+    const hull = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.55, 1.05, 0.92, 8),
+      new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.45 })
+    );
+    hull.scale.set(2.05, 1, 0.88);
+    hull.position.y = 0.38;
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 0.95, 1.55),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 })
+    );
+    cabin.position.set(-0.2, 1.25, 0);
+    const bridgeWin = new THREE.Mesh(
+      new THREE.BoxGeometry(2.66, 0.34, 1.6),
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.45 })
+    );
+    bridgeWin.position.set(-0.2, 1.35, 0);
+    const funnel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.26, 0.85, 10),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4 })
+    );
+    funnel.position.set(-0.65, 2.05, 0);
+    cruiser.add(hull, cabin, bridgeWin, funnel);
+    cruiser.position.set(bx, by, bz);
+    cruiser.rotation.y = rotY;
+    decorGroup.add(cruiser);
+    floatingIslands.push(cruiser);
+  });
+
+  // 3. Hokkaido Winter Festival Hot Air Balloons
   const balloonZ = islandD / 2 + 8;
   const balloonSpecs: [number, number, number, number][] = [
-    [-halfLen * 0.85, 21, -balloonZ, 0xf97316],
-    [halfLen * 0.65, 23, -balloonZ - 4, 0x38bdf8],
-    [-halfLen * 0.35, 25, balloonZ, 0xf43f5e],
+    [-halfLen * 0.85, 21, -balloonZ, 0x38bdf8],
+    [halfLen * 0.65, 23, -balloonZ - 4, 0xf43f5e],
+    [-halfLen * 0.35, 25, balloonZ, 0xa855f7],
   ];
   balloonSpecs.forEach(([bx, by, bz, col]) => {
     const bGroup = new THREE.Group();
     const balloon = new THREE.Mesh(
       new THREE.SphereGeometry(2.1, 16, 16),
-      new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: col, roughness: 0.38 })
     );
     balloon.scale.set(1, 1.22, 1);
     const stripe = new THREE.Mesh(
-      new THREE.TorusGeometry(2.05, 0.2, 10, 20),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4 })
+      new THREE.TorusGeometry(2.05, 0.22, 10, 20),
+      snowCapMat
     );
     stripe.rotation.x = Math.PI / 2;
     const basket = new THREE.Mesh(
       new THREE.BoxGeometry(0.9, 0.7, 0.9),
-      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.8 })
+      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 })
     );
     basket.position.y = -3.1;
     bGroup.add(balloon, stripe, basket);
@@ -8837,44 +9082,65 @@ export function buildFantasyArenaDecor(
     balloons.push(bGroup);
   });
 
-  // 4. Palm Trees framing the Golden Beach Perimeter
+  // 4. Snow-Laden Hokkaido Pine Forest Perimeter & Guard Snowmen + Otaru Snow Light Path
   const edgeZ = islandD / 2 - 3.0;
   const leftEdgeX = islandCenterX - islandW / 2 + 3.2;
   const rightEdgeX = islandCenterX + islandW / 2 - 3.2;
-  const palmPlacements: [number, number, number, number, number][] = [
-    [leftEdgeX, -edgeZ + 0.8, 0.55, 0.35, 1.12],
-    [leftEdgeX, edgeZ - 0.8, 0.55, -0.35, 1.08],
-    [-halfLen * 0.55, -edgeZ, 0.2, 0.5, 1.15],
-    [0, -edgeZ, 0.05, 0.48, 1.08],
-    [halfLen * 0.52, -edgeZ, -0.25, 0.48, 1.1],
-    [rightEdgeX, -edgeZ + 0.8, -0.45, 0.35, 1.12],
-    [rightEdgeX, edgeZ - 0.8, -0.45, -0.35, 1.06],
-    [-halfLen * 0.58, edgeZ, 0.25, -0.45, 1.0],
-    [0, edgeZ, -0.05, -0.46, 1.04],
-    [halfLen * 0.5, edgeZ, -0.25, -0.45, 1.0],
+  const pinePlacements: [number, number, number, number, number][] = [
+    [leftEdgeX, -edgeZ + 0.8, 0.2, 0.15, 1.15],
+    [leftEdgeX, edgeZ - 0.8, 0.2, -0.15, 1.1],
+    [-halfLen * 0.58, -edgeZ, 0.1, 0.2, 1.22],
+    [-halfLen * 0.18, -edgeZ, -0.08, 0.15, 1.05],
+    [halfLen * 0.22, -edgeZ, 0.08, 0.18, 1.16],
+    [halfLen * 0.62, -edgeZ, -0.15, 0.2, 1.12],
+    [rightEdgeX, -edgeZ + 0.8, -0.2, 0.15, 1.15],
+    [rightEdgeX, edgeZ - 0.8, -0.2, -0.15, 1.08],
+    [-halfLen * 0.58, edgeZ, 0.12, -0.2, 1.08],
+    [-halfLen * 0.12, edgeZ, -0.05, -0.18, 1.14],
+    [halfLen * 0.35, edgeZ, -0.12, -0.18, 1.06],
+    [halfLen * 0.68, edgeZ, -0.15, -0.2, 1.12],
   ];
-  palmPlacements.forEach(([px, pz, lx, lz, sc]) => {
-    const palm = buildPalmTree(lx, lz, sc);
-    palm.position.set(px, 0, pz);
-    decorGroup.add(palm);
+  pinePlacements.forEach(([px, pz, lx, lz, sc]) => {
+    const pine = buildHokkaidoPineTree(lx, lz, sc);
+    pine.position.set(px, 0, pz);
+    decorGroup.add(pine);
   });
 
-  // 5. Left Side: ซุ้มอาหารจุดเริ่มต้น (Grand Beach Food Stall & Food-Coma Lounge Zone)
-  const foodZoneGroup = new THREE.Group();
-  const oldWoodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 });
-  const warmDeckMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.78 });
-  const deckTrimMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.82 });
+  // Guard Snowmen (Yuki-Daruma พี่ยาม) greeting runners & spectators
+  [
+    [-halfLen - 2.6, -(trackWidth / 2 + 2.8), 0.45, 1.05],
+    [halfLen - 3.4, -(trackWidth / 2 + 3.6), -0.35, 1.0],
+    [0, edgeZ - 1.8, Math.PI, 0.95],
+  ].forEach(([sx, sz, rotY, sc]) => {
+    const snowman = buildGuardSnowman(sc);
+    snowman.position.set(sx, 0.02, sz);
+    snowman.rotation.y = rotY;
+    decorGroup.add(snowman);
+  });
 
-  // Extra-spacious wooden boardwalk patio behind the starting line (supports many players!)
+  // Otaru Snow Light Path (ทางเดินตะเกียงก๊าซวินเทจคลองโอตารุ & โคมหิมะเทียนหอม)
+  const lampRowZ = trackWidth / 2 + 3.8 + Math.max(0, specRows - 1) * 1.5;
+  [-1, 1].forEach((zSide) => {
+    [-halfLen * 0.72, -halfLen * 0.24, halfLen * 0.24, halfLen * 0.72].forEach((lx, li) => {
+      buildOtaruGasLamp(lx, zSide * lampRowZ, 0.96);
+      buildSnowCandleDome(lx + (li % 2 === 0 ? 2.1 : -2.1), zSide * (lampRowZ + 0.65));
+    });
+  });
+
+  // 5. Left Side: ตลาดซัปโปโร & ตรอกราเม็งจุดเริ่มต้น (Sapporo Ramen Yokocho & Winter Market Stall)
+  const foodZoneGroup = new THREE.Group();
+  const cedarDarkMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.85 });
+  const cedarWarmMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.78 });
+  const deckTrimMat = new THREE.MeshStandardMaterial({ color: 0x5c3317, roughness: 0.82 });
+
   const foodDeckW = 14.8;
   const foodDeckD = trackWidth + 11.5;
   const foodDeckX = -halfLen - 8.5;
-  const foodDeck = new THREE.Mesh(new THREE.BoxGeometry(foodDeckW, 0.1, foodDeckD), warmDeckMat);
+  const foodDeck = new THREE.Mesh(new THREE.BoxGeometry(foodDeckW, 0.1, foodDeckD), cedarWarmMat);
   foodDeck.position.set(foodDeckX, 0.04, 0);
   foodDeck.receiveShadow = true;
   foodZoneGroup.add(foodDeck);
 
-  // Decorative wooden boardwalk planks
   for (let p = -6; p <= 6; p++) {
     const groove = new THREE.Mesh(
       new THREE.BoxGeometry(0.06, 0.11, foodDeckD - 0.3),
@@ -8884,8 +9150,8 @@ export function buildFantasyArenaDecor(
     foodZoneGroup.add(groove);
   }
 
-  // Cozy lounging beach mats & cushions on the Food Zone deck (for regressed competitors!)
-  const matColors = [0xf43f5e, 0x38bdf8, 0xfacc15, 0xa855f7, 0x10b981, 0xf97316];
+  // Cozy Winter Kotatsu / Wool Picnic Mats on the Sapporo Food Deck
+  const matColors = [0xb91c1c, 0x0369a1, 0xd97706, 0x4338ca, 0x0f766e, 0xbe123c];
   const matPositions: [number, number, number][] = [
     [-halfLen - 4.2, -trackWidth * 0.32, 0.08],
     [-halfLen - 4.2, 0, -0.04],
@@ -8897,147 +9163,192 @@ export function buildFantasyArenaDecor(
   matPositions.forEach(([mx, mz, mrot], mi) => {
     const loungeMat = new THREE.Group();
     const rug = new THREE.Mesh(
-      new THREE.BoxGeometry(2.15, 0.04, 1.65),
+      new THREE.BoxGeometry(2.15, 0.05, 1.65),
       new THREE.MeshStandardMaterial({ color: matColors[mi % matColors.length], roughness: 0.82 })
     );
-    const innerRug = new THREE.Mesh(
-      new THREE.BoxGeometry(1.75, 0.045, 1.25),
-      new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.85 })
+    const innerFleece = new THREE.Mesh(
+      new THREE.BoxGeometry(1.75, 0.055, 1.25),
+      new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.88 })
     );
-    const pillow = new THREE.Mesh(
-      new THREE.BoxGeometry(0.45, 0.18, 0.85),
+    const cushion = new THREE.Mesh(
+      new THREE.BoxGeometry(0.46, 0.19, 0.86),
       new THREE.MeshStandardMaterial({ color: matColors[(mi + 1) % matColors.length], roughness: 0.65 })
     );
-    pillow.position.set(-0.68, 0.11, 0);
-    loungeMat.add(rug, innerRug, pillow);
+    cushion.position.set(-0.68, 0.11, 0);
+    loungeMat.add(rug, innerFleece, cushion);
     loungeMat.position.set(mx, 0.09, mz);
     loungeMat.rotation.y = mrot;
     foodZoneGroup.add(loungeMat);
   });
 
-  // Main Festive Beach Buffet Stall (ซุ้มอาหารหลัก) at the back of the Food Deck
+  // Main Sapporo Ramen Yokocho & Crab Market Timber Stall with Snow-Blanketed Roof
   const mainStall = new THREE.Group();
-  const counterMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.7 });
-  const creamMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.6 });
-  const redAwningMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.55 });
+  const hinokiCounterMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.65 });
+  const norenBlueMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.72 });
+  const norenWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.7 });
 
-  const counterBase = new THREE.Mesh(new THREE.BoxGeometry(1.45, 1.15, 6.2), counterMat);
+  const counterBase = new THREE.Mesh(new THREE.BoxGeometry(1.45, 1.15, 6.2), cedarDarkMat);
   counterBase.position.y = 0.58;
   counterBase.castShadow = true;
-  const counterTop = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.14, 6.5), creamMat);
+  const counterTop = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.14, 6.55), hinokiCounterMat);
   counterTop.position.y = 1.2;
   mainStall.add(counterBase, counterTop);
 
-  // 4 Bamboo/Wood Support Posts
   [-0.65, 0.65].forEach((px) => {
     [-2.85, 2.85].forEach((pz) => {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 3.3, 8), oldWoodMat);
-      post.position.set(px, 1.65, pz);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 3.35, 8), cedarDarkMat);
+      post.position.set(px, 1.68, pz);
       post.castShadow = true;
       mainStall.add(post);
     });
   });
 
-  // Red & Cream Striped Market Awning Roof
-  const stripeSegments = 8;
-  const segDepth = 6.8 / stripeSegments;
-  for (let s = 0; s < stripeSegments; s++) {
-    const zOff = -3.4 + (s + 0.5) * segDepth;
-    const sMat = s % 2 === 0 ? redAwningMat : creamMat;
-    const slopeFront = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.12, segDepth + 0.02), sMat);
-    slopeFront.position.set(0.62, 3.25, zOff);
-    slopeFront.rotation.z = -0.34;
-    const slopeBack = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.12, segDepth + 0.02), sMat);
-    slopeBack.position.set(-0.55, 3.28, zOff);
-    slopeBack.rotation.z = 0.32;
-    const valance = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, segDepth + 0.01), sMat);
-    valance.position.set(1.32, 2.92, zOff);
-    mainStall.add(slopeFront, slopeBack, valance);
+  // Snow-Blanketed Japanese Gable Roof + Indigo Noren Curtains
+  const roofSlopeF = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.16, 6.9), cedarDarkMat);
+  roofSlopeF.position.set(0.62, 3.28, 0);
+  roofSlopeF.rotation.z = -0.32;
+  const roofSlopeB = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.16, 6.9), cedarDarkMat);
+  roofSlopeB.position.set(-0.55, 3.31, 0);
+  roofSlopeB.rotation.z = 0.3;
+  const roofSnowF = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 6.96), snowCapMat);
+  roofSnowF.position.set(0.64, 3.4, 0);
+  roofSnowF.rotation.z = -0.32;
+  const roofSnowB = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, 6.96), snowCapMat);
+  roofSnowB.position.set(-0.56, 3.43, 0);
+  roofSnowB.rotation.z = 0.3;
+  mainStall.add(roofSlopeF, roofSlopeB, roofSnowF, roofSnowB);
+
+  for (let n = 0; n < 6; n++) {
+    const nz = -2.55 + n * 1.02;
+    const flap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.56, 0.88),
+      n % 2 === 0 ? norenBlueMat : norenWhiteMat
+    );
+    flap.position.set(1.26, 2.74, nz);
+    mainStall.add(flap);
   }
 
-  // Delicious 3D Buffet Spread on the Countertop: Shabu Pot, Pizza Boxes, Boba Cups & Burger Platter
-  // 1) Steaming Shabu Hotpot
-  const shabuPot = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.42, 0.34, 0.28, 14),
-    new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6, roughness: 0.3 })
-  );
-  shabuPot.position.set(0.1, 1.41, -1.85);
-  const shabuSoup = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.38, 0.38, 0.05, 14),
-    new THREE.MeshBasicMaterial({ color: 0xf97316 })
-  );
-  shabuSoup.position.set(0.1, 1.54, -1.85);
-  mainStall.add(shabuPot, shabuSoup);
-
-  // 2) Cheesy Pizza Platter & Stacked Boxes
-  const pizzaBox1 = new THREE.Mesh(
-    new THREE.BoxGeometry(0.85, 0.1, 0.85),
-    new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.7 })
-  );
-  pizzaBox1.position.set(0.05, 1.32, -0.35);
-  const pizzaPie = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.42, 0.42, 0.07, 14),
-    new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.55 })
-  );
-  pizzaPie.position.set(0.15, 1.31, 0.65);
-  mainStall.add(pizzaBox1, pizzaPie);
-
-  // 3) Row of Boba Milk Tea & Fruit Smoothie Cups
-  [1.65, 2.05, 2.45].forEach((cz, ci) => {
-    const cupColors = [0xfde68a, 0xf472b6, 0x4ade80];
-    const cup = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.14, 0.1, 0.36, 10),
-      new THREE.MeshStandardMaterial({ color: cupColors[ci], roughness: 0.3 })
-    );
-    cup.position.set(0.18, 1.45, cz);
-    const straw = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.025, 0.025, 0.24, 6),
-      new THREE.MeshStandardMaterial({ color: 0x18181b })
-    );
-    straw.position.set(0.18, 1.68, cz);
-    straw.rotation.z = -0.2;
-    mainStall.add(cup, straw);
+  // Glowing Red Chochin Paper Lanterns hanging under the Ramen Stall eaves
+  const chochinMat = new THREE.MeshStandardMaterial({
+    color: 0xef4444,
+    emissive: 0xdc2626,
+    emissiveIntensity: 0.65,
+    roughness: 0.35,
+  });
+  [-2.2, 0, 2.2].forEach((cz) => {
+    const lantern = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), chochinMat);
+    lantern.scale.set(0.88, 1.25, 0.88);
+    lantern.position.set(1.32, 2.38, cz);
+    mainStall.add(lantern);
   });
 
-  // Big Overhead Signboard angled slightly toward overview camera: "ซุ้มอาหารสายตบะแตก"
+  // Hokkaido Winter Delicacies on Countertop:
+  // 1) Two Steaming Miso Butter Corn Ramen Bowls
+  [-2.05, -1.15].forEach((rz) => {
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.22, 0.24, 14),
+      new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.35 })
+    );
+    bowl.position.set(0.12, 1.39, rz);
+    const misoBroth = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.32, 0.04, 14),
+      new THREE.MeshBasicMaterial({ color: 0xf59e0b })
+    );
+    misoBroth.position.set(0.12, 1.5, rz);
+    const butterPat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.05, 0.14),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    );
+    butterPat.position.set(0.14, 1.54, rz);
+    mainStall.add(bowl, misoBroth, butterPat);
+  });
+
+  // 2) Giant Red Hokkaido King Crab (Tarabagani ปูยักษ์ฮอกไกโด) Platter!
+  const crabTray = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.5, 0.06, 14),
+    new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+  );
+  crabTray.position.set(0.12, 1.3, 0.25);
+  const crabRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 });
+  const crabShell = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), crabRedMat);
+  crabShell.scale.set(1.1, 0.55, 1.25);
+  crabShell.position.set(0.12, 1.42, 0.25);
+  mainStall.add(crabTray, crabShell);
+  [-1, 1].forEach((side) => {
+    [-0.18, 0.04, 0.26].forEach((lz) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 0.52, 6), crabRedMat);
+      leg.position.set(0.12 + side * 0.34, 1.38, 0.25 + lz);
+      leg.rotation.z = side * 1.18;
+      mainStall.add(leg);
+    });
+  });
+
+  // 3) Hokkaido Milk Soft-Serve Cones & Hot Cocoa Mugs
+  [1.55, 2.05, 2.5].forEach((cz, ci) => {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.12, 0.32, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.65 })
+    );
+    cone.rotation.x = Math.PI;
+    cone.position.set(0.18, 1.44, cz);
+    const swirl = new THREE.Mesh(
+      new THREE.ConeGeometry(0.14, 0.28, 10),
+      new THREE.MeshStandardMaterial({
+        color: ci === 1 ? 0xc084fc : 0xffffff, // Furano Lavender & Hokkaido Fresh Milk!
+        roughness: 0.35,
+      })
+    );
+    swirl.position.set(0.18, 1.68, cz);
+    mainStall.add(cone, swirl);
+  });
+
   const foodSignTex = makeArenaSignTexture(
-    '🍖 ซุ้มอาหารสายตบะแตก',
-    'Food Coma Zone',
-    '#b91c1c',
-    '#facc15',
-    '#fef08a'
+    '🍜 ตลาดซัปโปโรสายตบะแตก',
+    'Sapporo Ramen & Crab',
+    '#991b1b',
+    '#fde047',
+    '#fffbeb'
   );
   const foodSignBoard = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 1.2, 4.8),
+    new THREE.BoxGeometry(0.2, 1.2, 4.9),
     new THREE.MeshStandardMaterial({ map: foodSignTex, roughness: 0.45 })
   );
-  foodSignBoard.position.set(0.25, 4.2, 0);
+  foodSignBoard.position.set(0.25, 4.25, 0);
   foodSignBoard.rotation.y = -0.38;
   mainStall.add(foodSignBoard);
 
   mainStall.position.set(-halfLen - 14.2, 0.08, 0);
   foodZoneGroup.add(mainStall);
 
-  // Side Sizzling Beach BBQ Grill right next to the Food Stall
+  // Side Sizzling Sapporo Jingisukan BBQ Grill & Yaki-imo Roasted Sweet Potatoes
   const bbqGroup = new THREE.Group();
   const grillMetalMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.7, roughness: 0.25 });
   const grillBox = new THREE.Mesh(
     new THREE.BoxGeometry(2.4, 0.8, 1.4),
-    new THREE.MeshStandardMaterial({ color: 0x18181b, metalness: 0.5, roughness: 0.4 })
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.5, roughness: 0.4 })
   );
   grillBox.position.y = 1.2;
   const coals = new THREE.Mesh(
     new THREE.BoxGeometry(2.1, 0.15, 1.15),
-    new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.65 })
+    new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xf97316, emissiveIntensity: 0.78 })
   );
   coals.position.y = 1.62;
-  [-0.6, 0, 0.6].forEach((mx) => {
-    const steak = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.28, 0.12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.6 })
+  // Iconic Hokkaido helmet-shaped Jingisukan cast-iron dome skillet
+  const jingisukanDome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x18181b, metalness: 0.65, roughness: 0.35 })
+  );
+  jingisukanDome.scale.set(1.2, 0.55, 1.0);
+  jingisukanDome.position.set(-0.35, 1.66, 0);
+  // Purple-red Yaki-imo roasted sweet potatoes on the side grate
+  [0.45, 0.78].forEach((px) => {
+    const sweetPotato = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.11, 0.28, 6, 8),
+      new THREE.MeshStandardMaterial({ color: 0x881337, roughness: 0.7 })
     );
-    steak.position.set(mx, 1.72, 0);
-    bbqGroup.add(steak);
+    sweetPotato.rotation.x = Math.PI / 2;
+    sweetPotato.position.set(px, 1.74, 0);
+    bbqGroup.add(sweetPotato);
   });
   [
     [-1.0, -0.55],
@@ -9049,18 +9360,22 @@ export function buildFantasyArenaDecor(
     leg.position.set(lx, 0.6, lz);
     bbqGroup.add(leg);
   });
-  bbqGroup.add(grillBox, coals);
+  bbqGroup.add(grillBox, coals, jingisukanDome);
   bbqGroup.position.set(-halfLen - 8.5, 0.08, -trackWidth / 2 - 3.6);
   bbqGroup.rotation.y = 0.28;
   foodZoneGroup.add(bbqGroup);
 
-  // Festive Warm Fairy String Lights framing the Food Zone
-  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+  // Sapporo White Illumination String Lights framing the Food Zone
+  const bulbMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.7,
+  });
   [-1, 1].forEach((zSide) => {
     const zPos = zSide * (trackWidth / 2 + 5.0);
-    const poleFront = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 7), oldWoodMat);
+    const poleFront = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 7), cedarDarkMat);
     poleFront.position.set(-halfLen - 2.0, 1.7, zPos);
-    const poleBack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 7), oldWoodMat);
+    const poleBack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 7), cedarDarkMat);
     poleBack.position.set(-halfLen - 13.6, 1.7, zPos);
     foodZoneGroup.add(poleFront, poleBack);
 
@@ -9074,152 +9389,271 @@ export function buildFantasyArenaDecor(
     }
   });
 
-  // Beach Start Line Signpost: "จุดสตาร์ท (Start Line)"
+  // Hokkaido Start Line Signpost
   const signPost = new THREE.Group();
-  const sPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.2, 6), oldWoodMat);
+  const sPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.2, 6), cedarDarkMat);
   sPost.position.y = 1.1;
-  const signTex = makeArenaSignTexture('จุดสตาร์ท', 'Start Line', '#0284c7', '#facc15', '#ffffff');
+  const signTex = makeArenaSignTexture('❄️ จุดสตาร์ท', 'Hokkaido Start', '#0369a1', '#bae6fd', '#ffffff');
   const sBoard = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.95, 2.3),
+    new THREE.BoxGeometry(0.12, 0.95, 2.35),
     new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.55 })
   );
   sBoard.position.y = 1.95;
-  signPost.add(sPost, sBoard);
+  const signSnow = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 2.42), snowCapMat);
+  signSnow.position.y = 2.46;
+  signPost.add(sPost, sBoard, signSnow);
   signPost.position.set(-halfLen - 1.4, 0.05, trackWidth / 2 + 2.2);
   signPost.rotation.y = -0.45;
   foodZoneGroup.add(signPost);
 
   decorGroup.add(foodZoneGroup);
 
-  // 6. Beachside Cheer & Lounge Props: Striped Beach Umbrellas, Sun Loungers, Surfboards, Lifebuoys & Starfish
-  const umbrellaPalettes: [number, number][] = [
-    [0x0ea5e9, 0xffffff],
-    [0xf43f5e, 0xfffbeb],
-    [0xf97316, 0xfef08a],
-    [0x10b981, 0xf0fdf4],
-  ];
+  // 6. Outdoor Rotenburo Onsen Zone (บ่อออนเซ็นหินกลางแจ้งควันกรุ่น) + Winter Ski Chalet Shelters
   const beachOuterZ = trackWidth / 2 + 8.5 + Math.max(0, specRows - 1) * 3.4;
 
-  [-1, 1].forEach((zSign, sideIdx) => {
-    [-halfLen * 0.65, -halfLen * 0.2, halfLen * 0.25, halfLen * 0.68].forEach((ux, uIdx) => {
-      const umbSet = new THREE.Group();
-      const [colA, colB] = umbrellaPalettes[(uIdx + sideIdx) % umbrellaPalettes.length];
+  // 6A. Steaming Volcanic-Rock Rotenburo Hot Spring Bath with Yuzu Capybaras!
+  {
+    const onsenX = -halfLen * 0.22;
+    const onsenZ = -beachOuterZ;
+    const onsenGroup = new THREE.Group();
+    onsenGroup.position.set(onsenX, 0.02, onsenZ);
 
-      // Tilted Striped Beach Umbrella
-      const umbGroup = new THREE.Group();
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.06, 0.07, 3.1, 8),
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 })
+    const rockDarkMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.88 });
+    const rockMidMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.84 });
+
+    // Milky-cyan glowing hot spring mineral water
+    const waterPool = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.85, 2.75, 0.24, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x0ea5e9,
+        emissiveIntensity: 0.42,
+        roughness: 0.16,
+        transparent: true,
+        opacity: 0.9,
+      })
+    );
+    waterPool.position.y = 0.18;
+    onsenGroup.add(waterPool);
+
+    // Ring of snow-dusted volcanic boulders around the Rotenburo pool
+    const rockCount = 18;
+    for (let r = 0; r < rockCount; r++) {
+      const a = (r / rockCount) * Math.PI * 2;
+      const rx = Math.cos(a) * 2.95;
+      const rz = Math.sin(a) * 2.55;
+      const rSize = 0.48 + (r % 3) * 0.14;
+      const boulder = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(rSize, 0),
+        r % 2 === 0 ? rockDarkMat : rockMidMat
       );
-      pole.position.y = 1.55;
-      umbGroup.add(pole);
+      boulder.scale.set(1.15, 0.75, 1.1);
+      boulder.position.set(rx, 0.28, rz);
+      boulder.rotation.y = a;
+      boulder.castShadow = true;
+      onsenGroup.add(boulder);
 
-      const wedges = 8;
-      for (let w = 0; w < wedges; w++) {
-        const wa = (w / wedges) * Math.PI * 2;
-        const wedge = new THREE.Mesh(
-          new THREE.ConeGeometry(1.85, 0.82, 3, 1, false, wa, (Math.PI * 2) / wedges + 0.04),
-          new THREE.MeshStandardMaterial({
-            color: w % 2 === 0 ? colA : colB,
-            roughness: 0.5,
-            side: THREE.DoubleSide,
-          })
-        );
-        wedge.position.y = 2.95;
-        wedge.castShadow = true;
-        umbGroup.add(wedge);
-      }
-      umbGroup.rotation.z = 0.12 * (uIdx % 2 === 0 ? 1 : -1);
-      umbGroup.rotation.x = -zSign * 0.1;
-      umbSet.add(umbGroup);
+      const rockSnow = new THREE.Mesh(new THREE.SphereGeometry(rSize * 0.78, 8, 6), snowCapMat);
+      rockSnow.scale.set(1.1, 0.35, 1.05);
+      rockSnow.position.set(rx, 0.56, rz);
+      onsenGroup.add(rockSnow);
+    }
 
-      // Pair of Sun Loungers (เตียงผ้าใบชายหาด) flanking the umbrella
-      [-1.35, 1.35].forEach((cx) => {
-        const chair = new THREE.Group();
-        const frame = new THREE.Mesh(
-          new THREE.BoxGeometry(0.95, 0.22, 1.85),
-          new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.65 })
-        );
-        frame.position.y = 0.22;
-        frame.castShadow = true;
-        const towel = new THREE.Mesh(
-          new THREE.BoxGeometry(0.82, 0.06, 1.65),
-          new THREE.MeshStandardMaterial({ color: colA, roughness: 0.7 })
-        );
-        towel.position.y = 0.35;
-        const backrest = new THREE.Mesh(
-          new THREE.BoxGeometry(0.86, 0.08, 0.68),
-          new THREE.MeshStandardMaterial({ color: colB, roughness: 0.65 })
-        );
-        backrest.position.set(0, 0.55, -zSign * 0.68);
-        backrest.rotation.x = zSign * 0.52;
-        chair.add(frame, towel, backrest);
-        chair.position.set(cx, 0, 0);
-        umbSet.add(chair);
-      });
+    // Traditional Bamboo/Hinoki Privacy Fence & Onsen Sign behind the pool
+    const bambooFence = new THREE.Mesh(
+      new THREE.BoxGeometry(4.4, 1.65, 0.14),
+      new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.8 })
+    );
+    bambooFence.position.set(0, 0.92, -2.85);
+    bambooFence.castShadow = true;
+    const fenceSnow = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.12, 0.24), snowCapMat);
+    fenceSnow.position.set(0, 1.78, -2.85);
+    const onsenSignTex = makeArenaSignTexture('♨️ บ่อออนเซ็นฮอกไกโด', 'Rotenburo Onsen', '#7c2d12', '#fde68a', '#fffbeb');
+    const onsenSign = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 0.72, 0.12),
+      new THREE.MeshStandardMaterial({ map: onsenSignTex, roughness: 0.5 })
+    );
+    onsenSign.position.set(0, 2.22, -2.85);
+    onsenGroup.add(bambooFence, fenceSnow, onsenSign);
 
-      umbSet.position.set(ux, 0, zSign * beachOuterZ);
-      decorGroup.add(umbSet);
+    // Floating Yuzu Citrus Fruits & Hinoki Wooden Bucket
+    const yuzuMat = new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.2, roughness: 0.4 });
+    [
+      [-1.1, 0.6],
+      [0.95, 0.85],
+      [1.35, -0.45],
+      [-0.45, -0.95],
+    ].forEach(([yx, yz]) => {
+      const yuzu = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), yuzuMat);
+      yuzu.position.set(yx, 0.31, yz);
+      onsenGroup.add(yuzu);
     });
 
-    // Surfboards planted in the sand & Red-White Lifebuoy Rings
-    const surfColors = [0x06b6d4, 0xf43f5e];
-    const surfboard = new THREE.Group();
-    const boardMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.36, 1.85, 8, 14),
-      new THREE.MeshStandardMaterial({ color: surfColors[sideIdx % 2], roughness: 0.25 })
+    const hinokiBucket = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.24, 0.26, 12),
+      hinokiCounterMat
     );
-    boardMesh.scale.set(1, 1, 0.22);
-    boardMesh.position.y = 1.15;
-    boardMesh.castShadow = true;
-    const boardStripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 2.35, 0.18),
-      new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.3 })
-    );
-    boardStripe.position.y = 1.15;
-    surfboard.add(boardMesh, boardStripe);
-    surfboard.position.set(sideIdx === 0 ? halfLen * 0.22 : -halfLen * 0.22, 0, zSign * (beachOuterZ + 2.4));
-    surfboard.rotation.z = sideIdx === 0 ? -0.18 : 0.18;
-    surfboard.rotation.y = sideIdx === 0 ? 0.35 : -0.35;
-    decorGroup.add(surfboard);
+    hinokiBucket.position.set(1.65, 0.34, 0.55);
+    onsenGroup.add(hinokiBucket);
 
-    const lifebuoy = new THREE.Group();
-    const torusWhite = new THREE.Mesh(
-      new THREE.TorusGeometry(0.55, 0.18, 10, 20),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 })
-    );
-    torusWhite.rotation.x = Math.PI / 2;
-    for (let rb = 0; rb < 4; rb++) {
-      const ra = (rb / 4) * Math.PI * 2;
-      const redBand = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.19, 0.19, 0.28, 10),
-        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.45 })
+    // Two Chill Capybaras soaking in the Onsen with folded white towels & yuzu on their heads!
+    const capyMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.78 });
+    const snoutMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 });
+    [
+      [-0.75, -0.15, 0.35],
+      [0.55, -0.35, -0.45],
+    ].forEach(([cx, cz, crot], ci) => {
+      const capy = new THREE.Group();
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.42, 0.58), capyMat);
+      head.position.y = 0.44;
+      const snout = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.28, 0.26), snoutMat);
+      snout.position.set(0, 0.4, 0.34);
+      const towel = new THREE.Mesh(
+        new THREE.BoxGeometry(0.36, 0.08, 0.28),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 })
       );
-      redBand.position.set(Math.cos(ra) * 0.55, 0, Math.sin(ra) * 0.55);
-      redBand.rotation.y = -ra;
-      redBand.rotation.x = Math.PI / 2;
-      lifebuoy.add(redBand);
-    }
-    lifebuoy.add(torusWhite);
-    lifebuoy.position.set(sideIdx === 0 ? -halfLen * 0.25 : halfLen * 0.25, 0.18, zSign * (beachOuterZ - 2.1));
-    decorGroup.add(lifebuoy);
+      towel.position.set(0, 0.68, -0.02);
+      if (ci === 0) {
+        const headYuzu = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), yuzuMat);
+        headYuzu.position.set(0, 0.78, -0.02);
+        capy.add(headYuzu);
+      }
+      capy.add(head, snout, towel);
+      capy.position.set(cx, 0, cz);
+      capy.rotation.y = crot;
+      onsenGroup.add(capy);
+    });
 
-    // Cute Coral Starfish on the sand
-    const starGroup = new THREE.Group();
-    const starMat = new THREE.MeshStandardMaterial({ color: 0xfb7185, roughness: 0.65 });
-    for (let arm = 0; arm < 5; arm++) {
-      const sa = (arm / 5) * Math.PI * 2;
-      const ray = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.48, 6), starMat);
-      ray.rotation.z = -Math.PI / 2;
-      ray.rotation.y = sa;
-      ray.position.set(Math.cos(sa) * 0.18, 0.06, -Math.sin(sa) * 0.18);
-      starGroup.add(ray);
+    decorGroup.add(onsenGroup);
+
+    // Rising Onsen Steam Puffs (animated continuously in frame loop; denser when freezing!)
+    for (let sp = 0; sp < 10; sp++) {
+      const steamSprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: sharedRadialGlowTex,
+          color: 0xf8fafc,
+          transparent: true,
+          opacity: 0.32,
+          depthWrite: false,
+        })
+      );
+      const angle = (sp / 10) * Math.PI * 2;
+      const rad = 0.5 + (sp % 3) * 0.65;
+      const bx = onsenX + Math.cos(angle) * rad;
+      const bz = onsenZ + Math.sin(angle) * (rad * 0.85);
+      steamSprite.position.set(bx, 0.6, bz);
+      steamSprite.scale.set(1.8, 1.8, 1);
+      decorGroup.add(steamSprite);
+      onsenSteamPuffs.push({
+        sprite: steamSprite,
+        baseX: bx,
+        baseY: 0.42,
+        baseZ: bz,
+        phase: sp * 0.63,
+        speed: 0.42 + (sp % 3) * 0.11,
+        radius: 1.7 + (sp % 3) * 0.45,
+      });
     }
-    starGroup.position.set(sideIdx === 0 ? halfLen * 0.72 : -halfLen * 0.72, 0.02, zSign * (beachOuterZ + 1.5));
-    decorGroup.add(starGroup);
+  }
+
+  // 6B. Cozy Snow-Roofed Winter Rest Gazebos, Ski/Snowboard Racks & Snow Bunnies
+  const skiPalette: [number, number][] = [
+    [0x0284c7, 0x38bdf8],
+    [0xe11d48, 0xfda4af],
+    [0xd97706, 0xfde047],
+    [0x059669, 0x6ee7b7],
+  ];
+
+  [-1, 1].forEach((zSign, sideIdx) => {
+    [-halfLen * 0.66, halfLen * 0.26, halfLen * 0.68].forEach((ux, uIdx) => {
+      const chaletSet = new THREE.Group();
+      const [colA, colB] = skiPalette[(uIdx + sideIdx) % skiPalette.length];
+
+      // Snow-topped Wooden Winter Shelter Canopy
+      const shelter = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.85, 8), cedarDarkMat);
+      post.position.y = 1.42;
+      post.castShadow = true;
+      const woodRoof = new THREE.Mesh(new THREE.ConeGeometry(1.95, 0.88, 6), cedarWarmMat);
+      woodRoof.position.y = 2.88;
+      woodRoof.castShadow = true;
+      const snowRoof = new THREE.Mesh(new THREE.ConeGeometry(1.9, 0.55, 6), snowCapMat);
+      snowRoof.position.y = 3.12;
+      shelter.add(post, woodRoof, snowRoof);
+      chaletSet.add(shelter);
+
+      // Pair of Warm Cedar Winter Benches with Wool Blankets
+      [-1.32, 1.32].forEach((cx) => {
+        const bench = new THREE.Group();
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.24, 1.75), cedarWarmMat);
+        seat.position.y = 0.28;
+        seat.castShadow = true;
+        const blanket = new THREE.Mesh(
+          new THREE.BoxGeometry(0.84, 0.07, 1.5),
+          new THREE.MeshStandardMaterial({ color: colA, roughness: 0.78 })
+        );
+        blanket.position.y = 0.42;
+        const pillow = new THREE.Mesh(
+          new THREE.BoxGeometry(0.76, 0.14, 0.42),
+          new THREE.MeshStandardMaterial({ color: colB, roughness: 0.72 })
+        );
+        pillow.position.set(0, 0.5, -zSign * 0.52);
+        bench.add(seat, blanket, pillow);
+        bench.position.set(cx, 0, 0);
+        chaletSet.add(bench);
+      });
+
+      chaletSet.position.set(ux, 0, zSign * beachOuterZ);
+      decorGroup.add(chaletSet);
+    });
+
+    // Niseko Ski & Snowboard Rack planted in the snow!
+    const snowboard = new THREE.Group();
+    const boardMesh = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.32, 1.75, 8, 14),
+      new THREE.MeshStandardMaterial({ color: sideIdx === 0 ? 0x0ea5e9 : 0xf43f5e, roughness: 0.25 })
+    );
+    boardMesh.scale.set(1, 1, 0.18);
+    boardMesh.position.y = 1.1;
+    boardMesh.castShadow = true;
+    [-0.55, 0.55].forEach((sx) => {
+      const ski = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 2.15, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.3 })
+      );
+      ski.position.set(sx, 1.08, 0);
+      ski.rotation.z = sx * 0.08;
+      snowboard.add(ski);
+    });
+    snowboard.add(boardMesh);
+    snowboard.position.set(sideIdx === 0 ? -halfLen * 0.22 : halfLen * 0.02, 0, zSign * (beachOuterZ + 2.1));
+    snowboard.rotation.y = sideIdx === 0 ? -0.25 : 0.25;
+    decorGroup.add(snowboard);
+
+    // Cute Japanese Yuki-Usagi (กระต่ายหิมะตาสีแดง หูใบไม้) sitting on the snow
+    const yukiBunny = new THREE.Group();
+    const bBody = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), snowCapMat);
+    bBody.scale.set(1, 0.78, 1.25);
+    bBody.position.y = 0.24;
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.6 });
+    [-0.12, 0.12].forEach((ex) => {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.28, 6), leafMat);
+      ear.position.set(ex, 0.52, -0.05);
+      ear.rotation.x = -0.5;
+      yukiBunny.add(ear);
+      const berryEye = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 6, 6),
+        new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+      );
+      berryEye.position.set(ex * 0.85, 0.32, 0.36);
+      yukiBunny.add(berryEye);
+    });
+    yukiBunny.add(bBody);
+    yukiBunny.position.set(sideIdx === 0 ? halfLen * 0.48 : -halfLen * 0.48, 0.02, zSign * (beachOuterZ - 1.9));
+    decorGroup.add(yukiBunny);
   });
 
-  // 7. Right Side: Winged Golden Crystal Finish Arch + Portal Glow + Twin Winged Trophies (เส้นชัยมหาเทพริมหาด)
+  // 7. Right Side: Winged Golden & Ice-Crystal Finish Arch + Twin Winged Trophies
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.72 });
   const archGroup = new THREE.Group();
   const goldArchMat = new THREE.MeshStandardMaterial({
@@ -9232,27 +9666,29 @@ export function buildFantasyArenaDecor(
   const crystalMat = new THREE.MeshStandardMaterial({
     color: 0x38bdf8,
     emissive: 0x0ea5e9,
-    emissiveIntensity: 0.9,
+    emissiveIntensity: 0.95,
     roughness: 0.1,
   });
   const wingWhiteMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    emissive: 0xfef08a,
-    emissiveIntensity: 0.2,
-    roughness: 0.25,
+    emissive: 0xe0f2fe,
+    emissiveIntensity: 0.24,
+    roughness: 0.22,
   });
 
   const pillarSpan = trackWidth / 2 + 0.9;
   [-pillarSpan, pillarSpan].forEach((pz) => {
     const base = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.9, 1.3), stoneMat);
     base.position.set(0, 0.45, pz);
+    const baseSnow = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.14, 1.38), snowCapMat);
+    baseSnow.position.set(0, 0.94, pz);
     const col = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 5.5, 14), goldArchMat);
     col.position.set(0, 3.2, pz);
     col.castShadow = true;
     const pillarCrystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.48, 0), crystalMat);
     pillarCrystal.scale.set(0.65, 1.5, 0.65);
     pillarCrystal.position.set(0, 3.3, pz);
-    archGroup.add(base, col, pillarCrystal);
+    archGroup.add(base, baseSnow, col, pillarCrystal);
   });
 
   const topBeam = new THREE.Mesh(
@@ -9260,15 +9696,18 @@ export function buildFantasyArenaDecor(
     goldArchMat
   );
   topBeam.position.set(0, 6.0, 0);
-  archGroup.add(topBeam);
+  const topBeamSnow = new THREE.Mesh(
+    new THREE.BoxGeometry(1.22, 0.16, pillarSpan * 2 + 1.68),
+    snowCapMat
+  );
+  topBeamSnow.position.set(0, 6.56, 0);
+  archGroup.add(topBeam, topBeamSnow);
 
-  // Center glowing cyan crystal crest
   const archCrest = new THREE.Mesh(new THREE.OctahedronGeometry(0.95, 0), crystalMat);
   archCrest.scale.set(0.7, 1.25, 0.85);
-  archCrest.position.set(0, 6.65, 0);
+  archCrest.position.set(0, 6.75, 0);
   archGroup.add(archCrest);
 
-  // Layered white & gold angel wings fanning out from the finish arch
   [-1, 1].forEach((side) => {
     for (let w = 0; w < 5; w++) {
       const feather = new THREE.Mesh(
@@ -9281,40 +9720,39 @@ export function buildFantasyArenaDecor(
     }
   });
 
-  // Overhead signboard: "เส้นชัย (Finish Line)"
-  const finishSignTex = makeArenaSignTexture('เส้นชัย', 'Finish Line', '#334155', '#facc15', '#fef08a');
+  const finishSignTex = makeArenaSignTexture('❄️ เส้นชัยฮอกไกโด', 'Finish Line', '#1e3a8a', '#bae6fd', '#fef08a');
   const finishSign = new THREE.Mesh(
-    new THREE.BoxGeometry(0.28, 1.3, 4.6),
+    new THREE.BoxGeometry(0.28, 1.3, 4.7),
     new THREE.MeshStandardMaterial({ map: finishSignTex, roughness: 0.45 })
   );
-  finishSign.position.set(0, 7.85, 0);
+  finishSign.position.set(0, 7.9, 0);
   archGroup.add(finishSign);
 
-  // Golden Portal Floor Glow under the arch
   const portalGlow = new THREE.Mesh(
     new THREE.RingGeometry(0.8, trackWidth * 0.42, 32),
-    new THREE.MeshBasicMaterial({ color: 0xfde047, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+    new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.52, side: THREE.DoubleSide })
   );
   portalGlow.rotation.x = -Math.PI / 2;
   portalGlow.position.set(0, 0.22, 0);
   archGroup.add(portalGlow);
 
-  // Twin Giant Winged Golden Trophies flanking the finish arch
   [-1, 1].forEach((side) => {
     const tGroup = new THREE.Group();
     const tPedestal = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 1.4), stoneMat);
     tPedestal.position.y = 0.55;
+    const tSnow = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.12, 1.48), snowCapMat);
+    tSnow.position.y = 1.14;
     const cupStem = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.4, 0.7, 12), goldArchMat);
-    cupStem.position.y = 1.45;
+    cupStem.position.y = 1.48;
     const cupBowl = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.35, 1.1, 16), goldArchMat);
-    cupBowl.position.y = 2.25;
+    cupBowl.position.y = 2.28;
     [-1, 1].forEach((ws) => {
       const tw = new THREE.Mesh(new THREE.ConeGeometry(0.26, 1.5, 8), wingWhiteMat);
-      tw.position.set(0, 2.35, ws * 0.85);
+      tw.position.set(0, 2.38, ws * 0.85);
       tw.rotation.x = ws * 0.65;
       tGroup.add(tw);
     });
-    tGroup.add(tPedestal, cupStem, cupBowl);
+    tGroup.add(tPedestal, tSnow, cupStem, cupBowl);
     tGroup.position.set(-0.6, 0, side * (pillarSpan + 1.85));
     archGroup.add(tGroup);
   });
@@ -9323,7 +9761,7 @@ export function buildFantasyArenaDecor(
   archGroup.rotation.y = Math.atan2(-finishTan.z, finishTan.x);
   decorGroup.add(archGroup);
 
-  // 8. Muscle-Beach Giant Golden Dumbbell Prop near Finish Side
+  // 8. Giant Frosted Golden Dumbbell Monument near Finish Side
   const propDumbbellGroup = new THREE.Group();
   const barMesh = new THREE.Mesh(
     new THREE.CylinderGeometry(0.18, 0.18, 3.2, 12),
@@ -9345,7 +9783,16 @@ export function buildFantasyArenaDecor(
   propDumbbellGroup.rotation.y = -0.42;
   decorGroup.add(propDumbbellGroup);
 
-  return { decorGroup, balloons, floatingIslands, oceanMesh, foamRings, palmCrowns };
+  return {
+    decorGroup,
+    balloons,
+    floatingIslands,
+    oceanMesh,
+    foamRings,
+    palmCrowns,
+    otaruLamps,
+    onsenSteamPuffs,
+  };
 }
 
 export interface TrackMarkerParts {

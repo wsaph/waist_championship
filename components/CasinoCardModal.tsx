@@ -71,6 +71,7 @@ interface TableMember {
   name: string;
   emoji: string;
   points: number;
+  joinedAt?: number;
 }
 
 interface SeatRoundState {
@@ -254,11 +255,16 @@ export function CasinoCardModal({
   onPointsUpdated,
 }: CasinoCardModalProps) {
   const [screen, setScreen] = useState<'lobby' | 'table'>('lobby');
+  const [roomCode, setRoomCode] = useState<string>(initialRoomCode || '9999');
   const [gameType, setGameType] = useState<CasinoGameType>('pokdeng');
   const [muted, setMuted] = useState<boolean>(false);
+  const [toastMsg, setToastMsg] = useState<string>('');
+  const [amIHost, setAmIHost] = useState<boolean>(initialIsHost);
 
   const myClientIdRef = useRef<string>(`card-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   const [mySeat, setMySeat] = useState<SeatId>('S1');
+  const mySeatRef = useRef<SeatId>('S1');
+  mySeatRef.current = mySeat;
   const [members, setMembers] = useState<Partial<Record<SeatId, TableMember>>>({});
   const [round, setRound] = useState<CasinoRoundState | null>(null);
 
@@ -286,8 +292,8 @@ export function CasinoCardModal({
   gameTypeRef.current = gameType;
   const roundRef = useRef(round);
   roundRef.current = round;
-  const isHostRef = useRef(initialIsHost);
-  isHostRef.current = initialIsHost;
+  const isHostRef = useRef(amIHost);
+  isHostRef.current = amIHost;
   const screenRef = useRef(screen);
   screenRef.current = screen;
   const mutedRef = useRef(muted);
@@ -327,12 +333,17 @@ export function CasinoCardModal({
     }
   }, []);
 
+  const showTableToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg((c) => (c === msg ? '' : c)), 4200);
+  }, []);
+
   const broadcastArenaLobby = useCallback(
     (status: 'waiting' | 'started' | 'closed', gType: CasinoGameType, memObj: Partial<Record<SeatId, TableMember>>) => {
-      if (!isHostRef.current || !initialRoomCode) return;
+      if (!isHostRef.current || !roomCode) return;
       const host = memObj.S1;
       onLobbyBroadcastRef.current?.({
-        roomCode: initialRoomCode,
+        roomCode,
         gameType: gType,
         hostUserId: host?.userId ?? (currentUserId || 0),
         hostName: host?.name || 'เพื่อนในสนาม',
@@ -343,7 +354,7 @@ export function CasinoCardModal({
         status,
       });
     },
-    [initialRoomCode, currentUserId, invitedTargetName]
+    [roomCode, currentUserId, invitedTargetName]
   );
 
   const returnToLobbyAsHost = useCallback(() => {
@@ -1105,85 +1116,177 @@ export function CasinoCardModal({
   );
   handlePlayerActionAsHostRef.current = handlePlayerActionAsHost;
 
-  // Connect to Realtime Casino Room on open
+  // Auto-resolve a disconnected seat so Hold'em, Old Maid, Pok Deng & Blackjack NEVER freeze!
+  const handleDisconnectedSeatAsHost = useCallback(
+    (departedSeatId: SeatId) => {
+      if (!isHostRef.current) return;
+      const cur = roundRef.current;
+      if (!cur || cur.phase === 'settled') return;
+      const seatExists = cur.seats.some((s) => s.seatId === departedSeatId);
+      if (!seatExists) return;
+
+      if (cur.phase === 'betting') {
+        const remainingSeats = cur.seats.filter((s) => s.seatId !== departedSeatId);
+        const minNeeded = cur.gameType === 'oldmaid' ? 2 : 1;
+        if (remainingSeats.length < minNeeded) {
+          returnToLobbyAsHost();
+          return;
+        }
+        const nextRound = { ...cur, seats: remainingSeats };
+        if (remainingSeats.every((s) => s.ready)) {
+          dealCurrentRoundAsHost(nextRound);
+        } else {
+          pushRoundSync(nextRound);
+        }
+        return;
+      }
+
+      if (cur.gameType === 'pokdeng' || cur.gameType === 'blackjack') {
+        handlePlayerActionAsHostRef.current(departedSeatId, 'stand');
+        return;
+      }
+
+      if (cur.gameType === 'holdem') {
+        const turnIdx = cur.turnIndex ?? 0;
+        if (cur.seats[turnIdx]?.seatId === departedSeatId) {
+          handlePlayerActionAsHostRef.current(departedSeatId, 'fold');
+        } else {
+          const seats = cur.seats.map((s) =>
+            s.seatId === departedSeatId ? { ...s, folded: true, done: true } : s
+          );
+          const alive = seats.filter((s) => !s.folded);
+          if (alive.length <= (seats.length === 1 ? 0 : 1)) {
+            finishHoldemAsHost({ ...cur, seats });
+          } else {
+            pushRoundSync({ ...cur, seats });
+          }
+        }
+        return;
+      }
+
+      if (cur.gameType === 'oldmaid') {
+        const depIdx = cur.seats.findIndex((s) => s.seatId === departedSeatId);
+        if (depIdx === -1) return;
+        const seats = cur.seats.map((s) => ({ ...s, cards: [...s.cards] }));
+        const leftoverCards = seats[depIdx].cards.splice(0);
+        seats[depIdx].safe = true;
+        seats[depIdx].done = true;
+
+        // Transfer leftover cards to next active survivor + discard matching pairs so 51-card parity stays valid!
+        let receiverIdx = -1;
+        for (let step = 1; step < seats.length; step++) {
+          const cand = (depIdx + step) % seats.length;
+          if (!seats[cand].safe) {
+            receiverIdx = cand;
+            break;
+          }
+        }
+        if (receiverIdx !== -1 && leftoverCards.length > 0) {
+          seats[receiverIdx].cards.push(...leftoverCards);
+          const { remaining } = discardOldMaidPairs(seats[receiverIdx].cards);
+          seats[receiverIdx].cards = remaining;
+          if (remaining.length === 0) {
+            seats[receiverIdx].safe = true;
+            seats[receiverIdx].done = true;
+          }
+        }
+
+        const activeLeft = seats.filter((s) => !s.safe);
+        if (activeLeft.length <= 1) {
+          returnToLobbyAsHost();
+          return;
+        }
+        let nextTurn = cur.turnIndex ?? 0;
+        if (seats[nextTurn]?.safe) {
+          for (let step = 1; step <= seats.length; step++) {
+            const cand = (nextTurn + step) % seats.length;
+            if (!seats[cand].safe) {
+              nextTurn = cand;
+              break;
+            }
+          }
+        }
+        pushRoundSync({ ...cur, seats, turnIndex: nextTurn });
+      }
+    },
+    [dealCurrentRoundAsHost, finishHoldemAsHost, pushRoundSync, returnToLobbyAsHost]
+  );
+  const handleDisconnectedSeatRef = useRef(handleDisconnectedSeatAsHost);
+  handleDisconnectedSeatRef.current = handleDisconnectedSeatAsHost;
+
+  // Connect to Realtime Casino Room via Supabase Presence (isolated client per session)
   useEffect(() => {
-    if (!isOpen || !initialRoomCode) return;
+    if (!isOpen || !roomCode) return;
 
     void fetchGuardBank();
     setScreen('lobby');
+    screenRef.current = 'lobby';
     setRound(null);
     roundRef.current = null;
     setGuardMood(resolveGuardMood(0));
 
-    const me = players.find((p) => p.id === currentUserId) || players[0];
-    const myInfo: Omit<TableMember, 'seatId'> = {
+    const me = playersRef.current.find((p) => p.id === currentUserId) || playersRef.current[0];
+    const now = Date.now();
+    const myPresence = {
       clientId: myClientIdRef.current,
       userId: me?.id ?? 0,
       name: me?.name ?? 'ผู้กล้า',
       emoji: me?.emoji ?? '🐰',
       points: currentUserPoints,
+      joinedAt: now,
     };
 
-    if (initialIsHost) {
-      const initMem: Partial<Record<SeatId, TableMember>> = {
-        S1: { ...myInfo, seatId: 'S1' },
-      };
-      setMySeat('S1');
-      setMembers(initMem);
-      membersRef.current = initMem;
-      broadcastArenaLobby('waiting', gameTypeRef.current, initMem);
-    } else {
-      setMembers({});
-      membersRef.current = {};
-    }
+    let destroyed = false;
+    let prevHostClientId: string | null = null;
+    const localPeers = new Map<string, { member: typeof myPresence; seenAt: number }>();
+    localPeers.set(myPresence.clientId, { member: myPresence, seenAt: now });
+
+    const rebuildMembersFromPresence = (list: Array<typeof myPresence>) => {
+      const sorted = [...list].sort((a, b) => {
+        if ((a.joinedAt || 0) !== (b.joinedAt || 0)) return (a.joinedAt || 0) - (b.joinedAt || 0);
+        return a.clientId.localeCompare(b.clientId);
+      });
+      const hostCid = sorted[0]?.clientId ?? null;
+      const iAmNowHost = hostCid === myClientIdRef.current;
+      setAmIHost(iAmNowHost);
+      isHostRef.current = iAmNowHost;
+
+      const nextMem: Partial<Record<SeatId, TableMember>> = {};
+      sorted.slice(0, 5).forEach((m, idx) => {
+        const sid = SEAT_ORDER[idx];
+        nextMem[sid] = { ...m, seatId: sid };
+        if (m.clientId === myClientIdRef.current) {
+          setMySeat(sid);
+          mySeatRef.current = sid;
+        }
+      });
+
+      if (prevHostClientId && hostCid && prevHostClientId !== hostCid && !list.some((x) => x.clientId === prevHostClientId)) {
+        const newHostObj = sorted[0];
+        if (newHostObj) {
+          showTableToast(`👑 โอนสิทธิ์หัวโต๊ะไพ่ให้ ${newHostObj.name} อัตโนมัติ!`);
+        }
+      }
+      prevHostClientId = hostCid;
+
+      setMembers(nextMem);
+      membersRef.current = nextMem;
+      if (iAmNowHost && screenRef.current === 'lobby') {
+        broadcastArenaLobby('waiting', gameTypeRef.current, nextMem);
+      }
+      return { hostCid, nextMem };
+    };
+
+    rebuildMembersFromPresence([myPresence]);
 
     const handleRoomEvent = (event: string, payload: Record<string, unknown>) => {
-      if (!payload) return;
+      if (destroyed || !payload) return;
 
-      if (event === 'join_req' && isHostRef.current) {
+      if (event === 'lobby_sync' && !isHostRef.current) {
         if (screenRef.current === 'table') return;
-        const cid = String(payload.clientId || '');
-        if (!cid || cid === myClientIdRef.current) return;
-        const cur = { ...membersRef.current };
-        let assigned = (Object.keys(cur) as SeatId[]).find((s) => cur[s]?.clientId === cid);
-        if (!assigned) assigned = SEAT_ORDER.find((s) => !cur[s]);
-        if (assigned) {
-          cur[assigned] = {
-            seatId: assigned,
-            clientId: cid,
-            userId: Number(payload.userId ?? 0),
-            name: String(payload.name || 'เพื่อน'),
-            emoji: String(payload.emoji || '🦊'),
-            points: Number(payload.points ?? 0),
-          };
-          setMembers(cur);
-          membersRef.current = cur;
-          sendRoomMsg('lobby_sync', { gameType: gameTypeRef.current, members: cur });
-          broadcastArenaLobby('waiting', gameTypeRef.current, cur);
-        }
-      } else if (event === 'leave_req' && isHostRef.current) {
-        const cid = String(payload.clientId || '');
-        const cur = { ...membersRef.current };
-        (Object.keys(cur) as SeatId[]).forEach((s) => {
-          if (cur[s]?.clientId === cid) delete cur[s];
-        });
-        setMembers(cur);
-        membersRef.current = cur;
-        sendRoomMsg('lobby_sync', { gameType: gameTypeRef.current, members: cur });
-        if (screenRef.current === 'lobby') {
-          broadcastArenaLobby('waiting', gameTypeRef.current, cur);
-        }
-      } else if (event === 'lobby_sync' && !isHostRef.current) {
-        const incMem = (payload.members || {}) as Partial<Record<SeatId, TableMember>>;
         const incGame = (payload.gameType as CasinoGameType) || 'pokdeng';
         setGameType(incGame);
         gameTypeRef.current = incGame;
-        setMembers(incMem);
-        membersRef.current = incMem;
-        const mine = (Object.keys(incMem) as SeatId[]).find(
-          (s) => incMem[s]?.clientId === myClientIdRef.current
-        );
-        if (mine) setMySeat(mine);
       } else if (event === 'enter_table') {
         const incMem = (payload.members || {}) as Partial<Record<SeatId, TableMember>>;
         const incGame = (payload.gameType as CasinoGameType) || 'pokdeng';
@@ -1195,7 +1298,10 @@ export function CasinoCardModal({
         const mine = (Object.keys(incMem) as SeatId[]).find(
           (s) => incMem[s]?.clientId === myClientIdRef.current
         );
-        if (mine) setMySeat(mine);
+        if (mine) {
+          setMySeat(mine);
+          mySeatRef.current = mine;
+        }
         if (incRound) {
           setRound(incRound);
           roundRef.current = incRound;
@@ -1241,85 +1347,158 @@ export function CasinoCardModal({
       }
     };
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      const bc = new BroadcastChannel(`waist-card-room-${initialRoomCode}`);
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    let hb: ReturnType<typeof setInterval> | null = null;
+
+    if (url && key) {
+      const sb = createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { params: { eventsPerSecond: 30 } },
+      });
+      const ch = sb.channel(`waist-card-presence-${roomCode}`, {
+        config: {
+          presence: { key: myPresence.clientId },
+          broadcast: { self: false, ack: false },
+        },
+      });
+
+      const syncPresence = () => {
+        if (destroyed) return;
+        const raw = ch.presenceState<typeof myPresence>();
+        const list: Array<typeof myPresence> = [];
+        const seen = new Set<string>();
+        for (const arr of Object.values(raw)) {
+          if (Array.isArray(arr) && arr.length > 0) {
+            const latest = arr[arr.length - 1];
+            if (latest?.clientId && !seen.has(latest.clientId)) {
+              seen.add(latest.clientId);
+              list.push(latest);
+            }
+          }
+        }
+        if (!seen.has(myPresence.clientId)) list.push(myPresence);
+        const { hostCid } = rebuildMembersFromPresence(list);
+        if (hostCid === myClientIdRef.current && screenRef.current === 'lobby') {
+          ch.send({ type: 'broadcast', event: 'lobby_sync', payload: { gameType: gameTypeRef.current } });
+        }
+      };
+
+      ch.on('presence', { event: 'sync' }, syncPresence)
+        .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+          if (destroyed) return;
+          const prevMemSnap = { ...membersRef.current };
+          syncPresence();
+          for (const left of (leftPresences || []) as unknown as Array<typeof myPresence>) {
+            if (!left?.clientId || left.clientId === myClientIdRef.current) continue;
+            showTableToast(`⚠️ ${left.emoji} ${left.name} ออกจากวงไพ่`);
+            const oldSeat = (Object.keys(prevMemSnap) as SeatId[]).find(
+              (sid) => prevMemSnap[sid]?.clientId === left.clientId
+            );
+            if (oldSeat && screenRef.current === 'table') {
+              handleDisconnectedSeatRef.current(oldSeat);
+            }
+          }
+        })
+        .on('broadcast', { event: 'lobby_sync' }, ({ payload }) => handleRoomEvent('lobby_sync', payload))
+        .on('broadcast', { event: 'enter_table' }, ({ payload }) => handleRoomEvent('enter_table', payload))
+        .on('broadcast', { event: 'back_to_lobby' }, ({ payload }) => handleRoomEvent('back_to_lobby', payload || {}))
+        .on('broadcast', { event: 'player_action' }, ({ payload }) => handleRoomEvent('player_action', payload))
+        .on('broadcast', { event: 'round_sync' }, ({ payload }) => handleRoomEvent('round_sync', payload))
+        .subscribe(async (status) => {
+          if (!destroyed && status === 'SUBSCRIBED') {
+            await ch.track(myPresence);
+          }
+        });
+
+      supabaseRef.current = sb;
+      channelRef.current = ch;
+    } else if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      const bc = new BroadcastChannel(`waist-card-local-${roomCode}`);
       bc.onmessage = (ev) => {
-        if (ev.data && typeof ev.data.event === 'string') {
-          handleRoomEvent(ev.data.event, ev.data.payload);
+        if (destroyed || !ev.data) return;
+        const { event, payload } = ev.data;
+        if (event === 'presence_ping' && payload?.clientId && payload.clientId !== myClientIdRef.current) {
+          localPeers.set(payload.clientId, { member: payload, seenAt: Date.now() });
+          rebuildMembersFromPresence(Array.from(localPeers.values()).map((v) => v.member));
+        } else if (event === 'presence_leave' && payload?.clientId) {
+          const prevMemSnap = { ...membersRef.current };
+          const gone = localPeers.get(payload.clientId)?.member;
+          localPeers.delete(payload.clientId);
+          rebuildMembersFromPresence(Array.from(localPeers.values()).map((v) => v.member));
+          if (gone) showTableToast(`⚠️ ${gone.emoji} ${gone.name} ออกจากวงไพ่`);
+          const oldSeat = (Object.keys(prevMemSnap) as SeatId[]).find(
+            (sid) => prevMemSnap[sid]?.clientId === payload.clientId
+          );
+          if (oldSeat && screenRef.current === 'table') {
+            handleDisconnectedSeatRef.current(oldSeat);
+          }
+        } else {
+          handleRoomEvent(event, payload);
         }
       };
       bcRef.current = bc;
-    }
-
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (url && key) {
-      const sb = createClient(url, key, {
-        realtime: { params: { eventsPerSecond: 20 } },
-      });
-      const ch = sb.channel(`waist-card-room-${initialRoomCode}`, {
-        config: { broadcast: { self: false } },
-      });
-      ch.on('broadcast', { event: 'join_req' }, ({ payload }) => handleRoomEvent('join_req', payload))
-        .on('broadcast', { event: 'leave_req' }, ({ payload }) => handleRoomEvent('leave_req', payload))
-        .on('broadcast', { event: 'lobby_sync' }, ({ payload }) => handleRoomEvent('lobby_sync', payload))
-        .on('broadcast', { event: 'enter_table' }, ({ payload }) => handleRoomEvent('enter_table', payload))
-        .on('broadcast', { event: 'back_to_lobby' }, ({ payload }) => handleRoomEvent('back_to_lobby', payload))
-        .on('broadcast', { event: 'player_action' }, ({ payload }) => handleRoomEvent('player_action', payload))
-        .on('broadcast', { event: 'round_sync' }, ({ payload }) => handleRoomEvent('round_sync', payload))
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED' && !initialIsHost) {
-            ch.send({ type: 'broadcast', event: 'join_req', payload: { ...myInfo } });
+      bc.postMessage({ event: 'presence_ping', payload: myPresence });
+      hb = setInterval(() => {
+        if (destroyed) return;
+        const t = Date.now();
+        localPeers.set(myPresence.clientId, { member: myPresence, seenAt: t });
+        bc.postMessage({ event: 'presence_ping', payload: myPresence });
+        for (const [cid, entry] of localPeers.entries()) {
+          if (cid !== myPresence.clientId && t - entry.seenAt > 3500) {
+            const prevMemSnap = { ...membersRef.current };
+            localPeers.delete(cid);
+            rebuildMembersFromPresence(Array.from(localPeers.values()).map((v) => v.member));
+            showTableToast(`⚠️ ${entry.member.name} หลุดออกจากวงไพ่`);
+            const oldSeat = (Object.keys(prevMemSnap) as SeatId[]).find(
+              (sid) => prevMemSnap[sid]?.clientId === cid
+            );
+            if (oldSeat && screenRef.current === 'table') {
+              handleDisconnectedSeatRef.current(oldSeat);
+            }
           }
-        });
-      supabaseRef.current = sb;
-      channelRef.current = ch;
-    }
-
-    let hb: ReturnType<typeof setInterval> | null = null;
-    if (initialIsHost) {
-      hb = setInterval(() => {
-        if (screenRef.current === 'lobby') {
-          broadcastArenaLobby('waiting', gameTypeRef.current, membersRef.current);
         }
-      }, 4500);
-    } else {
-      setTimeout(() => sendRoomMsg('join_req', { ...myInfo }), 120);
-      hb = setInterval(() => {
-        if (
-          screenRef.current === 'lobby' &&
-          !Object.values(membersRef.current).some((m) => m?.clientId === myClientIdRef.current)
-        ) {
-          sendRoomMsg('join_req', { ...myInfo });
-        }
-      }, 1200);
+      }, 1100);
     }
 
     return () => {
+      destroyed = true;
       if (hb) clearInterval(hb);
-      if (initialIsHost) {
+      if (isHostRef.current) {
         broadcastArenaLobby('closed', gameTypeRef.current, membersRef.current);
-      } else {
-        sendRoomMsg('leave_req', { clientId: myClientIdRef.current });
       }
       if (bcRef.current) {
-        bcRef.current.close();
+        try {
+          bcRef.current.postMessage({ event: 'presence_leave', payload: { clientId: myClientIdRef.current } });
+          bcRef.current.close();
+        } catch {
+          // ignore
+        }
         bcRef.current = null;
       }
-      if (supabaseRef.current && channelRef.current) {
-        supabaseRef.current.removeChannel(channelRef.current);
-        channelRef.current = null;
-        supabaseRef.current = null;
+      const sb = supabaseRef.current;
+      const ch = channelRef.current;
+      supabaseRef.current = null;
+      channelRef.current = null;
+      if (ch && sb) {
+        void ch
+          .untrack()
+          .catch(() => {})
+          .finally(() => {
+            void sb.removeChannel(ch).finally(() => {
+              sb.realtime.disconnect();
+            });
+          });
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialRoomCode, initialIsHost]);
+  }, [isOpen, roomCode]);
 
   const dispatchAction = (action: string, value?: number) => {
-    if (initialIsHost) {
-      handlePlayerActionAsHost(mySeat, action, value);
+    if (isHostRef.current) {
+      handlePlayerActionAsHost(mySeatRef.current, action, value);
     } else {
-      sendRoomMsg('player_action', { seatId: mySeat, action, value });
+      sendRoomMsg('player_action', { seatId: mySeatRef.current, action, value });
     }
   };
 
@@ -1793,6 +1972,8 @@ export function CasinoCardModal({
       });
       disposeObject3D(scene);
       renderer.dispose();
+      renderer.domElement.remove();
+      container.innerHTML = '';
     };
   }, [isOpen, screen, qualityMode]);
 
@@ -1819,8 +2000,18 @@ export function CasinoCardModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/92 flex flex-col overflow-hidden">
+      {toastMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none max-w-[92vw]">
+          <div className="rpg-banner border-2 border-amber-300 rounded-2xl px-4 py-2 text-xs sm:text-sm font-extrabold text-amber-200 shadow-2xl">
+            {toastMsg}
+          </div>
+        </div>
+      )}
       {screen === 'lobby' ? (
-        <div className="w-full h-dvh overflow-y-auto flex items-center justify-center p-3 sm:p-5 pt-safe pb-safe">
+        <div
+          key="casino-lobby"
+          className="w-full h-dvh overflow-y-auto flex items-center justify-center p-3 sm:p-5 pt-safe pb-safe"
+        >
           <div className="rpg-stone-frame rounded-2xl max-w-2xl w-full p-4 sm:p-5 space-y-4 relative my-auto">
             <button
               type="button"
@@ -1846,10 +2037,36 @@ export function CasinoCardModal({
               </div>
             </div>
 
+            {/* Table Switcher (#9999 / #9998) */}
+            <div className="flex items-center justify-between bg-slate-900/90 border border-amber-500/40 rounded-xl p-2">
+              <div className="flex items-center gap-1.5">
+                {(
+                  [
+                    { code: '9999', label: '🃏 โต๊ะพี่ยาม 1 (#9999)' },
+                    { code: '9998', label: '🎲 โต๊ะพี่ยาม 2 (#9998)' },
+                  ] as const
+                ).map((tb) => (
+                  <button
+                    key={tb.code}
+                    type="button"
+                    onClick={() => setRoomCode(tb.code)}
+                    className={`px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+                      roomCode === tb.code
+                        ? 'rpg-btn-gold'
+                        : 'bg-slate-950 text-amber-100/80 hover:text-white'
+                    }`}
+                  >
+                    {tb.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] font-bold text-emerald-300">🟢 Presence Live</span>
+            </div>
+
             {/* Game Selector Cards (4 Playable Games!) */}
             <div className="space-y-1.5">
               <div className="text-xs font-extrabold text-amber-200">
-                เลือกเกมไพ่ที่จะเล่น {initialIsHost ? '(หัวตี้เลือกได้เลย)' : '(หัวตี้กำลังเลือก)'}:
+                เลือกเกมไพ่ที่จะเล่น {amIHost ? '(หัวโต๊ะเลือกได้เลย)' : '(หัวโต๊ะกำลังเลือก)'}:
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {GAME_CATALOG.map((g) => {
@@ -1858,9 +2075,9 @@ export function CasinoCardModal({
                     <button
                       key={g.id}
                       type="button"
-                      disabled={!initialIsHost}
+                      disabled={!amIHost}
                       onClick={() => {
-                        if (!initialIsHost) return;
+                        if (!amIHost) return;
                         setGameType(g.id);
                         gameTypeRef.current = g.id;
                         sendRoomMsg('lobby_sync', { gameType: g.id, members: membersRef.current });
@@ -1924,7 +2141,7 @@ export function CasinoCardModal({
               )}
             </div>
 
-            {initialIsHost ? (
+            {amIHost ? (
               <button
                 type="button"
                 disabled={playableCount < minPlayersNeeded}
@@ -1959,7 +2176,10 @@ export function CasinoCardModal({
         </div>
       ) : (
         /* ==================== 3D CASINO TABLE + FLOATING HUD SCREEN ==================== */
-        <div className="relative w-full h-dvh overflow-hidden flex flex-col justify-between">
+        <div
+          key="casino-table"
+          className="relative w-full h-dvh overflow-hidden flex flex-col justify-between"
+        >
           {/* Full-Screen 3D Casino Table & Expressive 3D Guard Dealer Backdrop */}
           <div ref={casinoCanvasRef} className="fixed inset-0 w-full h-full z-0 pointer-events-none" />
 
@@ -1973,7 +2193,7 @@ export function CasinoCardModal({
               >
                 ← ออก
               </button>
-              {initialIsHost && (
+              {amIHost && (
                 <button
                   type="button"
                   onClick={returnToLobbyAsHost}
@@ -2235,7 +2455,7 @@ export function CasinoCardModal({
                           round.gameType === 'oldmaid' ? round.oldMaidStake : mySeatState.bet;
                         const canAfford = chip <= currentUserPoints;
                         const canPick =
-                          (round.gameType === 'oldmaid' ? initialIsHost : !mySeatState.ready) && canAfford;
+                          (round.gameType === 'oldmaid' ? amIHost : !mySeatState.ready) && canAfford;
                         return (
                           <button
                             key={chip}
@@ -2392,7 +2612,7 @@ export function CasinoCardModal({
               {/* PHASE 3: SETTLED */}
               {round.phase === 'settled' && (
                 <>
-                  {initialIsHost ? (
+                  {amIHost ? (
                     <button
                       type="button"
                       disabled={settling}

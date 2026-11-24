@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import confetti from 'canvas-confetti';
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
@@ -56,41 +56,42 @@ interface ShabuCoopModalProps {
   onRewardEarned?: (earned: number, newPoints: number) => void;
 }
 
-interface ShabuMember {
+interface ShabuPresenceMember {
   clientId: string;
   playerId: number;
   name: string;
   emoji: string;
+  joinedAt: number;
+}
+
+interface CompactShabuSnap {
+  seq: number;
+  s: ShabuGameState;
 }
 
 const EMPTY_INPUT: ShabuInputState = { mx: 0, mz: 0, interact: false, dash: false };
 const SLOT_ORDER: ShabuSlotId[] = ['P1', 'P2', 'P3', 'P4'];
+const SHABU_BROADCAST_MS = 50; // 20 Hz Host-Authoritative broadcast!
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
-function makeLabelSprite(text: string, bgHex: string, borderHex: string): THREE.Sprite {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 80;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = bgHex;
-    ctx.strokeStyle = borderHex;
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.roundRect(6, 6, 244, 68, 18);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 28px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, 128, 42);
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-  const sp = new THREE.Sprite(mat);
-  sp.scale.set(2.5, 0.78, 1);
-  return sp;
+function resolveShabuLobby(list: ShabuPresenceMember[]): {
+  hostClientId: string | null;
+  slots: Partial<Record<ShabuSlotId, ShabuPresenceMember>>;
+  sorted: ShabuPresenceMember[];
+} {
+  const sorted = [...list].sort((a, b) => {
+    if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
+    return a.clientId.localeCompare(b.clientId);
+  });
+  const slots: Partial<Record<ShabuSlotId, ShabuPresenceMember>> = {};
+  sorted.slice(0, 4).forEach((m, idx) => {
+    slots[SLOT_ORDER[idx]] = m;
+  });
+  return {
+    hostClientId: sorted[0]?.clientId ?? null,
+    slots,
+    sorted,
+  };
 }
 
 function makeHoldingSprite(emoji: string): THREE.Sprite {
@@ -126,13 +127,15 @@ export function ShabuCoopModal({
   currentUserId,
   qualityMode = 'auto',
   initialRoomCode,
-  initialIsHost,
   invitedTargetName,
   onLobbyBroadcast,
   onRewardEarned,
 }: ShabuCoopModalProps) {
   const [screen, setScreen] = useState<'waiting' | 'playing'>('waiting');
+  const [roomCode, setRoomCode] = useState<string>(initialRoomCode || '5555');
+  const [shabuRunId, setShabuRunId] = useState<number>(0);
   const [muted, setMuted] = useState<boolean>(false);
+  const [toastMsg, setToastMsg] = useState<string>('');
   const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     const tier = detectDeviceTier();
@@ -145,8 +148,12 @@ export function ShabuCoopModal({
   });
 
   const myClientIdRef = useRef<string>(`shabu-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
-  const [mySlot, setMySlot] = useState<ShabuSlotId>('P1');
-  const [members, setMembers] = useState<Partial<Record<ShabuSlotId, ShabuMember>>>({});
+  const [presenceList, setPresenceList] = useState<ShabuPresenceMember[]>([]);
+  const [activeMatchMembers, setActiveMatchMembers] = useState<
+    Partial<Record<ShabuSlotId, ShabuPresenceMember>>
+  >({});
+  const [myPlayingSlot, setMyPlayingSlot] = useState<ShabuSlotId>('P1');
+  const [amIMatchHost, setAmIMatchHost] = useState<boolean>(true);
 
   // Live HUD state
   const [hudScore, setHudScore] = useState<number>(0);
@@ -169,6 +176,7 @@ export function ShabuCoopModal({
 
   const canvasWrapRef = useRef<HTMLDivElement | null>(null);
   const localInputRef = useRef<ShabuInputState>({ ...EMPTY_INPUT });
+  const lastSentSigRef = useRef<string>('0,0,0,0');
   const keyStateRef = useRef<{ up: boolean; down: boolean; left: boolean; right: boolean }>({
     up: false,
     down: false,
@@ -181,53 +189,88 @@ export function ShabuCoopModal({
     P3: { ...EMPTY_INPUT },
     P4: { ...EMPTY_INPUT },
   });
+
+  // 20Hz Snapshot Lerp Buffer for Guest
+  const prevSnapRef = useRef<ShabuGameState | null>(null);
+  const currSnapRef = useRef<ShabuGameState | null>(null);
+  const currSnapRecvMsRef = useRef<number>(0);
+  const lastRecvSeqRef = useRef<number>(0);
+
   const gameStateRef = useRef<ShabuGameState | null>(null);
-  const netTargetStateRef = useRef<ShabuGameState | null>(null);
-  const lastSentInputSigRef = useRef<string>('');
+  const activeRunUidRef = useRef<string>('');
   const rewardClaimedRef = useRef<boolean>(false);
+  const isFinishedRef = useRef<boolean>(false);
+  isFinishedRef.current = isFinished;
+
   const mutedRef = useRef<boolean>(false);
   mutedRef.current = muted;
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const amIMatchHostRef = useRef(amIMatchHost);
+  amIMatchHostRef.current = amIMatchHost;
+  const myPlayingSlotRef = useRef(myPlayingSlot);
+  myPlayingSlotRef.current = myPlayingSlot;
+  const activeMatchMembersRef = useRef(activeMatchMembers);
+  activeMatchMembersRef.current = activeMatchMembers;
+  const onLobbyBroadcastRef = useRef(onLobbyBroadcast);
+  onLobbyBroadcastRef.current = onLobbyBroadcast;
+  const onRewardEarnedRef = useRef(onRewardEarned);
+  onRewardEarnedRef.current = onRewardEarned;
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const bcRef = useRef<BroadcastChannel | null>(null);
-  const membersRef = useRef(members);
-  membersRef.current = members;
-  const isHostRef = useRef(initialIsHost);
-  isHostRef.current = initialIsHost;
-  const mySlotRef = useRef(mySlot);
-  mySlotRef.current = mySlot;
-  const screenRef = useRef(screen);
-  screenRef.current = screen;
-  const onLobbyBroadcastRef = useRef(onLobbyBroadcast);
-  onLobbyBroadcastRef.current = onLobbyBroadcast;
+  const currentHostIdRef = useRef<string | null>(null);
 
-  const sendRoomMessage = useCallback((event: string, payload: Record<string, unknown>) => {
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg((c) => (c === msg ? '' : c)), 4000);
+  }, []);
+
+  const lobbyResolved = useMemo(() => resolveShabuLobby(presenceList), [presenceList]);
+  currentHostIdRef.current = lobbyResolved.hostClientId;
+  const amILobbyHost = lobbyResolved.hostClientId === myClientIdRef.current;
+
+  const myLobbySlot = useMemo<ShabuSlotId>(() => {
+    for (const [sid, m] of Object.entries(lobbyResolved.slots)) {
+      if (m?.clientId === myClientIdRef.current) return sid as ShabuSlotId;
+    }
+    return 'P1';
+  }, [lobbyResolved.slots]);
+
+  const sendRoomMessage = useCallback((event: string, payload: unknown) => {
     if (channelRef.current) {
       channelRef.current.send({ type: 'broadcast', event, payload });
     }
     if (bcRef.current) {
-      bcRef.current.postMessage({ event, payload });
+      try {
+        bcRef.current.postMessage({ event, payload });
+      } catch {
+        // ignore
+      }
     }
   }, []);
+  const sendRoomMessageRef = useRef(sendRoomMessage);
+  sendRoomMessageRef.current = sendRoomMessage;
 
-  const broadcastArenaLobby = useCallback(
-    (status: 'waiting' | 'started' | 'closed', memObj: Partial<Record<ShabuSlotId, ShabuMember>>) => {
-      if (!isHostRef.current || !initialRoomCode) return;
-      const host = memObj.P1;
-      onLobbyBroadcastRef.current?.({
-        roomCode: initialRoomCode,
-        hostUserId: host?.playerId ?? (currentUserId || 0),
-        hostName: host?.name || 'เพื่อนในสนาม',
-        hostEmoji: host?.emoji || '🍲',
-        targetName: invitedTargetName,
-        count: Object.keys(memObj).length,
-        max: 4,
-        status,
-      });
-    },
-    [initialRoomCode, currentUserId, invitedTargetName]
-  );
+  // Event-Driven Guest Input: Only sends when quantized direction or button state actually changes!
+  const notifyLocalInputChanged = useCallback(() => {
+    if (amIMatchHostRef.current || screenRef.current !== 'playing') return;
+    const inp = localInputRef.current;
+    // Quantize analog joystick to 0.25 steps so thumb micro-jitter never floods WebSocket!
+    const qx = Math.round(inp.mx * 4) / 4;
+    const qz = Math.round(inp.mz * 4) / 4;
+    const sig = `${qx},${qz},${inp.interact ? 1 : 0},${inp.dash ? 1 : 0}`;
+    if (sig === lastSentSigRef.current) return;
+    lastSentSigRef.current = sig;
+    sendRoomMessageRef.current('shabu_input', {
+      clientId: myClientIdRef.current,
+      slot: myPlayingSlotRef.current,
+      input: { mx: qx, mz: qz, interact: inp.interact, dash: inp.dash },
+    });
+  }, []);
 
   const claimShabuReward = useCallback(
     async (finalScore: number) => {
@@ -248,7 +291,7 @@ export function ShabuCoopModal({
           setRewardStatus(
             `🎁 ทุกคนในตี้รับโบนัส +${data.earned} 💰 GP! (สะสมวันนี้ ${data.earnedToday}/${data.dailyCap} GP)`
           );
-          onRewardEarned?.(data.earned, data.points);
+          onRewardEarnedRef.current?.(data.earned, data.points);
         } else if (res.ok && data.capReached) {
           setRewardStatus(`รับโบนัสชาบูครบ ${data.dailyCap}/${data.dailyCap} GP ของวันนี้แล้ว (ยังเล่นทำสถิติต่อได้!)`);
         } else {
@@ -258,233 +301,326 @@ export function ShabuCoopModal({
         // ignore
       }
     },
-    [currentUserId, onRewardEarned]
+    [currentUserId]
+  );
+  const claimShabuRewardRef = useRef(claimShabuReward);
+  claimShabuRewardRef.current = claimShabuReward;
+
+  const startShabuFromPayload = useCallback(
+    (pkt: {
+      runUid: string;
+      hostClientId: string;
+      members: Partial<Record<ShabuSlotId, ShabuPresenceMember>>;
+    }) => {
+      if (pkt.runUid && pkt.runUid === activeRunUidRef.current && screenRef.current === 'playing') {
+        return;
+      }
+      if (screenRef.current === 'playing' && !isFinishedRef.current) {
+        return;
+      }
+
+      let foundSlot: ShabuSlotId = 'P1';
+      for (const sid of SLOT_ORDER) {
+        if (pkt.members[sid]?.clientId === myClientIdRef.current) {
+          foundSlot = sid;
+        }
+      }
+
+      const iAmHost = pkt.hostClientId === myClientIdRef.current;
+      activeRunUidRef.current = pkt.runUid;
+      setActiveMatchMembers(pkt.members);
+      activeMatchMembersRef.current = pkt.members;
+      setMyPlayingSlot(foundSlot);
+      myPlayingSlotRef.current = foundSlot;
+      setAmIMatchHost(iAmHost);
+      amIMatchHostRef.current = iAmHost;
+
+      prevSnapRef.current = null;
+      currSnapRef.current = null;
+      lastRecvSeqRef.current = 0;
+      lastSentSigRef.current = '0,0,0,0';
+      localInputRef.current = { ...EMPTY_INPUT };
+      remoteInputsRef.current = {
+        P1: { ...EMPTY_INPUT },
+        P2: { ...EMPTY_INPUT },
+        P3: { ...EMPTY_INPUT },
+        P4: { ...EMPTY_INPUT },
+      };
+
+      rewardClaimedRef.current = false;
+      setRewardStatus('');
+      setIsFinished(false);
+      isFinishedRef.current = false;
+      setShabuRunId((n) => n + 1);
+      screenRef.current = 'playing';
+      setScreen('playing');
+    },
+    []
   );
 
-  // Connect to Shabu Co-op Room immediately on open
+  // Broadcast open lobby banner to the 3D Island while waiting as Host
   useEffect(() => {
-    if (!isOpen || !initialRoomCode) return;
+    if (!isOpen || screen !== 'waiting' || !amILobbyHost) return;
+    const me = playersRef.current.find((p) => p.id === currentUserId) || playersRef.current[0];
+    onLobbyBroadcastRef.current?.({
+      roomCode,
+      hostUserId: me?.id ?? (currentUserId || 0),
+      hostName: me?.name || 'เพื่อนในสนาม',
+      hostEmoji: me?.emoji || '🍲',
+      targetName: invitedTargetName,
+      count: lobbyResolved.sorted.length,
+      max: 4,
+      status: 'waiting',
+    });
+  }, [isOpen, screen, amILobbyHost, roomCode, lobbyResolved.sorted.length, currentUserId, invitedTargetName]);
 
-    setScreen('waiting');
-    setIsFinished(false);
-    setRewardStatus('');
-    setHudScore(0);
-    setHudCombo(0);
-    setHudDishes(0);
-    setHudHunger(100);
-    rewardClaimedRef.current = false;
+  // Connect to Supabase Realtime Presence + Broadcast (isolated client per room session)
+  useEffect(() => {
+    if (!isOpen || !roomCode) return;
 
-    const me = players.find((p) => p.id === currentUserId) || players[0];
-    const myInfo: ShabuMember = {
+    const me = playersRef.current.find((p) => p.id === currentUserId) || playersRef.current[0];
+    const now = Date.now();
+    const myInfo: ShabuPresenceMember = {
       clientId: myClientIdRef.current,
       playerId: me?.id ?? 0,
       name: me?.name ?? 'ผู้กล้า',
       emoji: me?.emoji ?? '🐰',
+      joinedAt: now,
     };
+    setPresenceList([myInfo]);
 
-    if (initialIsHost) {
-      const initMem: Partial<Record<ShabuSlotId, ShabuMember>> = { P1: myInfo };
-      setMySlot('P1');
-      mySlotRef.current = 'P1';
-      setMembers(initMem);
-      membersRef.current = initMem;
-      broadcastArenaLobby('waiting', initMem);
-    } else {
-      setMembers({});
-      membersRef.current = {};
-    }
+    let destroyed = false;
+    const localPeers = new Map<string, { member: ShabuPresenceMember; seenAt: number }>();
+    localPeers.set(myInfo.clientId, { member: myInfo, seenAt: now });
 
-    const handleRoomEvent = (event: string, payload: Record<string, unknown>) => {
-      if (!payload) return;
-
-      if (event === 'join_req' && isHostRef.current) {
-        if (screenRef.current === 'playing') return;
-        const cid = String(payload.clientId || '');
-        if (!cid || cid === myClientIdRef.current) return;
-        const cur = { ...membersRef.current };
-        let assigned = (Object.keys(cur) as ShabuSlotId[]).find((s) => cur[s]?.clientId === cid);
-        if (!assigned) {
-          assigned = SLOT_ORDER.find((s) => !cur[s]);
-        }
-        if (assigned) {
-          cur[assigned] = {
-            clientId: cid,
-            playerId: Number(payload.playerId ?? 0),
-            name: String(payload.name || 'เพื่อน'),
-            emoji: String(payload.emoji || '🦊'),
-          };
-          setMembers(cur);
-          membersRef.current = cur;
-          sendRoomMessage('room_sync', { members: cur });
-          broadcastArenaLobby('waiting', cur);
-        }
-      } else if (event === 'leave_req' && isHostRef.current) {
-        const cid = String(payload.clientId || '');
-        if (!cid) return;
-        const cur = { ...membersRef.current };
-        (Object.keys(cur) as ShabuSlotId[]).forEach((s) => {
-          if (cur[s]?.clientId === cid) delete cur[s];
-        });
-        setMembers(cur);
-        membersRef.current = cur;
-        sendRoomMessage('room_sync', { members: cur });
-        if (screenRef.current === 'waiting') {
-          broadcastArenaLobby('waiting', cur);
-        }
-      } else if (event === 'room_sync' && !isHostRef.current) {
-        const inc = (payload.members || {}) as Partial<Record<ShabuSlotId, ShabuMember>>;
-        setMembers(inc);
-        membersRef.current = inc;
-        const myAssigned = (Object.keys(inc) as ShabuSlotId[]).find(
-          (s) => inc[s]?.clientId === myClientIdRef.current
+    const handleEvent = (event: string, payload: Record<string, unknown>) => {
+      if (destroyed || !payload) return;
+      if (event === 'start_shabu') {
+        startShabuFromPayload(
+          payload as unknown as {
+            runUid: string;
+            hostClientId: string;
+            members: Partial<Record<ShabuSlotId, ShabuPresenceMember>>;
+          }
         );
-        if (myAssigned) {
-          setMySlot(myAssigned);
-          mySlotRef.current = myAssigned;
-        }
-      } else if (event === 'start_shabu') {
-        const inc = (payload.members || {}) as Partial<Record<ShabuSlotId, ShabuMember>>;
-        setMembers(inc);
-        membersRef.current = inc;
-        const myAssigned = (Object.keys(inc) as ShabuSlotId[]).find(
-          (s) => inc[s]?.clientId === myClientIdRef.current
-        );
-        if (myAssigned) {
-          setMySlot(myAssigned);
-          mySlotRef.current = myAssigned;
-        }
-        setIsFinished(false);
-        setRewardStatus('');
-        rewardClaimedRef.current = false;
-        setScreen('playing');
-      } else if (event === 'shabu_input' && isHostRef.current) {
+      } else if (event === 'shabu_input' && amIMatchHostRef.current) {
         const slot = payload.slot as ShabuSlotId;
         const inp = payload.input as ShabuInputState;
-        if (slot && inp) {
+        const expectedCid = activeMatchMembersRef.current[slot]?.clientId;
+        if (slot && inp && (!expectedCid || expectedCid === payload.clientId)) {
           remoteInputsRef.current[slot] = inp;
         }
-      } else if (event === 'shabu_state' && !isHostRef.current) {
-        const snap = payload.state as ShabuGameState | undefined;
-        if (snap) {
-          netTargetStateRef.current = snap;
-        }
+      } else if (event === 'shabu_state' && !amIMatchHostRef.current) {
+        const pkt = payload as unknown as CompactShabuSnap;
+        if (!pkt?.s) return;
+        if (typeof pkt.seq === 'number' && pkt.seq <= lastRecvSeqRef.current) return;
+        if (typeof pkt.seq === 'number') lastRecvSeqRef.current = pkt.seq;
+
+        prevSnapRef.current = currSnapRef.current || pkt.s;
+        currSnapRef.current = pkt.s;
+        currSnapRecvMsRef.current = performance.now();
       }
     };
-
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      const bc = new BroadcastChannel(`waist-shabu-room-${initialRoomCode}`);
-      bc.onmessage = (ev) => {
-        if (ev.data && typeof ev.data.event === 'string') {
-          handleRoomEvent(ev.data.event, ev.data.payload);
-        }
-      };
-      bcRef.current = bc;
-    }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    let localHb: ReturnType<typeof setInterval> | null = null;
+
     if (url && key) {
       const sb = createClient(url, key, {
-        realtime: { params: { eventsPerSecond: 25 } },
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { params: { eventsPerSecond: 40 } },
       });
-      const ch = sb.channel(`waist-shabu-room-${initialRoomCode}`, {
-        config: { broadcast: { self: false } },
+      const ch = sb.channel(`waist-shabu-presence-${roomCode}`, {
+        config: {
+          presence: { key: myInfo.clientId },
+          broadcast: { self: false, ack: false },
+        },
       });
-      ch.on('broadcast', { event: 'join_req' }, ({ payload }) => handleRoomEvent('join_req', payload))
-        .on('broadcast', { event: 'leave_req' }, ({ payload }) => handleRoomEvent('leave_req', payload))
-        .on('broadcast', { event: 'room_sync' }, ({ payload }) => handleRoomEvent('room_sync', payload))
-        .on('broadcast', { event: 'start_shabu' }, ({ payload }) => handleRoomEvent('start_shabu', payload))
-        .on('broadcast', { event: 'shabu_input' }, ({ payload }) => handleRoomEvent('shabu_input', payload))
-        .on('broadcast', { event: 'shabu_state' }, ({ payload }) => handleRoomEvent('shabu_state', payload))
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED' && !initialIsHost) {
-            ch.send({ type: 'broadcast', event: 'join_req', payload: { ...myInfo } });
+
+      const reconcile = () => {
+        if (destroyed) return;
+        const raw = ch.presenceState<ShabuPresenceMember>();
+        const list: ShabuPresenceMember[] = [];
+        const seen = new Set<string>();
+        for (const arr of Object.values(raw)) {
+          if (Array.isArray(arr) && arr.length > 0) {
+            const latest = arr[arr.length - 1];
+            if (latest?.clientId && !seen.has(latest.clientId)) {
+              seen.add(latest.clientId);
+              list.push(latest);
+            }
+          }
+        }
+        if (!seen.has(myInfo.clientId)) list.push(myInfo);
+
+        const prevHost = currentHostIdRef.current;
+        const resolved = resolveShabuLobby(list);
+        setPresenceList(list);
+
+        // Automatic Host Migration if P1 drops mid-cooking!
+        if (
+          prevHost &&
+          resolved.hostClientId &&
+          prevHost !== resolved.hostClientId &&
+          !list.some((m) => m.clientId === prevHost)
+        ) {
+          const newHost = list.find((m) => m.clientId === resolved.hostClientId);
+          const iAmNewHost = resolved.hostClientId === myClientIdRef.current;
+          if (screenRef.current === 'playing') {
+            setAmIMatchHost(iAmNewHost);
+            amIMatchHostRef.current = iAmNewHost;
+          }
+          if (newHost) {
+            showToast(`👑 โอนสิทธิ์หัวตี้ชาบูให้ ${newHost.name} ดูแลเตาต่ออัตโนมัติ!`);
+          }
+        }
+      };
+
+      ch.on('presence', { event: 'sync' }, reconcile)
+        .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+          if (destroyed) return;
+          reconcile();
+          for (const left of (leftPresences || []) as unknown as ShabuPresenceMember[]) {
+            if (!left?.clientId || left.clientId === myClientIdRef.current) continue;
+            showToast(`⚠️ ${left.emoji} ${left.name} ออกจากวงชาบู`);
+            for (const [sid, m] of Object.entries(activeMatchMembersRef.current)) {
+              if (m?.clientId === left.clientId) {
+                remoteInputsRef.current[sid as ShabuSlotId] = { ...EMPTY_INPUT };
+              }
+            }
+          }
+        })
+        .on('broadcast', { event: 'start_shabu' }, ({ payload }) => handleEvent('start_shabu', payload))
+        .on('broadcast', { event: 'shabu_input' }, ({ payload }) => handleEvent('shabu_input', payload))
+        .on('broadcast', { event: 'shabu_state' }, ({ payload }) => handleEvent('shabu_state', payload))
+        .subscribe(async (status) => {
+          if (!destroyed && status === 'SUBSCRIBED') {
+            await ch.track(myInfo);
           }
         });
+
       supabaseRef.current = sb;
       channelRef.current = ch;
-    }
-
-    let heartbeatIv: ReturnType<typeof setInterval> | null = null;
-    if (initialIsHost) {
-      heartbeatIv = setInterval(() => {
-        if (screenRef.current === 'waiting') {
-          broadcastArenaLobby('waiting', membersRef.current);
+    } else if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      const bc = new BroadcastChannel(`waist-shabu-local-${roomCode}`);
+      bc.onmessage = (ev) => {
+        if (destroyed || !ev.data) return;
+        const { event, payload } = ev.data;
+        if (event === 'presence_ping' && payload?.clientId && payload.clientId !== myClientIdRef.current) {
+          localPeers.set(payload.clientId, { member: payload as ShabuPresenceMember, seenAt: Date.now() });
+          setPresenceList(Array.from(localPeers.values()).map((v) => v.member));
+        } else if (event === 'presence_leave' && payload?.clientId) {
+          const gone = localPeers.get(payload.clientId)?.member;
+          localPeers.delete(payload.clientId);
+          setPresenceList(Array.from(localPeers.values()).map((v) => v.member));
+          if (gone) showToast(`⚠️ ${gone.emoji} ${gone.name} ออกจากวงชาบู`);
+        } else {
+          handleEvent(event, payload);
         }
-      }, 4500);
-    } else {
-      setTimeout(() => sendRoomMessage('join_req', { ...myInfo }), 120);
-      heartbeatIv = setInterval(() => {
-        if (
-          screenRef.current === 'waiting' &&
-          !Object.values(membersRef.current).some((m) => m?.clientId === myClientIdRef.current)
-        ) {
-          sendRoomMessage('join_req', { ...myInfo });
+      };
+      bcRef.current = bc;
+      bc.postMessage({ event: 'presence_ping', payload: myInfo });
+      localHb = setInterval(() => {
+        if (destroyed) return;
+        const t = Date.now();
+        localPeers.set(myInfo.clientId, { member: myInfo, seenAt: t });
+        bc.postMessage({ event: 'presence_ping', payload: myInfo });
+        for (const [cid, entry] of localPeers.entries()) {
+          if (cid !== myInfo.clientId && t - entry.seenAt > 3500) {
+            localPeers.delete(cid);
+            showToast(`⚠️ ${entry.member.name} หลุดออกจากวงชาบู`);
+          }
         }
-      }, 1200);
+        setPresenceList(Array.from(localPeers.values()).map((v) => v.member));
+      }, 1100);
     }
 
     return () => {
-      if (heartbeatIv) clearInterval(heartbeatIv);
-      if (initialIsHost) {
-        broadcastArenaLobby('closed', membersRef.current);
-      } else {
-        sendRoomMessage('leave_req', { clientId: myClientIdRef.current });
+      destroyed = true;
+      if (localHb) clearInterval(localHb);
+      if (currentHostIdRef.current === myClientIdRef.current) {
+        onLobbyBroadcastRef.current?.({
+          roomCode,
+          hostUserId: currentUserId || 0,
+          hostName: me?.name || 'เพื่อน',
+          hostEmoji: me?.emoji || '🍲',
+          count: 0,
+          max: 4,
+          status: 'closed',
+        });
       }
       if (bcRef.current) {
-        bcRef.current.close();
+        try {
+          bcRef.current.postMessage({ event: 'presence_leave', payload: { clientId: myClientIdRef.current } });
+          bcRef.current.close();
+        } catch {
+          // ignore
+        }
         bcRef.current = null;
       }
-      if (supabaseRef.current && channelRef.current) {
-        supabaseRef.current.removeChannel(channelRef.current);
-        channelRef.current = null;
-        supabaseRef.current = null;
+      const sb = supabaseRef.current;
+      const ch = channelRef.current;
+      supabaseRef.current = null;
+      channelRef.current = null;
+      if (ch && sb) {
+        void ch
+          .untrack()
+          .catch(() => {})
+          .finally(() => {
+            void sb.removeChannel(ch).finally(() => {
+              sb.realtime.disconnect();
+            });
+          });
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialRoomCode, initialIsHost]);
+  }, [isOpen, roomCode]);
 
-  // Keyboard bindings while playing
+  // Event-Driven Keyboard bindings while playing
   useEffect(() => {
     if (!isOpen || screen !== 'playing') return;
     const syncAxis = () => {
       const k = keyStateRef.current;
       localInputRef.current.mx = (k.right ? 1 : 0) - (k.left ? 1 : 0);
       localInputRef.current.mz = (k.down ? 1 : 0) - (k.up ? 1 : 0);
+      notifyLocalInputChanged();
     };
     const onKey = (e: KeyboardEvent, down: boolean) => {
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) {
         e.preventDefault();
       }
+      if (down && e.repeat) return;
       const c = e.code;
       if (c === 'KeyA' || c === 'ArrowLeft') {
         keyStateRef.current.left = down;
         syncAxis();
-      }
-      if (c === 'KeyD' || c === 'ArrowRight') {
+      } else if (c === 'KeyD' || codeIsRight(c)) {
         keyStateRef.current.right = down;
         syncAxis();
-      }
-      if (c === 'KeyW' || c === 'ArrowUp') {
+      } else if (c === 'KeyW' || c === 'ArrowUp') {
         keyStateRef.current.up = down;
         syncAxis();
-      }
-      if (c === 'KeyS' || c === 'ArrowDown') {
+      } else if (c === 'KeyS' || c === 'ArrowDown') {
         keyStateRef.current.down = down;
         syncAxis();
-      }
-      if (c === 'Space' || c === 'KeyE' || c === 'Enter') {
+      } else if (c === 'Space' || c === 'KeyE' || c === 'Enter') {
         localInputRef.current.interact = down;
-      }
-      if (c === 'ShiftLeft' || c === 'ShiftRight' || c === 'KeyJ') {
+        notifyLocalInputChanged();
+      } else if (c === 'ShiftLeft' || c === 'ShiftRight' || c === 'KeyJ') {
         localInputRef.current.dash = down;
+        notifyLocalInputChanged();
       }
     };
+    function codeIsRight(c: string) {
+      return c === 'ArrowRight';
+    }
     const kd = (e: KeyboardEvent) => onKey(e, true);
     const ku = (e: KeyboardEvent) => onKey(e, false);
     const onBlur = () => {
       keyStateRef.current = { up: false, down: false, left: false, right: false };
       localInputRef.current = { ...EMPTY_INPUT };
+      notifyLocalInputChanged();
     };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
@@ -495,22 +631,19 @@ export function ShabuCoopModal({
       window.removeEventListener('blur', onBlur);
       localInputRef.current = { ...EMPTY_INPUT };
     };
-  }, [isOpen, screen]);
+  }, [isOpen, screen, notifyLocalInputChanged]);
 
-  // Main 3D Top-Down Shabu Buffet Scene & 60 FPS Game Loop
+  // Main 3D Top-Down Shabu Buffet Scene & 60 FPS Game Loop (immune to Arena3DPage background re-renders!)
   useEffect(() => {
     if (!isOpen || screen !== 'playing' || !canvasWrapRef.current) return;
     const container = canvasWrapRef.current;
     container.innerHTML = '';
 
-    const activeSlots = (Object.keys(membersRef.current) as ShabuSlotId[]).filter((s) =>
-      Boolean(membersRef.current[s])
-    );
+    const memSnap = activeMatchMembersRef.current;
+    const activeSlots = SLOT_ORDER.filter((s) => Boolean(memSnap[s]));
     const slotsToUse: ShabuSlotId[] = activeSlots.length > 0 ? activeSlots : ['P1'];
     const game = createInitialShabuState(slotsToUse);
     gameStateRef.current = game;
-    netTargetStateRef.current = null;
-    lastSentInputSigRef.current = '';
 
     setHudOrder([...game.order]);
     setHudScore(0);
@@ -521,6 +654,7 @@ export function ShabuCoopModal({
     setHudSpeed(1.0);
     setHudHolding(null);
     setIsFinished(false);
+    isFinishedRef.current = false;
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
@@ -547,7 +681,6 @@ export function ShabuCoopModal({
     renderer.shadowMap.type = qCfg.shadowType;
     container.appendChild(renderer.domElement);
 
-    // Warm Shabu Restaurant Lighting
     scene.add(new THREE.HemisphereLight(0xfffbeb, 0x451a03, 1.0));
     const mainLight = new THREE.DirectionalLight(0xfff7ed, 1.25);
     mainLight.position.set(5, 16, 8);
@@ -560,7 +693,6 @@ export function ShabuCoopModal({
     mainLight.shadow.camera.bottom = -10;
     scene.add(mainLight);
 
-    // Wooden Restaurant Floor
     const floor = new THREE.Mesh(
       new THREE.BoxGeometry(15.6, 0.6, 10.8),
       new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.85 })
@@ -569,7 +701,6 @@ export function ShabuCoopModal({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Decorative Tatami/Border Rug under Center Table
     const rug = new THREE.Mesh(
       new THREE.PlaneGeometry(5.6, 4.4),
       new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 })
@@ -579,11 +710,9 @@ export function ShabuCoopModal({
     rug.receiveShadow = true;
     scene.add(rug);
 
-    // 4 Sculpted 3D Buffet Counters with Appetizing 3D Food Platters!
+    // 4 Sculpted 3D Buffet Counters with Appetizing 3D Food Platters
     SHABU_STATIONS.forEach((st) => {
       const grp = new THREE.Group();
-
-      // Warm wood & stone buffet counter base
       const counter = new THREE.Mesh(
         new THREE.BoxGeometry(2.6, 1.02, 1.6),
         new THREE.MeshStandardMaterial({ color: 0x3b2618, roughness: 0.72 })
@@ -593,7 +722,6 @@ export function ShabuCoopModal({
       counter.receiveShadow = true;
       grp.add(counter);
 
-      // Marble / colored accent counter top
       const topTrim = new THREE.Mesh(
         new THREE.BoxGeometry(2.74, 0.14, 1.74),
         new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.35 })
@@ -601,7 +729,6 @@ export function ShabuCoopModal({
       topTrim.position.y = 1.07;
       grp.add(topTrim);
 
-      // Glowing color strip around counter front
       const neonStrip = new THREE.Mesh(
         new THREE.BoxGeometry(2.64, 0.1, 1.64),
         new THREE.MeshBasicMaterial({ color: st.colorHex })
@@ -609,9 +736,7 @@ export function ShabuCoopModal({
       neonStrip.position.y = 0.96;
       grp.add(neonStrip);
 
-      // 3D Sculpted Food Platter per station
       if (st.id === 'meat') {
-        // Wooden board + stacked marbled sliced beef & pork belly rolls
         const board = new THREE.Mesh(
           new THREE.BoxGeometry(2.1, 0.08, 1.15),
           new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.65 })
@@ -634,7 +759,6 @@ export function ShabuCoopModal({
           grp.add(roll, stripe);
         }
       } else if (st.id === 'seafood') {
-        // Ice tray + bright orange shrimp & white squid rings
         const iceBed = new THREE.Mesh(
           new THREE.BoxGeometry(2.15, 0.14, 1.2),
           new THREE.MeshStandardMaterial({ color: 0xbae6fd, roughness: 0.15, metalness: 0.1 })
@@ -647,207 +771,108 @@ export function ShabuCoopModal({
         for (let i = 0; i < 4; i++) {
           const shrimp = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.075, 8, 14, Math.PI * 1.35), shrimpMat);
           shrimp.rotation.x = Math.PI / 2;
-          shrimp.position.set(-0.68 + i * 0.45, 1.33, -0.22);
-          shrimp.castShadow = true;
+          shrimp.position.set(-0.65 + i * 0.44, 1.33, -0.22);
           grp.add(shrimp);
         }
-        for (let i = 0; i < 3; i++) {
-          const squid = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.06, 8, 14), squidMat);
-          squid.rotation.x = Math.PI / 2;
-          squid.position.set(-0.52 + i * 0.52, 1.32, 0.28);
-          grp.add(squid);
+        for (let i = 0; i < 4; i++) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.055, 8, 14), squidMat);
+          ring.rotation.x = Math.PI / 2;
+          ring.position.set(-0.6 + i * 0.42, 1.32, 0.26);
+          grp.add(ring);
         }
       } else if (st.id === 'veggie') {
-        // Bamboo basket + fresh green cabbage leaves & mushrooms
         const basket = new THREE.Mesh(
-          new THREE.BoxGeometry(2.1, 0.16, 1.15),
-          new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 })
+          new THREE.BoxGeometry(2.1, 0.16, 1.18),
+          new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.8 })
         );
-        basket.position.y = 1.21;
+        basket.position.y = 1.2;
         grp.add(basket);
 
-        const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.55 });
-        const stemMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, roughness: 0.6 });
-        const capMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.65 });
-        for (let i = 0; i < 4; i++) {
-          const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), leafMat);
-          leaf.scale.set(1.25, 0.55, 0.9);
-          leaf.position.set(-0.68 + i * 0.45, 1.36, -0.2);
-          grp.add(leaf);
-        }
-        for (let i = 0; i < 3; i++) {
-          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.22, 8), stemMat);
-          stem.position.set(-0.5 + i * 0.5, 1.34, 0.26);
-          const cap = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
-          cap.position.set(-0.5 + i * 0.5, 1.44, 0.26);
-          grp.add(stem, cap);
+        const leafGreen = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.55 });
+        const stemLight = new THREE.MeshStandardMaterial({ color: 0xd9f99d, roughness: 0.5 });
+        for (let v = 0; v < 5; v++) {
+          const vx = -0.72 + v * 0.36;
+          const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), leafGreen);
+          leaf.scale.set(1.1, 0.7, 1.3);
+          leaf.position.set(vx, 1.36, -0.18);
+          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.34, 8), stemLight);
+          stem.rotation.x = Math.PI / 2;
+          stem.position.set(vx, 1.32, 0.16);
+          grp.add(leaf, stem);
         }
       } else {
-        // Ceramic Suki Sauce Pots + Ladles + Chili/Garlic Bowls
         const tray = new THREE.Mesh(
-          new THREE.BoxGeometry(2.1, 0.08, 1.15),
+          new THREE.BoxGeometry(2.05, 0.08, 1.15),
           new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 })
         );
         tray.position.y = 1.18;
         grp.add(tray);
 
-        const potColors = [0xdc2626, 0xea580c, 0x16a34a];
-        potColors.forEach((col, i) => {
-          const jar = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.24, 0.2, 0.34, 14),
-            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+        const bowlMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.35 });
+        const sauceCols = [0xea580c, 0xdc2626, 0xb45309];
+        [-0.62, 0, 0.62].forEach((bx, bi) => {
+          const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.18, 0.22, 14), bowlMat);
+          bowl.position.set(bx, 1.32, 0);
+          const dip = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.23, 0.23, 0.04, 14),
+            new THREE.MeshBasicMaterial({ color: sauceCols[bi] })
           );
-          jar.position.set(-0.62 + i * 0.62, 1.38, 0);
-          const sauceTop = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.2, 0.2, 0.04, 14),
-            new THREE.MeshBasicMaterial({ color: col })
-          );
-          sauceTop.position.set(-0.62 + i * 0.62, 1.54, 0);
-          const ladle = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.025, 0.025, 0.42, 6),
-            new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.7, roughness: 0.2 })
-          );
-          ladle.position.set(-0.54 + i * 0.62, 1.66, 0.05);
-          ladle.rotation.z = -0.35;
-          grp.add(jar, sauceTop, ladle);
+          dip.position.set(bx, 1.42, 0);
+          grp.add(bowl, dip);
         });
       }
 
-      const labelSp = makeLabelSprite(`${st.emoji} ${st.label}`, '#0f172a', `#${st.colorHex.toString(16).padStart(6, '0')}`);
-      labelSp.position.set(0, 2.32, 0);
-      grp.add(labelSp);
+      const glowRing = new THREE.Mesh(
+        new THREE.RingGeometry(1.15, 1.36, 28),
+        new THREE.MeshBasicMaterial({
+          color: st.colorHex,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.55,
+        })
+      );
+      glowRing.rotation.x = -Math.PI / 2;
+      glowRing.position.set(0, 0.025, 0);
+      grp.add(glowRing);
 
       grp.position.set(st.x, 0, st.z);
       scene.add(grp);
     });
 
-    // Warm Japanese/Thai Shabu Hanging Lanterns along back wall
-    [-3.2, -1.6, 1.6, 3.2].forEach((lx) => {
-      const lantern = new THREE.Mesh(
-        new THREE.SphereGeometry(0.32, 12, 10),
-        new THREE.MeshBasicMaterial({ color: 0xf97316 })
-      );
-      lantern.scale.set(0.9, 1.25, 0.9);
-      lantern.position.set(lx, 3.4, -4.5);
-      const capTop = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.16, 0.16, 0.08, 10),
-        new THREE.MeshStandardMaterial({ color: 0x1c1917 })
-      );
-      capTop.position.set(lx, 3.8, -4.5);
-      scene.add(lantern, capTop);
-    });
+    // Center Shabu Table + Twin-Soup Hotpot
+    const centerTable = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.45, 1.25, 0.96, 24),
+      new THREE.MeshStandardMaterial({ color: 0x29170b, roughness: 0.6 })
+    );
+    centerTable.position.set(SHABU_POT_POS.x, 0.48, SHABU_POT_POS.z);
+    centerTable.castShadow = true;
+    scene.add(centerTable);
 
-    // Center Shabu Table + Induction Stove + Dipping Bowls + Chopsticks + Upgraded 2-Broth Hotpot!
-    const tableGroup = new THREE.Group();
-    const tableTop = new THREE.Mesh(
-      new THREE.BoxGeometry(3.25, 0.16, 2.15),
-      new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.5 })
-    );
-    tableTop.position.y = 0.84;
-    tableTop.castShadow = true;
-    tableTop.receiveShadow = true;
-    const tableBase = new THREE.Mesh(
-      new THREE.BoxGeometry(2.85, 0.78, 1.75),
-      new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.8 })
-    );
-    tableBase.position.y = 0.39;
-    tableBase.castShadow = true;
-    tableGroup.add(tableTop, tableBase);
-
-    // Induction Stove Plate with glowing heat ring
-    const stovePlate = new THREE.Mesh(
-      new THREE.BoxGeometry(1.75, 0.05, 1.75),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.4 })
-    );
-    stovePlate.position.y = 0.93;
-    const heatGlowRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.78, 0.86, 28),
-      new THREE.MeshBasicMaterial({ color: 0xf97316, side: THREE.DoubleSide })
-    );
-    heatGlowRing.rotation.x = -Math.PI / 2;
-    heatGlowRing.position.y = 0.96;
-    tableGroup.add(stovePlate, heatGlowRing);
-
-    // Guard's personal sauce bowl & chopsticks right in front of him on the table!
-    const guardBowl = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.14, 0.14, 14),
-      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
-    );
-    guardBowl.position.set(-0.62, 0.99, -0.78);
-    const guardSauce = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.16, 0.03, 14),
-      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
-    );
-    guardSauce.position.set(-0.62, 1.05, -0.78);
-    const chopstickMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.5 });
-    const stick1 = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.012, 0.65, 6), chopstickMat);
-    stick1.rotation.z = Math.PI / 2;
-    stick1.position.set(0.55, 0.95, -0.78);
-    const stick2 = stick1.clone();
-    stick2.position.z = -0.71;
-    tableGroup.add(guardBowl, guardSauce, stick1, stick2);
-
-    tableGroup.position.set(SHABU_POT_POS.x, 0, SHABU_POT_POS.z);
-    scene.add(tableGroup);
-
-    // Gorgeous Copper-Trimmed 2-Broth Shabu Hotpot (flippable!)
     const potGroup = new THREE.Group();
     const potOuter = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.84, 0.72, 0.42, 28),
-      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.3, metalness: 0.7 })
+      new THREE.CylinderGeometry(0.95, 0.78, 0.42, 24),
+      new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.75, roughness: 0.25 })
     );
     potOuter.castShadow = true;
-    const potRim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.84, 0.055, 10, 28),
-      new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.25, metalness: 0.75 })
-    );
-    potRim.rotation.x = Math.PI / 2;
-    potRim.position.y = 0.2;
-    const handleL = new THREE.Mesh(
-      new THREE.TorusGeometry(0.15, 0.038, 8, 12, Math.PI),
-      new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.7, roughness: 0.3 })
-    );
-    handleL.position.set(-0.88, 0.12, 0);
-    handleL.rotation.z = Math.PI / 2;
-    const handleR = handleL.clone();
-    handleR.position.x = 0.88;
-    handleR.rotation.z = -Math.PI / 2;
-    potGroup.add(potOuter, potRim, handleL, handleR);
+    potGroup.add(potOuter);
 
-    // Split 2-broth soup (Golden Dashi + Spicy Red Mala with garnish!)
-    const clearSoup = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.78, 0.78, 0.04, 24, 1, false, 0, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    const malaHalf = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.88, 0.88, 0.06, 20, 1, false, 0, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
     );
-    clearSoup.position.y = 0.16;
-    const malaSoup = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.78, 0.78, 0.04, 24, 1, false, Math.PI, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0xb91c1c })
+    malaHalf.position.y = 0.19;
+    const clearHalf = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.88, 0.88, 0.06, 20, 1, false, Math.PI, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0xfde047 })
     );
-    malaSoup.position.y = 0.16;
+    clearHalf.position.y = 0.19;
     const divider = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.16, 1.56),
-      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.75, roughness: 0.2 })
+      new THREE.BoxGeometry(1.76, 0.12, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.8 })
     );
-    divider.position.y = 0.16;
-    potGroup.add(clearSoup, malaSoup, divider);
+    divider.position.y = 0.2;
+    potGroup.add(malaHalf, clearHalf, divider);
 
-    // Garnish & simmering food pieces inside the pot
-    const potBits: THREE.Mesh[] = [];
-    const bitColors = [0xdc2626, 0x22c55e, 0xf97316, 0xfef9c3, 0xef4444, 0x4ade80];
-    bitColors.forEach((col, bi) => {
-      const bit = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 8, 8),
-        new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 })
-      );
-      bit.scale.set(1.2, 0.45, 0.9);
-      const ang = (bi / bitColors.length) * Math.PI * 2;
-      bit.position.set(Math.cos(ang) * 0.38, 0.19, Math.sin(ang) * 0.38);
-      potGroup.add(bit);
-      potBits.push(bit);
-    });
-
-    // Bubbling Steam Orbs above Pot
     const steamOrbs: THREE.Mesh[] = [];
     for (let si = 0; si < 6; si++) {
       const orb = new THREE.Mesh(
@@ -862,15 +887,15 @@ export function ShabuCoopModal({
     potGroup.position.set(SHABU_POT_POS.x, 1.05, SHABU_POT_POS.z);
     scene.add(potGroup);
 
-    // Guard Boss sitting RIGHT IN FRONT OF THE POT facing directly toward the hotpot & camera (-Math.PI / 2)!
+    // Guard Boss sitting in front of the pot
     const guardParts = buildCustomGuardCharacter();
     guardParts.rootGroup.position.set(SHABU_GUARD_POS.x, 0, SHABU_GUARD_POS.z);
-    guardParts.rootGroup.rotation.y = -Math.PI / 2; // faces +Z (directly facing the hotpot!)
+    guardParts.rootGroup.rotation.y = -Math.PI / 2;
     guardParts.rootGroup.scale.setScalar(1.0);
     scene.add(guardParts.rootGroup);
 
     // Build Real 3D Players with Equipped Props + Holding Badges
-    const activeMySlot = mySlotRef.current;
+    const activeMySlot = myPlayingSlotRef.current;
     const ringColors: Record<ShabuSlotId, number> = {
       P1: 0xfacc15,
       P2: 0x38bdf8,
@@ -886,10 +911,12 @@ export function ShabuCoopModal({
       holdSprites: Record<ShabuIngredient, THREE.Sprite>;
     }
 
+    const curPlayersList = playersRef.current;
     const visuals: PlayerVisual[] = slotsToUse.map((slotId, idx) => {
-      const member = membersRef.current[slotId];
+      const member = memSnap[slotId];
       const found =
-        players.find((p) => p.id === member?.playerId) || players[idx % Math.max(1, players.length)];
+        curPlayersList.find((p) => p.id === member?.playerId) ||
+        curPlayersList[idx % Math.max(1, curPlayersList.length)];
 
       const wrapper = new THREE.Group();
       const charParts = buildCharacterMesh({
@@ -914,7 +941,6 @@ export function ShabuCoopModal({
       charParts.rootGroup.scale.setScalar(0.76);
       wrapper.add(charParts.rootGroup);
 
-      // Pre-built holding sprites (toggle visibility = zero allocation per frame!)
       const holdSprites: Record<ShabuIngredient, THREE.Sprite> = {
         meat: makeHoldingSprite('🥩'),
         seafood: makeHoldingSprite('🦐'),
@@ -954,6 +980,7 @@ export function ShabuCoopModal({
     let lastNetSend = 0;
     let lastHudSync = 0;
     let finishHandled = false;
+    let hostSeq = 0;
 
     const animate = () => {
       frameId = requestAnimationFrame(animate);
@@ -969,7 +996,7 @@ export function ShabuCoopModal({
 
       const nowMs = performance.now();
 
-      if (isHostRef.current) {
+      if (amIMatchHostRef.current) {
         const inputs: Record<ShabuSlotId, ShabuInputState> = {
           P1: { ...EMPTY_INPUT },
           P2: { ...EMPTY_INPUT },
@@ -978,7 +1005,7 @@ export function ShabuCoopModal({
         };
         for (const p of st.players) {
           inputs[p.slotId] =
-            p.slotId === activeMySlot
+            p.slotId === myPlayingSlotRef.current
               ? localInputRef.current
               : remoteInputsRef.current[p.slotId] || EMPTY_INPUT;
         }
@@ -998,69 +1025,73 @@ export function ShabuCoopModal({
           setTimeout(() => setShakeActive(false), 650);
         }
 
-        if (nowMs - lastNetSend > 33) {
+        // Broadcast at 20 Hz (50ms) with rounded floats — saves 40%+ bandwidth and never hits rate limit!
+        const urgent = Boolean(ev.serve || ev.flip);
+        if (urgent || nowMs - lastNetSend >= SHABU_BROADCAST_MS) {
           lastNetSend = nowMs;
-          sendRoomMessage('shabu_state', { state: st });
+          hostSeq += 1;
+          const compactState: ShabuGameState = {
+            ...st,
+            hunger: r2(st.hunger),
+            speedMult: r2(st.speedMult),
+            potY: r2(st.potY),
+            potRotX: r2(st.potRotX),
+            potRotZ: r2(st.potRotZ),
+            players: st.players.map((pl) => ({
+              ...pl,
+              x: r2(pl.x),
+              z: r2(pl.z),
+              vx: r2(pl.vx),
+              vz: r2(pl.vz),
+              rotY: r2(pl.rotY),
+            })),
+          };
+          sendRoomMessageRef.current('shabu_state', { seq: hostSeq, s: compactState });
         }
       } else {
-        // Guest: immediate input send on change + 65ms keepalive
-        const curInp = localInputRef.current;
-        const sig = `${curInp.mx.toFixed(1)},${curInp.mz.toFixed(1)},${curInp.interact ? 1 : 0},${curInp.dash ? 1 : 0}`;
-        if (sig !== lastSentInputSigRef.current || nowMs - lastNetSend > 65) {
-          lastSentInputSigRef.current = sig;
-          lastNetSend = nowMs;
-          sendRoomMessage('shabu_input', { slot: activeMySlot, input: { ...curInp } });
-        }
-
-        // Guest 60FPS local movement prediction + smooth reconciliation
-        const guestInputs: Record<ShabuSlotId, ShabuInputState> = {
-          P1: { ...EMPTY_INPUT },
-          P2: { ...EMPTY_INPUT },
-          P3: { ...EMPTY_INPUT },
-          P4: { ...EMPTY_INPUT },
-        };
-        guestInputs[activeMySlot] = curInp;
-        stepShabuGame(st, guestInputs, delta);
-
-        const netSnap = netTargetStateRef.current;
-        if (netSnap) {
-          st.order = netSnap.order;
-          st.hunger = netSnap.hunger;
-          st.speedMult = netSnap.speedMult;
-          st.score = netSnap.score;
-          st.combo = netSnap.combo;
-          st.maxCombo = netSnap.maxCombo;
-          st.dishesServed = netSnap.dishesServed;
-          if (st.phase === 'playing' && netSnap.phase === 'pot_flipped') {
+        // Guest: 60 FPS Client-Side Linear Interpolation (Lerp) between 20Hz Host Snapshots!
+        const curr = currSnapRef.current;
+        if (curr) {
+          const prev = prevSnapRef.current || curr;
+          if (st.phase === 'playing' && curr.phase === 'pot_flipped') {
             playShabuSound('flip', mutedRef.current);
             setShakeActive(true);
             setTimeout(() => setShakeActive(false), 650);
           }
-          st.phase = netSnap.phase;
-          st.potY = netSnap.potY;
-          st.potRotX = netSnap.potRotX;
-          st.potRotZ = netSnap.potRotZ;
-          st.feedbackText = netSnap.feedbackText;
+          if (curr.dishesServed > st.dishesServed) {
+            playShabuSound('serve', mutedRef.current);
+            confetti({ particleCount: 35, spread: 55, origin: { y: 0.45 } });
+          }
+          st.order = curr.order;
+          st.hunger = curr.hunger;
+          st.speedMult = curr.speedMult;
+          st.score = curr.score;
+          st.combo = curr.combo;
+          st.maxCombo = curr.maxCombo;
+          st.dishesServed = curr.dishesServed;
+          st.phase = curr.phase;
+          st.potY = curr.potY;
+          st.potRotX = curr.potRotX;
+          st.potRotZ = curr.potRotZ;
+          st.feedbackText = curr.feedbackText;
 
-          for (const netP of netSnap.players) {
+          const alpha = Math.min(1.25, Math.max(0, (nowMs - currSnapRecvMsRef.current) / 55));
+          for (const netP of curr.players) {
             const localP = st.players.find((lp) => lp.slotId === netP.slotId);
             if (!localP) continue;
-            const isLocal = netP.slotId === activeMySlot;
-            const blend = isLocal ? 0.25 : 0.36;
-            localP.x += (netP.x - localP.x) * blend;
-            localP.z += (netP.z - localP.z) * blend;
+            const prevP = prev.players.find((pp) => pp.slotId === netP.slotId) || netP;
+            localP.x = prevP.x + (netP.x - prevP.x) * Math.min(1, alpha);
+            localP.z = prevP.z + (netP.z - prevP.z) * Math.min(1, alpha);
+            localP.vx = netP.vx;
+            localP.vz = netP.vz;
+            localP.rotY = netP.rotY;
             localP.holding = netP.holding;
-            if (!isLocal) {
-              localP.rotY = netP.rotY;
-              localP.vx = netP.vx;
-              localP.vz = netP.vz;
-            }
           }
         }
       }
 
-      // Sync React HUD at ~12Hz (super light, zero frame drops!)
-      if (nowMs - lastHudSync > 80) {
+      // Sync React HUD at ~10Hz
+      if (nowMs - lastHudSync > 95) {
         lastHudSync = nowMs;
         setHudScore(st.score);
         setHudCombo(st.combo);
@@ -1068,53 +1099,38 @@ export function ShabuCoopModal({
         setHudDishes(st.dishesServed);
         setHudHunger(Math.round(st.hunger));
         setHudSpeed(Number(st.speedMult.toFixed(1)));
-        setHudOrder(st.order.map((o) => ({ ...o })));
+        setHudOrder([...st.order]);
         setHudFeedback(st.feedbackText);
-        const meP = st.players.find((p) => p.slotId === activeMySlot);
+        const meP = st.players.find((p) => p.slotId === myPlayingSlotRef.current);
         setHudHolding(meP?.holding ?? null);
       }
 
-      if (st.phase === 'finished' && !finishHandled) {
+      if (st.phase === 'pot_flipped' && !finishHandled) {
         finishHandled = true;
         setIsFinished(true);
-        setHudScore(st.score);
-        setHudMaxCombo(st.maxCombo);
-        setHudDishes(st.dishesServed);
-        void claimShabuReward(st.score);
+        isFinishedRef.current = true;
+        void claimShabuRewardRef.current(st.score);
       }
 
-      // Animate Pot, Simmering Ingredients & Steam
-      potGroup.position.set(SHABU_POT_POS.x, st.potY + 0.1, SHABU_POT_POS.z);
-      potGroup.rotation.set(st.potRotX, 0, st.potRotZ);
-      potBits.forEach((bit, bi) => {
-        bit.position.y = 0.19 + Math.sin(elapsed * 5.2 + bi * 1.3) * 0.03;
-      });
+      // Animate Pot & Steam
+      potGroup.position.y = 1.05 + st.potY;
+      potGroup.rotation.x = st.potRotX;
+      potGroup.rotation.z = st.potRotZ;
       steamOrbs.forEach((orb, idx) => {
         orb.visible = st.phase === 'playing';
-        orb.position.y = 0.35 + ((elapsed * 0.9 + idx * 0.37) % 1.25);
-        const s = 0.65 + ((elapsed * 0.9 + idx * 0.37) % 1.25) * 0.5;
-        orb.scale.setScalar(s);
+        if (orb.visible) {
+          orb.position.y = 0.35 + ((elapsed * 1.2 + idx * 0.35) % 1.4);
+          orb.scale.setScalar(0.8 + Math.sin(elapsed * 4 + idx) * 0.25);
+        }
       });
 
-      // Animate Guard Boss sitting at hotpot: eating chopsticks motion -> angry shaking -> flipping pot!
-      const isAngry = st.hunger < 32 || st.phase !== 'playing';
-      const shakeAmt = isAngry ? Math.sin(elapsed * 32) * 0.09 : 0;
-      guardParts.rootGroup.position.set(SHABU_GUARD_POS.x + shakeAmt, 0, SHABU_GUARD_POS.z);
-      guardParts.bounceGroup.position.y = isAngry ? Math.abs(Math.sin(elapsed * 16)) * 0.08 : Math.sin(elapsed * 5.5) * 0.03;
-      if (st.phase !== 'playing') {
-        guardParts.armL.rotation.z = 2.6;
-        guardParts.armR.rotation.z = -2.6;
-      } else if (isAngry) {
-        guardParts.armL.rotation.z = 1.6 + Math.sin(elapsed * 20) * 0.45;
-        guardParts.armR.rotation.z = -1.6 - Math.sin(elapsed * 20) * 0.45;
-      } else {
-        // Cute eating / scooping shabu motion!
-        const eatWave = Math.sin(elapsed * (5.5 * st.speedMult));
-        guardParts.armL.rotation.z = 0.85 + eatWave * 0.35;
-        guardParts.armR.rotation.z = -0.85 - eatWave * 0.35;
-      }
+      // Animate Guard Boss mood based on hunger!
+      const rage = Math.max(0, (45 - st.hunger) / 45);
+      guardParts.bounceGroup.position.y = rage > 0.1 ? Math.abs(Math.sin(elapsed * 16)) * 0.16 * rage : Math.sin(elapsed * 2.5) * 0.03;
+      guardParts.armL.rotation.z = rage > 0.2 ? 2.2 + Math.sin(elapsed * 18) * 0.4 : 0.25;
+      guardParts.armR.rotation.z = rage > 0.2 ? -2.2 - Math.sin(elapsed * 18) * 0.4 : -0.25;
 
-      // Animate 3D Players
+      // Sync 3D Chef Characters
       for (const vis of visuals) {
         const p = st.players.find((pl) => pl.slotId === vis.slotId);
         if (!p) continue;
@@ -1153,13 +1169,34 @@ export function ShabuCoopModal({
       disposeObject3D(scene);
       renderer.dispose();
     };
-  }, [isOpen, screen, qualityMode, players, sendRoomMessage, claimShabuReward]);
+  }, [isOpen, screen, qualityMode, shabuRunId]);
 
   if (!isOpen) return null;
 
-  const joinedCount = Object.keys(members).length;
+  const joinedCount = Object.keys(lobbyResolved.slots).length;
   const estGp = computeShabuGpReward(hudScore);
   const isDanger = hudHunger < 30;
+
+  const handleHostStartShabu = () => {
+    if (!amILobbyHost) return;
+    const pkt = {
+      runUid: `${roomCode}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      hostClientId: myClientIdRef.current,
+      members: lobbyResolved.slots,
+    };
+    const me = players.find((p) => p.id === currentUserId) || players[0];
+    onLobbyBroadcastRef.current?.({
+      roomCode,
+      hostUserId: me?.id ?? (currentUserId || 0),
+      hostName: me?.name || 'เพื่อน',
+      hostEmoji: me?.emoji || '🍲',
+      count: lobbyResolved.sorted.length,
+      max: 4,
+      status: 'started',
+    });
+    sendRoomMessage('start_shabu', pkt);
+    startShabuFromPayload(pkt);
+  };
 
   // Virtual 360° Joystick Handlers
   const handleJoyDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1183,6 +1220,7 @@ export function ShabuCoopModal({
     setJoyKnob({ x: kx, y: ky });
     localInputRef.current.mx = dist > 8 ? kx / maxR : 0;
     localInputRef.current.mz = dist > 8 ? ky / maxR : 0;
+    notifyLocalInputChanged();
   };
 
   const handleJoyEnd = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1191,10 +1229,19 @@ export function ShabuCoopModal({
     setJoyKnob({ x: 0, y: 0 });
     localInputRef.current.mx = 0;
     localInputRef.current.mz = 0;
+    notifyLocalInputChanged();
   };
 
   return (
     <div className={`fixed inset-0 z-50 bg-slate-950/92 flex flex-col overflow-hidden ${shakeActive ? 'shake-active' : ''}`}>
+      {toastMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none max-w-[92vw]">
+          <div className="rpg-banner border-2 border-amber-300 rounded-2xl px-4 py-2 text-xs sm:text-sm font-extrabold text-amber-200 shadow-2xl">
+            {toastMsg}
+          </div>
+        </div>
+      )}
+
       {screen === 'waiting' ? (
         <div className="w-full h-dvh overflow-y-auto flex items-center justify-center p-3 sm:p-5 pt-safe pb-safe">
           <div className="rpg-stone-frame rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-4 relative my-auto">
@@ -1220,21 +1267,46 @@ export function ShabuCoopModal({
               </div>
             </div>
 
+            {/* Table Switcher (#5555 / #5556) */}
+            <div className="flex items-center justify-between bg-slate-900/90 border border-amber-500/40 rounded-xl p-2">
+              <div className="flex items-center gap-1.5">
+                {(
+                  [
+                    { code: '5555', label: '🍲 เตา 1 (#5555)' },
+                    { code: '5556', label: '🔥 เตา 2 (#5556)' },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.code}
+                    type="button"
+                    onClick={() => setRoomCode(t.code)}
+                    className={`px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+                      roomCode === t.code
+                        ? 'rpg-btn-gold'
+                        : 'bg-slate-950 text-amber-100/80 hover:text-white'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] font-bold text-emerald-300">🟢 Presence Live</span>
+            </div>
+
             <div className="bg-amber-950/70 border-2 border-amber-400/70 rounded-xl p-3 text-center space-y-1">
               <div className="font-[family-name:var(--font-kanit)] text-base sm:text-lg font-extrabold text-amber-300">
                 👥 สมาชิกตี้ชาบู ({joinedCount}/4 คน)
               </div>
               <div className="text-[11px] text-amber-100/90 font-semibold">
-                {invitedTargetName
-                  ? `ส่งแจ้งเตือนชวน ${invitedTargetName} และเพื่อนในสนามแล้ว! กดเริ่มได้เลยเมื่อพร้อม (1–4 คน)`
-                  : 'เพื่อนที่ออนไลน์ในสนามเห็นป้ายแจ้งเตือนชวนเข้าตี้แล้ว กดเข้าร่วมได้สูงสุด 4 คน!'}
+                เพื่อนเดินมาที่ซุ้มอาหารบนเกาะแล้วกดเข้าตี้ชาบู จะเข้ามาเจอกันในห้องรอนี้อัตโนมัติ!
               </div>
             </div>
 
             {/* 4 Co-op Player Slots */}
             <div className="grid grid-cols-2 gap-2">
               {SLOT_ORDER.map((sid, idx) => {
-                const m = members[sid];
+                const m = lobbyResolved.slots[sid];
+                const isSlotHost = m?.clientId === lobbyResolved.hostClientId;
                 return (
                   <div
                     key={sid}
@@ -1245,11 +1317,11 @@ export function ShabuCoopModal({
                     }`}
                   >
                     <div className="text-[10px] font-bold opacity-75 mb-0.5">
-                      เชฟคนที่ {idx + 1} {sid === 'P1' ? '(หัวตี้)' : ''}
+                      เชฟคนที่ {idx + 1} {isSlotHost ? '👑 (หัวตี้)' : ''}
                     </div>
                     {m ? (
                       <div className="text-xs sm:text-sm font-extrabold truncate">
-                        {m.emoji} {m.name} {sid === mySlot ? '(คุณ)' : ''}
+                        {m.emoji} {m.name} {sid === myLobbySlot ? '(คุณ)' : ''}
                       </div>
                     ) : (
                       <div className="text-[11px] font-bold animate-pulse">⏳ ว่าง (รอเพื่อนเข้า)</div>
@@ -1259,18 +1331,10 @@ export function ShabuCoopModal({
               })}
             </div>
 
-            {initialIsHost ? (
+            {amILobbyHost ? (
               <button
                 type="button"
-                onClick={() => {
-                  const curMem = membersRef.current;
-                  broadcastArenaLobby('started', curMem);
-                  sendRoomMessage('start_shabu', { members: curMem });
-                  setIsFinished(false);
-                  setRewardStatus('');
-                  rewardClaimedRef.current = false;
-                  setScreen('playing');
-                }}
+                onClick={handleHostStartShabu}
                 className="w-full rpg-btn-gold font-[family-name:var(--font-kanit)] py-3 rounded-xl text-sm sm:text-base font-extrabold cursor-pointer"
               >
                 🍲 เปิดเตาเริ่มเลย! ({joinedCount} คน)
@@ -1294,7 +1358,6 @@ export function ShabuCoopModal({
         <div className="relative w-full h-dvh overflow-hidden select-none">
           <div ref={canvasWrapRef} className="fixed inset-0 w-full h-full touch-none" />
 
-          {/* Red Pulsing Border when Guard is about to flip the pot! */}
           {isDanger && !isFinished && (
             <div className="fixed inset-0 pointer-events-none z-10 border-4 sm:border-8 border-rose-500/85 animate-pulse" />
           )}
@@ -1309,7 +1372,6 @@ export function ShabuCoopModal({
               ← ออก
             </button>
 
-            {/* Score + Hunger Meter */}
             <div className="pointer-events-auto rpg-banner rounded-2xl px-3 sm:px-4 py-1.5 flex flex-wrap items-center justify-center gap-2 sm:gap-3 shadow-xl">
               <div className="flex items-center gap-1.5">
                 <span className="font-[family-name:var(--font-kanit)] font-black text-sm sm:text-base text-amber-300">
@@ -1333,8 +1395,8 @@ export function ShabuCoopModal({
                       hudHunger > 55
                         ? 'bg-emerald-400'
                         : hudHunger > 30
-                        ? 'bg-amber-400'
-                        : 'bg-rose-500 animate-pulse'
+                          ? 'bg-amber-400'
+                          : 'bg-rose-500 animate-pulse'
                     }`}
                     style={{ width: `${Math.max(0, Math.min(100, hudHunger))}%` }}
                   />
@@ -1417,10 +1479,9 @@ export function ShabuCoopModal({
             </div>
           )}
 
-          {/* Mobile & iPad Multi-Touch Controls (360° Joystick + Dash + Pick/Drop) */}
+          {/* Mobile & iPad Multi-Touch Controls */}
           {!isFinished && showTouchControls && (
             <div className="flex fixed bottom-4 inset-x-4 pb-safe z-30 items-end justify-between pointer-events-none">
-              {/* Left Thumb: 360° Virtual Joystick */}
               <div
                 onPointerDown={handleJoyDown}
                 onPointerMove={handleJoyMove}
@@ -1436,19 +1497,21 @@ export function ShabuCoopModal({
                 </div>
               </div>
 
-              {/* Right Thumb: Dash + Pick/Drop */}
               <div className="flex items-end gap-3 pointer-events-auto">
                 <button
                   type="button"
                   onPointerDown={(e) => {
                     e.preventDefault();
                     localInputRef.current.dash = true;
+                    notifyLocalInputChanged();
                   }}
                   onPointerUp={() => {
                     localInputRef.current.dash = false;
+                    notifyLocalInputChanged();
                   }}
                   onPointerCancel={() => {
                     localInputRef.current.dash = false;
+                    notifyLocalInputChanged();
                   }}
                   className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-gradient-to-b from-sky-500/95 to-blue-700/95 active:scale-95 border-2 border-sky-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
@@ -1460,12 +1523,15 @@ export function ShabuCoopModal({
                   onPointerDown={(e) => {
                     e.preventDefault();
                     localInputRef.current.interact = true;
+                    notifyLocalInputChanged();
                   }}
                   onPointerUp={() => {
                     localInputRef.current.interact = false;
+                    notifyLocalInputChanged();
                   }}
                   onPointerCancel={() => {
                     localInputRef.current.interact = false;
+                    notifyLocalInputChanged();
                   }}
                   className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-b from-orange-500/95 to-rose-600/95 active:scale-95 border-2 border-amber-200 text-white flex flex-col items-center justify-center font-extrabold shadow-xl touch-none"
                 >
@@ -1513,18 +1579,17 @@ export function ShabuCoopModal({
                     {rewardStatus}
                   </div>
                 )}
-                {initialIsHost ? (
+                {amIMatchHost ? (
                   <button
                     type="button"
                     onClick={() => {
-                      const curMem = membersRef.current;
-                      sendRoomMessage('start_shabu', { members: curMem });
-                      setIsFinished(false);
-                      setRewardStatus('');
-                      rewardClaimedRef.current = false;
-                      // Toggle screen briefly to remount cleanly
-                      setScreen('waiting');
-                      setTimeout(() => setScreen('playing'), 30);
+                      const pkt = {
+                        runUid: `${roomCode}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        hostClientId: myClientIdRef.current,
+                        members: activeMatchMembersRef.current,
+                      };
+                      sendRoomMessage('start_shabu', pkt);
+                      startShabuFromPayload(pkt);
                     }}
                     className="w-full rpg-btn-gold py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
                   >

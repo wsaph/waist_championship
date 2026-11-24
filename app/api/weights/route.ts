@@ -17,6 +17,11 @@ import {
   type StepSyncMode,
   type StepSyncSource,
 } from '@/lib/health_sync';
+import {
+  assertActiveUserSession,
+  extractRequestSessionToken,
+  verifyOrMigrateSessionToken,
+} from '@/lib/session_guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +42,10 @@ export async function GET(req: Request) {
     const urlObj = new URL(req.url);
     const reqSeasonId = urlObj.searchParams.get('seasonId');
     const viewerId = Number(urlObj.searchParams.get('viewerId') || 0);
+    const reqSessionToken = extractRequestSessionToken(
+      req,
+      urlObj.searchParams.get('sessionToken')
+    );
 
     const seasonsRes = await turso.execute(`SELECT * FROM seasons ORDER BY id DESC`);
     const seasons = seasonsRes.rows.map((r) => ({
@@ -105,18 +114,42 @@ export async function GET(req: Request) {
 
     const todayKey = new Date().toISOString().slice(0, 10);
     const bkkSyncDate = getBangkokDateKey();
-    let viewerSyncedStepsToday = 0;
+
+    let effectiveViewerId = viewerId;
+    let viewerSessionValid: boolean | undefined = undefined;
+    let migratedSessionToken: string | undefined = undefined;
     if (viewerId > 0) {
+      const viewerRow = usersRes.rows.find((r) => Number(r.id) === viewerId);
+      if (!viewerRow) {
+        effectiveViewerId = 0;
+        viewerSessionValid = false;
+      } else {
+        const sessCheck = await verifyOrMigrateSessionToken(
+          viewerId,
+          viewerRow.active_session_token,
+          reqSessionToken
+        );
+        viewerSessionValid = sessCheck.valid;
+        if (!sessCheck.valid) {
+          effectiveViewerId = 0;
+        } else if (sessCheck.migratedToken) {
+          migratedSessionToken = sessCheck.migratedToken;
+        }
+      }
+    }
+
+    let viewerSyncedStepsToday = 0;
+    if (effectiveViewerId > 0) {
       const syncRes = await turso.execute({
         sql: `SELECT max_synced_steps FROM daily_step_syncs WHERE season_id = ? AND user_id = ? AND sync_date = ? LIMIT 1`,
-        args: [seasonId, viewerId, bkkSyncDate],
+        args: [seasonId, effectiveViewerId, bkkSyncDate],
       });
       viewerSyncedStepsToday = Math.max(0, Number(syncRes.rows[0]?.max_synced_steps ?? 0));
     }
 
     const participants = usersRes.rows.map((u) => {
       const uid = Number(u.id);
-      const isOwner = viewerId > 0 && uid === viewerId;
+      const isOwner = effectiveViewerId > 0 && uid === effectiveViewerId;
       const entry = entryByUser[uid];
       const goalType = entry ? String(entry.goal_type) : 'weight_loss';
       const isCumulative = goalType === 'reps_accumulate' || goalType === 'distance_accumulate';
@@ -205,6 +238,8 @@ export async function GET(req: Request) {
         activeSeason,
         lunchRush,
         feed: [],
+        ...(viewerSessionValid !== undefined ? { viewerSessionValid } : {}),
+        ...(migratedSessionToken ? { migratedSessionToken } : {}),
       },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
@@ -242,7 +277,10 @@ export async function POST(req: Request) {
     }
 
     const user = userCheck.rows[0];
-    if (!isSelf && String(user.pin_code) !== String(pinCode)) {
+    if (isSelf) {
+      const kickResp = await assertActiveUserSession(req, Number(userId));
+      if (kickResp) return kickResp;
+    } else if (String(user.pin_code) !== String(pinCode)) {
       return NextResponse.json({ error: 'รหัส PIN ไม่ถูกต้อง! อย่าแอบโกงเพื่อนนะ 👀' }, { status: 401 });
     }
 

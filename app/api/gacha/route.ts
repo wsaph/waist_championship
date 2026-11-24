@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
+import { assertActiveUserSession } from '@/lib/session_guard';
 import {
   GACHA_EXCLUSIVE_ITEMS,
   GACHA_SPIN_COST,
@@ -31,6 +32,9 @@ export async function POST(req: Request) {
     if (!userId) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบหรือเลือกตัวละครก่อนสุ่มGacha' }, { status: 400 });
     }
+
+    const kickResp = await assertActiveUserSession(req, Number(userId));
+    if (kickResp) return kickResp;
 
     const userRes = await turso.execute({
       sql: `SELECT * FROM users WHERE id = ?`,

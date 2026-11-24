@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { GOAL_TYPES, parsePropColors } from '@/lib/rpg_catalog';
 import { ensureUserSyncKey } from '@/lib/health_sync';
+import { assertActiveUserSession, issueUserSessionToken } from '@/lib/session_guard';
 
 const VALID_GOAL_TYPES = new Set<string>(GOAL_TYPES.map((g) => g.id));
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9A-Fa-f]{6}$/.test(v);
@@ -151,6 +152,7 @@ export async function POST(req: Request) {
 
     const newUserId = Number(result.lastInsertRowid);
     await ensureUserSyncKey(newUserId);
+    const sessionToken = await issueUserSessionToken(newUserId);
     const activeSeasonId = await getActiveSeasonId(Number(seasonId || 0));
 
     if (finalRole === 'competitor') {
@@ -172,7 +174,7 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ success: true, id: newUserId });
+    return NextResponse.json({ success: true, id: newUserId, sessionToken });
   } catch (error) {
     console.error('POST /api/users error:', error);
     return NextResponse.json({ error: 'สมัครไม่สำเร็จ ตรวจสอบการเชื่อมต่อ Turso' }, { status: 500 });
@@ -218,6 +220,11 @@ export async function PATCH(req: Request) {
       equipMarker,
       propColors,
     } = body;
+
+    if (isSelf && userId) {
+      const kickResp = await assertActiveUserSession(req, Number(userId));
+      if (kickResp) return kickResp;
+    }
 
     if (body.roamOnly && userId && isSelf) {
       await turso.execute({

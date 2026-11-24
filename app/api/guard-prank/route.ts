@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { GUARD_PRANKS } from '@/lib/guard_pranks';
+import { assertActiveUserSession } from '@/lib/session_guard';
 
 export async function POST(req: Request) {
   try {
@@ -8,6 +9,9 @@ export async function POST(req: Request) {
     if (!userId || !prankId) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบและเลือกวิธีแกล้งพี่ยาม' }, { status: 400 });
     }
+
+    const kickResp = await assertActiveUserSession(req, Number(userId));
+    if (kickResp) return kickResp;
 
     const prank = GUARD_PRANKS.find((p) => p.id === prankId);
     if (!prank) {

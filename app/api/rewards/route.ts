@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
+import { assertActiveUserSession } from '@/lib/session_guard';
+import { resolveDailyCheckinReward } from '@/lib/morning_champion';
 import {
   getBangkokLunchRushStatus,
   getOrSpawnLunchCoins,
@@ -7,7 +9,6 @@ import {
   LUNCH_COIN_VALUE,
 } from '@/lib/lunch_coins';
 
-const DAILY_CHECKIN_BONUS = 10;
 const VOLLEYBALL_WIN_BONUS = 5;
 const VOLLEYBALL_DAILY_WIN_CAP = 3;
 const SHABU_DAILY_GP_CAP = 20;
@@ -39,6 +40,9 @@ export async function POST(req: Request) {
       );
     }
 
+    const kickResp = await assertActiveUserSession(req, uid);
+    if (kickResp) return kickResp;
+
     const userRes = await turso.execute({
       sql: 'SELECT * FROM users WHERE id = ?',
       args: [uid],
@@ -58,16 +62,72 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      const nextPoints = currentPoints + DAILY_CHECKIN_BONUS;
-      await turso.execute({
-        sql: 'UPDATE users SET points = ?, last_checkin_date = ? WHERE id = ?',
-        args: [nextPoints, todayKey, uid],
+
+      const seasonRes = await turso.execute(
+        `SELECT id FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1`
+      );
+      const activeSeasonId =
+        seasonRes.rows.length > 0 ? Number(seasonRes.rows[0].id) : 1;
+
+      const snapRes = await turso.execute({
+        sql: `
+          SELECT
+            se.user_id,
+            se.step_count AS current_step_count,
+            COALESCE(sl.added_today, 0) AS steps_added_since_cutoff
+          FROM season_entries se
+          INNER JOIN users u ON u.id = se.user_id
+          LEFT JOIN (
+            SELECT user_id, SUM(steps_added) AS added_today
+            FROM step_logs
+            WHERE season_id = ? AND date(logged_at) >= ?
+            GROUP BY user_id
+          ) sl ON sl.user_id = se.user_id
+          WHERE se.season_id = ?
+        `,
+        args: [activeSeasonId, todayKey, activeSeasonId],
       });
+
+      const snapshotEntries = snapRes.rows.map((r) => ({
+        userId: Number(r.user_id),
+        currentStepCount: Number(r.current_step_count ?? 0),
+        stepsAddedSinceCutoff: Number(r.steps_added_since_cutoff ?? 0),
+      }));
+
+      const rewardMeta = resolveDailyCheckinReward(uid, snapshotEntries);
+
+      const updRes = await turso.execute({
+        sql: `
+          UPDATE users
+          SET points = points + ?, last_checkin_date = ?
+          WHERE id = ? AND COALESCE(last_checkin_date, '') != ?
+        `,
+        args: [rewardMeta.earned, todayKey, uid, todayKey],
+      });
+
+      if (Number(updRes.rowsAffected ?? 0) === 0) {
+        return NextResponse.json(
+          { error: 'รับโบนัสเช็คอินของวันนี้ไปแล้ว! กลับมารับใหม่พรุ่งนี้หลัง 07:00 น. นะ 🌅' },
+          { status: 400 }
+        );
+      }
+
+      const latestUserRes = await turso.execute({
+        sql: 'SELECT points FROM users WHERE id = ? LIMIT 1',
+        args: [uid],
+      });
+      const nextPoints = Number(
+        latestUserRes.rows[0]?.points ?? currentPoints + rewardMeta.earned
+      );
+
       return NextResponse.json({
         success: true,
-        earned: DAILY_CHECKIN_BONUS,
+        earned: rewardMeta.earned,
         points: nextPoints,
         checkedInToday: true,
+        isMorningChampion: rewardMeta.isMorningChampion,
+        championStepsAt7Am: rewardMeta.championStepsAt7Am,
+        coChampionCount: rewardMeta.coChampionCount,
       });
     }
 
@@ -204,6 +264,39 @@ export async function POST(req: Request) {
         earnedToday: nextEarnedToday,
         dailyCap: SHABU_DAILY_GP_CAP,
         capReached: nextEarnedToday >= SHABU_DAILY_GP_CAP,
+      });
+    }
+
+    if (type === 'penalty_win') {
+      const bkkToday = getBangkokDateKey();
+      const prevDate = String(user.penalty_wins_date || '');
+      const prevCount = prevDate === bkkToday ? Number(user.penalty_wins_count ?? 0) : 0;
+
+      if (prevCount >= VOLLEYBALL_DAILY_WIN_CAP) {
+        return NextResponse.json({
+          success: true,
+          earned: 0,
+          points: currentPoints,
+          winsToday: prevCount,
+          dailyCap: VOLLEYBALL_DAILY_WIN_CAP,
+          capReached: true,
+        });
+      }
+
+      const nextWins = prevCount + 1;
+      const nextPoints = currentPoints + VOLLEYBALL_WIN_BONUS;
+      await turso.execute({
+        sql: 'UPDATE users SET points = ?, penalty_wins_date = ?, penalty_wins_count = ? WHERE id = ?',
+        args: [nextPoints, bkkToday, nextWins, uid],
+      });
+
+      return NextResponse.json({
+        success: true,
+        earned: VOLLEYBALL_WIN_BONUS,
+        points: nextPoints,
+        winsToday: nextWins,
+        dailyCap: VOLLEYBALL_DAILY_WIN_CAP,
+        capReached: false,
       });
     }
 

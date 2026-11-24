@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import type { KrathongStyleId } from '@/lib/krathong_catalog';
+import type { KrathongItem, KrathongStyleId } from './catalog';
+
+export const LOY_KRATHONG_ORBIT_SPEED = 0.0082;
+export const LOY_KRATHONG_GLIDE_DURATION_SEC = 5.0;
 
 export interface KrathongAvatarSpec {
   colorHex?: string;
@@ -25,6 +28,8 @@ function getCandleGlowTexture(): THREE.CanvasTexture {
     const fallback = new THREE.CanvasTexture(
       Object.assign({ width: 2, height: 2 }) as HTMLCanvasElement
     );
+    fallback.userData.isSharedGltfResource = true;
+    sharedCandleGlowTex = fallback;
     return fallback;
   }
   const canvas = document.createElement('canvas');
@@ -223,7 +228,6 @@ export function buildKrathongMesh(
   let mascotGroup: THREE.Group | undefined;
 
   if (styleId === 'moo_deng') {
-    // Giant green lotus leaf + pink lotus rim + bouncy baby hippo Moo Deng!
     const leafPad = new THREE.Mesh(
       new THREE.CylinderGeometry(0.72, 0.64, 0.12, 20),
       new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.55 })
@@ -245,7 +249,6 @@ export function buildKrathongMesh(
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), hippoMat);
     head.position.set(0, 0.32, 0.14);
 
-    // Wide open adorable snout
     const upperJaw = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), hippoMat);
     upperJaw.scale.set(1.18, 0.72, 1.0);
     upperJaw.position.set(0, 0.33, 0.3);
@@ -271,7 +274,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'capybara_yuzu') {
-    // Hinoki wooden tub + warm turquoise onsen water + chill Capybara with yuzu orange on head!
     const tub = new THREE.Mesh(
       new THREE.CylinderGeometry(0.66, 0.58, 0.26, 18),
       new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.72 })
@@ -338,7 +340,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'corgi_butt') {
-    // Golden braided bread Krathong + loafing Corgi with upright ears & pink toe beans!
     const breadBase = new THREE.Mesh(
       new THREE.CylinderGeometry(0.64, 0.56, 0.2, 18),
       new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.65 })
@@ -397,7 +398,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'orange_cat') {
-    // Lotus cushion + chubby Orange Tabby hugging a golden Mackerel!
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.62, 0.54, 0.16, 18),
       new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.6 })
@@ -432,7 +432,6 @@ export function buildKrathongMesh(
       cat.add(ear);
     });
 
-    // Golden fish hugged across belly
     const fishBody = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), goldFishMat);
     fishBody.scale.set(1.75, 0.68, 0.65);
     fishBody.position.set(0.03, 0.18, 0.24);
@@ -449,7 +448,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'bunny_mochi') {
-    // Sakura pink petal Krathong + plump snowy Mochi Bunny + mini carrot!
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.6, 0.52, 0.16, 18),
       new THREE.MeshStandardMaterial({ color: 0xfbcfe8, roughness: 0.45 })
@@ -493,7 +491,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'guard_pork') {
-    // Arena Guard Signature: Black-and-gold Guard Cap + Golden Crispy Pork Plate + Silver Fork!
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.66, 0.58, 0.18, 18),
       new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.5 })
@@ -511,7 +508,6 @@ export function buildKrathongMesh(
     const guardTop = new THREE.Group();
     guardTop.position.set(0, 0.19, -0.05);
 
-    // Guard Cap on back-left
     const capCrown = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.19, 0.14, 14),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45 })
@@ -528,7 +524,6 @@ export function buildKrathongMesh(
     );
     capBadge.position.set(-0.14, 0.18, 0.11);
 
-    // Crispy Pork Belly Plate on right
     const plate = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.16, 0.05, 14),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25 })
@@ -552,7 +547,6 @@ export function buildKrathongMesh(
       guardTop.add(cube);
     }
 
-    // Giant shiny silver fork standing upright
     const silverMat = new THREE.MeshStandardMaterial({
       color: 0xe2e8f0,
       metalness: 0.8,
@@ -573,7 +567,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'shabu_pot') {
-    // Two-flavor Yin-Yang Shabu Hotpot Krathong!
     const lotusBase = new THREE.Mesh(
       new THREE.CylinderGeometry(0.66, 0.58, 0.12, 18),
       new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.6 })
@@ -592,7 +585,6 @@ export function buildKrathongMesh(
     const potWall = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.38, 0.24, 20), potMetal);
     potWall.position.y = 0.12;
 
-    // Two soup halves: spicy mala red & golden clear broth
     const malaSoup = new THREE.Mesh(
       new THREE.CylinderGeometry(0.42, 0.42, 0.04, 16, 1, false, 0, Math.PI),
       new THREE.MeshStandardMaterial({
@@ -616,7 +608,6 @@ export function buildKrathongMesh(
     const divider = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.84), potMetal);
     divider.position.y = 0.23;
 
-    // Handles + cute meatballs & pork rolls
     [-1, 1].forEach((s) => {
       const handle = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.02, 6, 12), potMetal);
       handle.position.set(s * 0.46, 0.18, 0);
@@ -647,7 +638,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'dragon_gold') {
-    // Auspicious Golden & Crimson Dragon Boat Krathong!
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.64, 0.54, 0.18, 18),
       new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.45 })
@@ -690,7 +680,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'unicorn_pastel') {
-    // Fluffy Pastel Cloud Krathong + Rainbow Unicorn with glowing golden horn!
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.5, 0.14, 16), cloudMat);
     base.position.y = 0.08;
@@ -741,7 +730,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'banana_leaf') {
-    // Traditional Thai Folded Banana Leaf Krathong with Marigolds & Orchids
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.58, 0.52, 0.18, 20),
       new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.65 })
@@ -751,7 +739,6 @@ export function buildKrathongMesh(
     buildPetalRing(floatBody, 14, 0.54, 0.12, 0x16a34a, 0.42, 0.95);
     buildPetalRing(floatBody, 12, 0.43, 0.18, 0x4ade80, 0.28, 0.82, 0.26);
     addMarigolds(floatBody, 8, 0.31, 0.24);
-    // Purple orchid accents
     const orchidMat = new THREE.MeshStandardMaterial({ color: 0xa855f7, roughness: 0.45 });
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
@@ -764,7 +751,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else if (styleId === 'my_character') {
-    // Custom Player Mascot Krathong using their own colorHex, bandColor, and species ears!
     const bodyCol = safeColor(avatar?.colorHex, 0xf472b6);
     const bandCol = safeColor(avatar?.bandColor, 0xffe600);
     const sp = (avatar?.species || 'bunny').toLowerCase();
@@ -798,7 +784,6 @@ export function buildKrathongMesh(
     headband.rotation.x = Math.PI / 2 - 0.15;
     headband.position.set(0, 0.43, 0.05);
 
-    // Species-inspired cute ears/horns
     if (sp.includes('bunny') || sp.includes('lop') || sp.includes('kangaroo')) {
       [-1, 1].forEach((s) => {
         const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.2, 6, 8), mainMat);
@@ -827,7 +812,6 @@ export function buildKrathongMesh(
         mascot.add(ear);
       });
     } else {
-      // Cat / Fox / Corgi / Husky / Wolf pointed ears
       [-1, 1].forEach((s) => {
         const ear = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.17, 6), mainMat);
         ear.position.set(s * 0.13, 0.53, 0.05);
@@ -845,7 +829,6 @@ export function buildKrathongMesh(
     flameMesh = c.flameMesh;
     glowSprite = c.glowSprite;
   } else {
-    // 'lotus_classic' default: Lush Royal 3-Tier Blooming Pink Lotus Krathong
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.6, 0.52, 0.16, 20),
       new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.58 })
@@ -883,7 +866,6 @@ export function animateKrathongParts(
   parts.floatBody.rotation.z = Math.sin(wavePhase * 0.85) * 0.055;
   parts.floatBody.rotation.x = Math.cos(wavePhase * 0.72) * 0.045;
 
-  // Candle flicker
   const flicker =
     1 + Math.sin(elapsed * 15.7 + seed * 31) * 0.13 + Math.cos(elapsed * 23.3 + seed * 11) * 0.08;
   parts.flameMesh.scale.set(1 + (flicker - 1) * 0.5, flicker, 1 + (flicker - 1) * 0.5);
@@ -894,7 +876,6 @@ export function animateKrathongParts(
   const gMat = parts.glowSprite.material as THREE.SpriteMaterial;
   gMat.opacity = Math.min(1, 0.78 + highlightBoost * 0.2 + (flicker - 1) * 0.15);
 
-  // Expanding water shimmer ring
   const ripCycle = (elapsed * 0.65 + seed * 3.7) % 1;
   const ripScale = 0.92 + ripCycle * 0.42;
   parts.rippleRing.scale.set(ripScale, ripScale, 1);
@@ -923,10 +904,11 @@ export function sampleIslandKrathongOrbit(
   islandW: number,
   islandD: number
 ): OrbitSample {
-  const t = ((progress01 % 1) + 1) % 1;
+  const safeProg = Number.isFinite(progress01) ? progress01 : 0;
+  const t = ((safeProg % 1) + 1) % 1;
   const hx = islandW / 2 + 1.4;
   const hz = islandD / 2 + 1.4;
-  const r = Math.max(3.2, laneOffset);
+  const r = Math.max(3.2, Number.isFinite(laneOffset) ? laneOffset : 5.2);
 
   const topLen = hx * 2;
   const sideLen = hz * 2;
@@ -1040,4 +1022,34 @@ export function computeOrbitSeedFromPoint(
     }
   }
   return Number(bestT.toFixed(4));
+}
+
+/**
+ * Computes a Krathong's live world position at `nowWallMs`, smoothly gliding out from
+ * shoreline `(startX, startZ)` into its steady island orbit during the first 5 seconds.
+ */
+export function sampleKrathongWorldPosition(
+  item: Pick<KrathongItem, 'orbitSeed' | 'laneOffset' | 'startX' | 'startZ' | 'createdAt'>,
+  nowWallMs: number,
+  islandCenterX: number,
+  islandW: number,
+  islandD: number
+): OrbitSample {
+  const ageSec = Math.max(0, (nowWallMs - item.createdAt) / 1000);
+  const orbitPt = sampleIslandKrathongOrbit(
+    item.orbitSeed + ageSec * LOY_KRATHONG_ORBIT_SPEED,
+    item.laneOffset,
+    islandCenterX,
+    islandW,
+    islandD
+  );
+  let x = orbitPt.x;
+  let z = orbitPt.z;
+  if (item.startX != null && item.startZ != null && ageSec < LOY_KRATHONG_GLIDE_DURATION_SEC) {
+    const u = Math.min(1, ageSec / LOY_KRATHONG_GLIDE_DURATION_SEC);
+    const smooth = u * u * (3 - 2 * u);
+    x = item.startX + (orbitPt.x - item.startX) * smooth;
+    z = item.startZ + (orbitPt.z - item.startZ) * smooth;
+  }
+  return { x, z, rotY: orbitPt.rotY };
 }

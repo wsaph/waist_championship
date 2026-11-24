@@ -3,35 +3,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { disposeObject3D } from '@/lib/device_perf';
+import type { FestivalModalProps } from '../types';
 import {
   KRATHONG_PRESET_WISHES,
   KRATHONG_STYLES,
   getKrathongStyleMeta,
+  type KrathongLaunchInput,
   type KrathongStyleId,
-} from '@/lib/krathong_catalog';
+} from './catalog';
 import {
   animateKrathongParts,
   buildKrathongMesh,
   type KrathongMeshParts,
-} from '@/lib/krathong_3d';
-import { disposeObject3D } from '@/lib/device_perf';
+} from './krathong3d';
 
-export interface LoyKrathongModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  player: {
-    id: number | null;
-    name: string;
-    emoji: string;
-    colorHex: string;
-    bandColor: string;
-    species: string;
-  };
-  submitting?: boolean;
-  isMusicOn?: boolean;
-  onToggleMusic?: () => void;
-  onLaunch: (styleId: KrathongStyleId, caption: string) => Promise<void> | void;
-}
+export type LoyKrathongModalProps = FestivalModalProps<KrathongLaunchInput>;
 
 export function LoyKrathongModal({
   isOpen,
@@ -44,6 +31,7 @@ export function LoyKrathongModal({
 }: LoyKrathongModalProps) {
   const [selectedStyle, setSelectedStyle] = useState<KrathongStyleId>('my_character');
   const [caption, setCaption] = useState<string>(KRATHONG_PRESET_WISHES[0]);
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
 
   const previewRef = useRef<HTMLDivElement | null>(null);
   const krathongHolderRef = useRef<THREE.Group | null>(null);
@@ -63,7 +51,14 @@ export function LoyKrathongModal({
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 40);
     camera.position.set(0, 1.45, 2.55);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      setWebglUnavailable(false);
+    } catch {
+      setWebglUnavailable(true);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     container.appendChild(renderer.domElement);
@@ -179,7 +174,10 @@ export function LoyKrathongModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
-    void onLaunch(selectedStyle, caption.trim() || 'ขอให้มีความสุข สมหวังทุกประการ 🪷');
+    void onLaunch({
+      styleId: selectedStyle,
+      caption: caption.trim() || 'ขอให้มีความสุข สมหวังทุกประการ 🪷',
+    });
   };
 
   return (
@@ -237,7 +235,6 @@ export function LoyKrathongModal({
         <div className="p-3.5 sm:p-4 space-y-3.5 overflow-y-auto">
           {/* 3D Preview Stage */}
           <div className="relative rounded-2xl border-2 border-cyan-400/40 bg-[radial-gradient(circle_at_50%_20%,#312e81_0%,#0c4a6e_58%,#020617_100%)] h-44 sm:h-48 overflow-hidden shadow-inner">
-            {/* Twinkling stars */}
             <div className="pointer-events-none absolute inset-0 opacity-75 text-[10px] select-none">
               <span className="absolute top-2.5 left-4 animate-pulse">✨</span>
               <span className="absolute top-5 right-6">🌕</span>
@@ -258,6 +255,15 @@ export function LoyKrathongModal({
             </div>
 
             <div ref={previewRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+            {webglUnavailable && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center pt-6">
+                <span className="text-6xl drop-shadow-[0_0_16px_rgba(251,191,36,0.75)]">
+                  {selectedStyle === 'my_character'
+                    ? player.emoji || activeMeta.emoji
+                    : activeMeta.emoji}
+                </span>
+              </div>
+            )}
 
             <div className="pointer-events-none absolute bottom-2 inset-x-3 flex items-center justify-between text-[10px] font-bold text-cyan-100/90">
               <span className="bg-black/55 px-2.5 py-0.5 rounded-full border border-white/15 truncate max-w-[70%]">
@@ -279,7 +285,9 @@ export function LoyKrathongModal({
               <label className="text-xs font-extrabold text-amber-200">
                 🎨 เลือกรูปแบบกระทง (12 ธีมฟรี!)
               </label>
-              <span className="text-[10.5px] text-cyan-300 font-semibold">ลอยซ้ำเปลี่ยนลายได้ไม่อั้น</span>
+              <span className="text-[10.5px] text-cyan-300 font-semibold">
+                ลอยซ้ำเปลี่ยนลายได้ไม่อั้น
+              </span>
             </div>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
               {KRATHONG_STYLES.map((st) => {

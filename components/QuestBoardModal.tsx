@@ -16,6 +16,7 @@ import {
   type QuestBoardItem,
   type QuestUserBrief,
 } from '@/lib/quest_board';
+import { sessionFetch } from '@/lib/client_session';
 
 interface QuestBoardModalProps {
   isOpen: boolean;
@@ -144,7 +145,7 @@ export function QuestBoardModal({
     setBusy(true);
     setErrorMsg('');
     try {
-      const res = await fetch('/api/quests', {
+      const res = await sessionFetch('/api/quests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -190,7 +191,7 @@ export function QuestBoardModal({
     setBusy(true);
     setErrorMsg('');
     try {
-      const res = await fetch(`/api/quests/${questId}/action`, {
+      const res = await sessionFetch(`/api/quests/${questId}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUser.id, ...payload }),

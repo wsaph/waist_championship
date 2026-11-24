@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { SHOP_ITEMS, FREE_DEFAULT_ITEMS } from '@/lib/rpg_catalog';
+import { assertActiveUserSession } from '@/lib/session_guard';
 
 export async function POST(req: Request) {
   try {
@@ -8,6 +9,9 @@ export async function POST(req: Request) {
     if (!userId || !itemId) {
       return NextResponse.json({ error: 'ข้อมูลไม่ครบถ้วน' }, { status: 400 });
     }
+
+    const kickResp = await assertActiveUserSession(req, Number(userId));
+    if (kickResp) return kickResp;
 
     const item = SHOP_ITEMS.find((it) => it.id === itemId);
     if (!item) {

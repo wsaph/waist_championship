@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
+import { issueUserSessionToken } from '@/lib/session_guard';
 
 export async function POST(req: Request) {
   try {
@@ -20,10 +21,14 @@ export async function POST(req: Request) {
     }
 
     const u = res.rows[0];
+    const uid = Number(u.id);
+    const sessionToken = await issueUserSessionToken(uid);
+
     return NextResponse.json({
       exists: true,
+      sessionToken,
       user: {
-        id: Number(u.id),
+        id: uid,
         name: String(u.name),
         emoji: String(u.avatar_emoji),
         colorHex: String(u.color_hex),

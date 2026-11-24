@@ -16,6 +16,7 @@ import {
 } from '@/lib/taekwondo_catalog';
 import { TaekwondoPvpArena, type TkdCharacterAppearance } from '@/components/TaekwondoPvpArena';
 import type { QualityMode } from '@/lib/device_perf';
+import { sessionFetch } from '@/lib/client_session';
 
 interface TaekwondoModalProps {
   isOpen: boolean;
@@ -666,7 +667,7 @@ export function TaekwondoModal({
       setSavingBeltTier(tier ?? belt.tier);
       setEquippedBeltTier(targetTier);
       try {
-        await fetch('/api/taekwondo', {
+        await sessionFetch('/api/taekwondo', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -720,7 +721,7 @@ export function TaekwondoModal({
       }, 620);
 
       try {
-        const res = await fetch('/api/taekwondo', {
+        const res = await sessionFetch('/api/taekwondo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1378,7 +1379,7 @@ export function TaekwondoModal({
               onMatchXpEarned={(xpScore) => {
                 void (async () => {
                   try {
-                    const res = await fetch('/api/taekwondo', {
+                    const res = await sessionFetch('/api/taekwondo', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ userId: currentUserId, score: xpScore, maxCombo: 1 }),

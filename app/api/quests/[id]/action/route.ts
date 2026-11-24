@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { fetchAllQuests } from '@/lib/quest_board_db';
+import { assertActiveUserSession } from '@/lib/session_guard';
 import {
   QUEST_MIN_DURATION_DAYS,
   computeBetPayouts,
@@ -35,6 +36,9 @@ export async function POST(
     if (!Number.isFinite(userId) || userId <= 0) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนทำรายการ' }, { status: 400 });
     }
+
+    const kickResp = await assertActiveUserSession(req, userId);
+    if (kickResp) return kickResp;
 
     const [questRes, userRes] = await Promise.all([
       turso.execute({ sql: `SELECT * FROM quests WHERE id = ?`, args: [questId] }),

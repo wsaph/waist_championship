@@ -41,7 +41,7 @@ import {
   type GuardPrank,
 } from '@/lib/guard_pranks';
 import { createGuardPrankFxRig } from '@/lib/guard_prank_fx';
-import { preloadBgm, startBgm, stopBgm } from '@/lib/bgm';
+import { startBgm, stopBgm } from '@/lib/bgm';
 import {
   SHOP_ITEMS,
   FREE_DEFAULT_ITEMS,
@@ -69,6 +69,18 @@ import {
   type FishingRarity,
 } from '@/lib/fishing_catalog';
 import { GuardDanceLoader } from '@/components/GuardDanceLoader';
+import {
+  STORAGE_ACTIVE_INSTANCE_KEY,
+  STORAGE_SESSION_TOKEN_KEY,
+  claimBrowserSession,
+  clearTabSession,
+  getActiveTabSessionToken,
+  getTabInstanceId,
+  restoreTabSessionFromStorage,
+  sessionFetch,
+  setSessionKickListener,
+  updateTabSessionToken,
+} from '@/lib/client_session';
 
 const WardrobeShopModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.WardrobeShopModal),
@@ -78,6 +90,7 @@ const LoginGateModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.LoginGateModal),
   { ssr: false }
 );
+import type { VbCourtRosterSlot } from '@/components/BeachVolleyballModal';
 const BeachVolleyballModal = dynamic(
   () => import('@/components/BeachVolleyballModal').then((m) => m.BeachVolleyballModal),
   { ssr: false }
@@ -102,24 +115,31 @@ const TaekwondoModal = dynamic(
   () => import('@/components/TaekwondoModal').then((m) => m.TaekwondoModal),
   { ssr: false }
 );
-const LoyKrathongModal = dynamic(
-  () => import('@/components/LoyKrathongModal').then((m) => m.LoyKrathongModal),
+const SumoArenaModal = dynamic(
+  () => import('@/components/SumoArenaModal').then((m) => m.SumoArenaModal),
+  { ssr: false }
+);
+const PenaltyShootoutModal = dynamic(
+  () => import('@/components/PenaltyShootoutGame').then((m) => m.PenaltyShootoutModal),
   { ssr: false }
 );
 import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
 import {
-  AMBIENT_NPC_KRATHONGS,
-  getKrathongStyleMeta,
-  type KrathongItem,
-  type KrathongStyleId,
-} from '@/lib/krathong_catalog';
+  fetchHokkaidoHybridWeather,
+  getBangkokDayPhase,
+  type HokkaidoWeatherSnapshot,
+} from '@/lib/hokkaido_weather';
 import {
-  buildKrathongMesh,
-  animateKrathongParts,
-  sampleIslandKrathongOrbit,
-  computeOrbitSeedFromPoint,
-  type KrathongMeshParts,
-} from '@/lib/krathong_3d';
+  ALL_FESTIVAL_REALTIME_EVENTS,
+  FestivalHeaderBadge,
+  FestivalMobileMenuItem,
+  FestivalModalHost,
+  FestivalShoreActions,
+  createIslandNightSkyController,
+  resolveIslandWeatherTargets,
+  useActiveFestival,
+  type FestivalSceneController,
+} from '@/festivals';
 
 interface Player {
   id: number;
@@ -367,9 +387,14 @@ export default function Arena3DPage() {
   const [isNearGuard, setIsNearGuard] = useState(false);
   const [isNearCafe, setIsNearCafe] = useState(false);
   const [isNearDojang, setIsNearDojang] = useState(false);
+  const [isNearSumo, setIsNearSumo] = useState(false);
+  const [isNearVbCourt, setIsNearVbCourt] = useState(false);
+  const [isNearPenaltyPitch, setIsNearPenaltyPitch] = useState(false);
+  const [isNearFoodStall, setIsNearFoodStall] = useState(false);
   const [isNearQuestBoard, setIsNearQuestBoard] = useState(false);
   const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
   const [isTaekwondoOpen, setIsTaekwondoOpen] = useState(false);
+  const [isSumoOpen, setIsSumoOpen] = useState(false);
   const [isQuestBoardOpen, setIsQuestBoardOpen] = useState(false);
   const [questBoardFocusId, setQuestBoardFocusId] = useState<number | null>(null);
   const [quests, setQuests] = useState<QuestBoardItem[]>([]);
@@ -399,17 +424,10 @@ export default function Arena3DPage() {
   activeQuestTagByUserIdRef.current = activeQuestTagByUserId;
   const [betBannerDismissed, setBetBannerDismissed] = useState(false);
   const [isNearOcean, setIsNearOcean] = useState(false);
-  const [isKrathongModalOpen, setIsKrathongModalOpen] = useState(false);
-  const [launchingKrathong, setLaunchingKrathong] = useState(false);
-  const [krathongs, setKrathongs] = useState<KrathongItem[]>(AMBIENT_NPC_KRATHONGS);
-  const krathongsRef = useRef<KrathongItem[]>(AMBIENT_NPC_KRATHONGS);
-  const krathongFocusIdxRef = useRef<number>(0);
-  const focusedKrathongIdRef = useRef<string | number | null>(null);
-  const focusedKrathongUntilRef = useRef<number>(0);
   const islandBoundsRef = useRef<{ centerX: number; w: number; d: number }>({
-    centerX: -2.5,
-    w: 68,
-    d: 38,
+    centerX: 5.5,
+    w: 84,
+    d: 44,
   });
   const [fishingPhase, setFishingPhase] = useState<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
   const [fishingResult, setFishingResult] = useState<{
@@ -438,6 +456,10 @@ export default function Arena3DPage() {
   const isNearGuardRef = useRef<boolean>(false);
   const isNearCafeRef = useRef<boolean>(false);
   const isNearDojangRef = useRef<boolean>(false);
+  const isNearSumoRef = useRef<boolean>(false);
+  const isNearVbCourtRef = useRef<boolean>(false);
+  const isNearPenaltyPitchRef = useRef<boolean>(false);
+  const isNearFoodStallRef = useRef<boolean>(false);
   const isNearQuestBoardRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
   const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
@@ -477,27 +499,8 @@ export default function Arena3DPage() {
     addedToPile?: boolean;
   } | null>(null);
 
-  const [bkkWeather, setBkkWeather] = useState<{
-    temp: number;
-    isDay: boolean;
-    dayPhase: 'dawn' | 'day' | 'dusk' | 'night';
-    condition: 'clear' | 'cloudy' | 'rain' | 'storm';
-    label: string;
-    emoji: string;
-  } | null>(null);
-  const [isFullMoonSky, setIsFullMoonSky] = useState<boolean>(true);
-  const isFullMoonSkyRef = useRef<boolean>(true);
-  useEffect(() => {
-    isFullMoonSkyRef.current = isFullMoonSky;
-  }, [isFullMoonSky]);
-  const bkkWeatherRef = useRef<{
-    temp: number;
-    isDay: boolean;
-    dayPhase: 'dawn' | 'day' | 'dusk' | 'night';
-    condition: 'clear' | 'cloudy' | 'rain' | 'storm';
-    label: string;
-    emoji: string;
-  } | null>(null);
+  const [bkkWeather, setBkkWeather] = useState<HokkaidoWeatherSnapshot | null>(null);
+  const bkkWeatherRef = useRef<HokkaidoWeatherSnapshot | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; emoji: string; title: string; text: string }>({
     show: false,
@@ -526,9 +529,12 @@ export default function Arena3DPage() {
     async () => { }
   );
   const lastDataSignatureRef = useRef<string>('');
-  const clientInstanceIdRef = useRef<string>(
-    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  );
+  const clientInstanceIdRef = useRef<string>(getTabInstanceId());
+  const lastSessionKickAtRef = useRef<number>(0);
+  const pendingSessionKickRef = useRef<{ userId: number; sessionToken: string } | null>(null);
+  const handleForceSessionKickRef = useRef<
+    (reason: string, opts?: { preserveLocalStorage?: boolean }) => void
+  >(() => {});
   const remoteSpectatorStateRef = useRef<
     Record<number, { x: number; y: number; z: number; rotY: number; isWalking: boolean; updatedAt: number }>
   >({});
@@ -566,9 +572,43 @@ export default function Arena3DPage() {
     targetName?: string;
     count: number;
     max: number;
+    status: 'waiting' | 'started';
+    scoreLeft?: number;
+    scoreRight?: number;
+    roster?: VbCourtRosterSlot[];
     updatedAt: number;
   } | null>(null);
+  const liveVbLobbyRef = useRef(liveVbLobby);
+  liveVbLobbyRef.current = liveVbLobby;
   const isVolleyballOpen = Boolean(vbSession);
+
+  // Auto-expire stale volleyball lobby/match state if host tab closed abruptly (>15s without 4.5s/5s heartbeat)
+  useEffect(() => {
+    if (!liveVbLobby) return;
+    const iv = setInterval(() => {
+      setLiveVbLobby((prev) => {
+        if (!prev) return null;
+        return Date.now() - prev.updatedAt > 15000 ? null : prev;
+      });
+    }, 3500);
+    return () => clearInterval(iv);
+  }, [liveVbLobby]);
+  const [penaltySession, setPenaltySession] = useState<{
+    roomCode: string;
+    isHost: boolean;
+    targetName?: string;
+  } | null>(null);
+  const [livePenaltyLobby, setLivePenaltyLobby] = useState<{
+    roomCode: string;
+    hostUserId: number;
+    hostName: string;
+    hostEmoji: string;
+    targetName?: string;
+    count: number;
+    max: number;
+    updatedAt: number;
+  } | null>(null);
+  const isPenaltyOpen = Boolean(penaltySession);
   const [shabuSession, setShabuSession] = useState<{
     roomCode: string;
     isHost: boolean;
@@ -664,57 +704,6 @@ export default function Arena3DPage() {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
 
-  useEffect(() => {
-    pauseArenaRenderRef.current = Boolean(
-      isJoinOpen ||
-      isVolleyballOpen ||
-      isShabuOpen ||
-      isCardOpen ||
-      isQuestBoardOpen ||
-      isKrathongModalOpen ||
-      (authChecked && currentUserId === null)
-    );
-  }, [isJoinOpen, isVolleyballOpen, isShabuOpen, isCardOpen, isQuestBoardOpen, isKrathongModalOpen, authChecked, currentUserId]);
-
-  const mergeWithAmbientKrathongs = useCallback((serverItems: KrathongItem[]): KrathongItem[] => {
-    const seen = new Set<string>();
-    const merged: KrathongItem[] = [];
-    for (const item of serverItems) {
-      const k = String(item.id);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      merged.push(item);
-    }
-    for (const npc of AMBIENT_NPC_KRATHONGS) {
-      const k = String(npc.id);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      merged.push(npc);
-    }
-    return merged;
-  }, []);
-
-  const fetchKrathongs = useCallback(async () => {
-    try {
-      const res = await fetch('/api/krathong', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.krathongs)) {
-        const nextList = mergeWithAmbientKrathongs(data.krathongs);
-        krathongsRef.current = nextList;
-        setKrathongs(nextList);
-      }
-    } catch {
-      // ignore transient network errors
-    }
-  }, [mergeWithAmbientKrathongs]);
-
-  useEffect(() => {
-    void fetchKrathongs();
-    const iv = setInterval(fetchKrathongs, 35_000);
-    return () => clearInterval(iv);
-  }, [fetchKrathongs]);
-
   const fetchQuests = useCallback(async () => {
     try {
       const res = await fetch('/api/quests', { cache: 'no-store' });
@@ -774,13 +763,23 @@ export default function Arena3DPage() {
         const activeViewerId =
           opts?.viewerId !== undefined
             ? Number(opts.viewerId || 0)
-            : Number(localStorage.getItem('waist_user_id') || 0);
+            : Number(currentUserIdRef.current || 0);
         const query = activeViewerId > 0 ? `?viewerId=${activeViewerId}` : '';
-        const res = await fetch(`/api/weights${query}`, { cache: 'no-store' });
+        const res = await sessionFetch(`/api/weights${query}`, { cache: 'no-store' });
         const text = await res.text();
         const data = text ? JSON.parse(text) : {};
         if (!res.ok) {
           console.error('Failed to fetch /api/weights:', data?.error || res.statusText);
+          return;
+        }
+
+        if (typeof data.migratedSessionToken === 'string' && data.migratedSessionToken) {
+          updateTabSessionToken(data.migratedSessionToken);
+        }
+        if (activeViewerId > 0 && data.viewerSessionValid === false) {
+          handleForceSessionKickRef.current(
+            'มีการเข้าสู่ระบบตัวละครนี้จากเครื่องหรือแท็บอื่น เครื่องเดิมจึงถูกออกจากระบบอัตโนมัติ'
+          );
           return;
         }
 
@@ -888,12 +887,13 @@ export default function Arena3DPage() {
 
           setPlayers(nextParticipants);
 
-          const savedId = localStorage.getItem('waist_user_id');
-          if (savedId) {
-            const me = nextParticipants.find((p) => p.id === Number(savedId));
+          const myActiveUid = currentUserIdRef.current;
+          if (myActiveUid && myActiveUid > 0) {
+            const me = nextParticipants.find((p) => p.id === myActiveUid);
             const shouldWalk = Boolean(me && (me.isRoaming || me.role === 'spectator'));
             if (!me) {
-              localStorage.removeItem('waist_user_id');
+              clearTabSession();
+              currentUserIdRef.current = null;
               setCurrentUserId(null);
               setWalkingSpectatorId(null);
             } else if (shouldWalk && walkingSpectatorIdRef.current === null) {
@@ -955,6 +955,94 @@ export default function Arena3DPage() {
     }
   }, []);
 
+  const festival = useActiveFestival({
+    currentUserId,
+    walkingSpectatorId,
+    isMusicOn,
+    setIsMusicOn,
+    getPlayerIdentity: () => {
+      const activeId = walkingSpectatorIdRef.current ?? currentUserId;
+      const me = playersRef.current.find((pl) => pl.id === activeId);
+      return {
+        id: me?.id ?? currentUserId,
+        name: me?.name || 'นักเดินทางริมหาด',
+        emoji: me?.emoji || '🪷',
+        colorHex: me?.colorHex || '#F472B6',
+        bandColor: me?.bandColor || '#FFE600',
+        species: me?.species || 'bunny',
+      };
+    },
+    prepareShoreLaunchOrigin: () => {
+      const activeId = walkingSpectatorIdRef.current ?? currentUserId;
+      const walkerMesh =
+        activeId !== null ? charMeshesRef.current.find((m) => m.id === activeId) : null;
+      const od = oceanDirRef.current;
+      const ib = islandBoundsRef.current;
+      let startX: number | null = null;
+      let startZ: number | null = null;
+      if (walkerMesh) {
+        walkerMesh.rootGroup.rotation.y = Math.atan2(-od.dz, od.dx);
+        startX = Number((walkerMesh.rootGroup.position.x + od.dx * 2.85).toFixed(2));
+        startZ = Number((walkerMesh.rootGroup.position.z + od.dz * 2.85).toFixed(2));
+      }
+      return {
+        startX,
+        startZ,
+        islandCenterX: ib.centerX,
+        islandW: ib.w,
+        islandD: ib.d,
+      };
+    },
+    focusWorldCamera: ({ lookAtX, lookAtY, lookAtZ, posX, posY, posZ }) => {
+      cameraLookAtRef.current.set(lookAtX, lookAtY, lookAtZ);
+      cameraTargetPosRef.current = new THREE.Vector3(posX, posY, posZ);
+    },
+    showToast,
+    broadcastRealtimeEvent,
+  });
+
+  const handleFestivalRealtimeRef = useRef(festival.handleRealtimeEvent);
+  handleFestivalRealtimeRef.current = festival.handleRealtimeEvent;
+
+  useEffect(() => {
+    const shouldPause = Boolean(
+      isJoinOpen ||
+      isVolleyballOpen ||
+      isPenaltyOpen ||
+      isShabuOpen ||
+      isCardOpen ||
+      isPetCafeOpen ||
+      isTaekwondoOpen ||
+      isSumoOpen ||
+      isQuestBoardOpen ||
+      festival.isModalOpen ||
+      (authChecked && currentUserId === null)
+    );
+    const wasPaused = pauseArenaRenderRef.current;
+    pauseArenaRenderRef.current = shouldPause;
+    // ล้างปุ่มเดินค้างทันทีเมื่อเปิด/ปิดมินิเกม เพื่อไม่ให้ตัวละครบนเกาะเดินไหลเองตอนกดกลับห้อง!
+    keysPressedRef.current = {};
+    walkTargetRef.current = null;
+    if (wasPaused && !shouldPause && typeof window !== 'undefined') {
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+    }
+  }, [
+    isJoinOpen,
+    isVolleyballOpen,
+    isPenaltyOpen,
+    isShabuOpen,
+    isCardOpen,
+    isPetCafeOpen,
+    isTaekwondoOpen,
+    isSumoOpen,
+    isQuestBoardOpen,
+    festival.isModalOpen,
+    authChecked,
+    currentUserId,
+  ]);
+
   // ซิงก์สถานะว่าผู้เล่นกำลังทำกิจกรรมหน้าต่างไหนอยู่ ให้เพื่อนเห็นป้ายบนหัวแบบเรียลไทม์!
   useEffect(() => {
     const label = isCardOpen
@@ -963,17 +1051,21 @@ export default function Arena3DPage() {
         ? '🍲 กำลังต้มชาบู...'
         : isVolleyballOpen
           ? '🏐 กำลังตีวอลเลย์บอล...'
-          : isPetCafeOpen
-            ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
-            : isTaekwondoOpen
-              ? '🥋 กำลังฝึกเตะเทควันโด...'
-              : isQuestBoardOpen
-                ? '📋 กำลังดูกระดานภารกิจ...'
-                : isKrathongModalOpen
-                  ? '🪷 กำลังอธิษฐานลอยกระทง...'
-                  : isJoinOpen
-                    ? '👗 กำลังแต่งตัว...'
-                    : '';
+          : isPenaltyOpen
+            ? '⚽ กำลังดวลจุดโทษ 3D...'
+            : isPetCafeOpen
+              ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
+              : isTaekwondoOpen
+                ? '🥋 กำลังฝึกเตะเทควันโด...'
+                : isSumoOpen
+                  ? '🏯 กำลังชนพุงในสังเวียนซูโม่...'
+                : isQuestBoardOpen
+                  ? '📋 กำลังดูกระดานภารกิจ...'
+                  : festival.busyModalLabel
+                    ? festival.busyModalLabel
+                    : isJoinOpen
+                      ? '👗 กำลังแต่งตัว...'
+                      : '';
     myBusyLabelRef.current = label;
     if (currentUserId && currentUserId > 0) {
       broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
@@ -982,10 +1074,12 @@ export default function Arena3DPage() {
     isCardOpen,
     isShabuOpen,
     isVolleyballOpen,
+    isPenaltyOpen,
     isPetCafeOpen,
     isTaekwondoOpen,
+    isSumoOpen,
     isQuestBoardOpen,
-    isKrathongModalOpen,
+    festival.busyModalLabel,
     isJoinOpen,
     currentUserId,
     broadcastRealtimeEvent,
@@ -993,7 +1087,14 @@ export default function Arena3DPage() {
 
   const broadcastArenaSync = useCallback(
     (
-      reason: 'user_created' | 'user_updated' | 'weight_logged' | 'shop_updated' | 'roam_toggled' | 'gift_sent',
+      reason:
+        | 'user_created'
+        | 'user_updated'
+        | 'weight_logged'
+        | 'shop_updated'
+        | 'roam_toggled'
+        | 'gift_sent'
+        | 'champion_checkin',
       meta?: {
         actorId?: number | null;
         actorName?: string;
@@ -1031,14 +1132,14 @@ export default function Arena3DPage() {
     } catch {
       // ignore invalid storage
     }
-    const savedId = localStorage.getItem('waist_user_id');
-    if (savedId && !Number.isNaN(Number(savedId))) {
-      const uid = Number(savedId);
-      setCurrentUserId(uid);
-      setBoardSenderId(String(uid));
+    const restored = restoreTabSessionFromStorage();
+    if (restored.userId && restored.userId > 0) {
+      currentUserIdRef.current = restored.userId;
+      setCurrentUserId(restored.userId);
+      setBoardSenderId(String(restored.userId));
     }
     setAuthChecked(true);
-    fetchArenaData({ force: true });
+    fetchArenaData({ force: true, viewerId: restored.userId ?? 0 });
   }, [fetchArenaData]);
 
   const playFishingSfx = useCallback((kind: 'cast' | 'nibble' | 'bite' | 'miss' | 'catch') => {
@@ -1112,6 +1213,74 @@ export default function Arena3DPage() {
       });
     }
   }, [broadcastRealtimeEvent]);
+
+  const handleForceSessionKick = useCallback(
+    (reason: string, opts?: { preserveLocalStorage?: boolean }) => {
+      const prevUid = currentUserIdRef.current;
+      if (prevUid === null || prevUid <= 0) return;
+      const nowMs = Date.now();
+      if (nowMs - lastSessionKickAtRef.current < 400) return;
+      lastSessionKickAtRef.current = nowMs;
+
+      myBusyLabelRef.current = '';
+      broadcastRealtimeEvent('busy_status', { userId: prevUid, label: '' });
+
+      cancelFishing();
+      setVbSession(null);
+      setShabuSession(null);
+      setCardSession(null);
+      setIsTaekwondoOpen(false);
+      setIsSumoOpen(false);
+      setIsPetCafeOpen(false);
+      setIsQuestBoardOpen(false);
+      festival.closeModal();
+      setIsJoinOpen(false);
+      setIsLogOpen(false);
+      setIsFeedbackOpen(false);
+      setActionTargetPlayer(null);
+      setGiftTargetPlayer(null);
+      setRadialMenu(null);
+      setGuardPrankMenu(null);
+
+      clearTabSession({ preserveLocalStorage: opts?.preserveLocalStorage });
+      currentUserIdRef.current = null;
+      walkingSpectatorIdRef.current = null;
+      setCurrentUserId(null);
+      setWalkingSpectatorId(null);
+      setBoardSenderId('');
+      setSignInUsername('');
+      setSignInError(reason);
+
+      setPlayers((prev) =>
+        prev.map((pl) => ({
+          ...pl,
+          startWeight: undefined,
+          currentWeight: undefined,
+          goalWeight: undefined,
+          bodyWeight: undefined,
+          heightCm: undefined,
+          gender: undefined,
+          startVal: undefined,
+          currentVal: undefined,
+          targetVal: undefined,
+          diffLabel: undefined,
+        }))
+      );
+
+      showToast('🚪', 'ออกจากระบบอัตโนมัติ', reason);
+    },
+    [broadcastRealtimeEvent, cancelFishing, festival.closeModal, showToast]
+  );
+
+  useEffect(() => {
+    handleForceSessionKickRef.current = handleForceSessionKick;
+    setSessionKickListener((reason) => {
+      handleForceSessionKick(reason);
+    });
+    return () => {
+      setSessionKickListener(null);
+    };
+  }, [handleForceSessionKick]);
 
   const startFishing = useCallback(() => {
     cancelFishing();
@@ -1227,7 +1396,7 @@ export default function Arena3DPage() {
     }
 
     try {
-      const res = await fetch('/api/fishing', {
+      const res = await sessionFetch('/api/fishing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUserId }),
@@ -1381,183 +1550,61 @@ export default function Arena3DPage() {
       walkTargetRef.current = null;
       isNearOceanRef.current = false;
       setIsNearOcean(false);
+      isNearFoodStallRef.current = false;
+      setIsNearFoodStall(false);
       isNearCafeRef.current = false;
       setIsNearCafe(false);
       isNearDojangRef.current = false;
       setIsNearDojang(false);
+      isNearSumoRef.current = false;
+      setIsNearSumo(false);
+      isNearVbCourtRef.current = false;
+      setIsNearVbCourt(false);
+      isNearPenaltyPitchRef.current = false;
+      setIsNearPenaltyPitch(false);
       isNearQuestBoardRef.current = false;
       setIsNearQuestBoard(false);
-      setIsKrathongModalOpen(false);
       setFishingResult(null);
       cancelFishing();
     }
   }, [walkingSpectatorId, cancelFishing]);
 
-  const playKrathongSfx = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const now = ctx.currentTime;
-      [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.09);
-        gain.gain.setValueAtTime(0.001, now + idx * 0.09);
-        gain.gain.exponentialRampToValueAtTime(0.11, now + idx * 0.09 + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.09 + 0.55);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + idx * 0.09);
-        osc.stop(now + idx * 0.09 + 0.6);
-      });
-      setTimeout(() => {
-        void ctx.close().catch(() => { });
-      }, 1200);
-    } catch {
-      // ignore audio context restriction
-    }
-  }, []);
-
-  const focusKrathongItem = useCallback((item: KrathongItem) => {
-    const ib = islandBoundsRef.current;
-    const ORBIT_SPEED = 0.0082;
-    const ageSec = Math.max(0, (Date.now() - item.createdAt) / 1000);
-    const orbitPt = sampleIslandKrathongOrbit(
-      item.orbitSeed + ageSec * ORBIT_SPEED,
-      item.laneOffset,
-      ib.centerX,
-      ib.w,
-      ib.d
-    );
-    let kx = orbitPt.x;
-    let kz = orbitPt.z;
-    if (item.startX != null && item.startZ != null && ageSec < 5.0) {
-      const u = Math.min(1, ageSec / 5.0);
-      const smooth = u * u * (3 - 2 * u);
-      kx = item.startX + (orbitPt.x - item.startX) * smooth;
-      kz = item.startZ + (orbitPt.z - item.startZ) * smooth;
-    }
-    focusedKrathongIdRef.current = item.id;
-    focusedKrathongUntilRef.current = performance.now() + 8500;
-    cameraLookAtRef.current.set(kx, 0.2, kz);
-    const dirX = kx - ib.centerX;
-    const dirZ = kz;
-    const len = Math.hypot(dirX, dirZ) || 1;
-    cameraTargetPosRef.current = new THREE.Vector3(
-      kx + (dirX / len) * 11.5,
-      8.5,
-      kz + (dirZ / len) * 11.5 + 4.5
-    );
-  }, []);
-
-  const handleCycleMyKrathongs = useCallback(() => {
-    const myList = krathongsRef.current.filter(
-      (k) => currentUserId !== null && k.userId === currentUserId
-    );
-    if (myList.length === 0) return;
-    const idx = krathongFocusIdxRef.current % myList.length;
-    krathongFocusIdxRef.current = idx + 1;
-    const target = myList[idx];
-    focusKrathongItem(target);
-    const stMeta = getKrathongStyleMeta(target.styleId);
-    showToast(
-      stMeta.emoji,
-      `กระทงใบที่ ${idx + 1}/${myList.length} ของคุณ`,
-      target.caption ? `“${target.caption}”` : stMeta.name
-    );
-  }, [currentUserId, focusKrathongItem, showToast]);
-
-  const handleLaunchKrathong = useCallback(
-    async (styleId: KrathongStyleId, caption: string) => {
-      if (launchingKrathong) return;
-      setLaunchingKrathong(true);
-      try {
-        const activeId = walkingSpectatorIdRef.current ?? currentUserId;
-        const me = playersRef.current.find((pl) => pl.id === activeId);
-        const walkerMesh =
-          activeId !== null ? charMeshesRef.current.find((m) => m.id === activeId) : null;
-        const od = oceanDirRef.current;
-        const ib = islandBoundsRef.current;
-
-        let startX: number | null = null;
-        let startZ: number | null = null;
-        if (walkerMesh) {
-          walkerMesh.rootGroup.rotation.y = Math.atan2(-od.dz, od.dx);
-          startX = Number((walkerMesh.rootGroup.position.x + od.dx * 2.85).toFixed(2));
-          startZ = Number((walkerMesh.rootGroup.position.z + od.dz * 2.85).toFixed(2));
-        }
-
-        const laneOffset = Number((4.0 + Math.random() * 4.4).toFixed(2));
-        const orbitSeed =
-          startX !== null && startZ !== null
-            ? computeOrbitSeedFromPoint(startX, startZ, laneOffset, ib.centerX, ib.w, ib.d)
-            : Number(Math.random().toFixed(4));
-
-        const res = await fetch('/api/krathong', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: me ? me.id : currentUserId,
-            userName: me?.name || 'นักเดินทางริมหาด',
-            userEmoji: me?.emoji || '🪷',
-            styleId,
-            caption,
-            avatarColor: me?.colorHex || '#F472B6',
-            avatarBand: me?.bandColor || '#FFE600',
-            avatarSpecies: me?.species || 'bunny',
-            orbitSeed,
-            laneOffset,
-            startX,
-            startZ,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data?.krathong) {
-          showToast('🚫', 'ปล่อยกระทงไม่สำเร็จ', data?.error || 'กรุณาลองใหม่อีกครั้งนะ');
-          return;
-        }
-
-        const launched: KrathongItem = data.krathong;
-        const nextList = mergeWithAmbientKrathongs([launched, ...krathongsRef.current]);
-        krathongsRef.current = nextList;
-        setKrathongs(nextList);
-        setIsKrathongModalOpen(false);
-
-        playKrathongSfx();
-        confetti({
-          particleCount: 65,
-          spread: 75,
-          origin: { y: 0.65 },
-          colors: ['#FDE047', '#F472B6', '#38BDF8', '#FB923C'],
-        });
-
-        focusedKrathongIdRef.current = launched.id;
-        focusedKrathongUntilRef.current = performance.now() + 9000;
-
-        const stMeta = getKrathongStyleMeta(launched.styleId);
-        showToast(
-          '🪷',
-          `ปล่อย${stMeta.name}ลงน้ำแล้ว!`,
-          launched.caption ? `“${launched.caption}”` : 'กระทงของคุณกำลังค่อยๆ ลอยวนรอบเกาะ ✨'
-        );
-
-        broadcastRealtimeEvent('krathong_launched', { krathong: launched });
-      } catch {
-        showToast('🚫', 'เชื่อมต่อไม่ได้', 'ไม่สามารถปล่อยกระทงได้ในขณะนี้ ลองใหม่อีกครั้งนะ');
-      } finally {
-        setLaunchingKrathong(false);
-      }
-    },
-    [currentUserId, launchingKrathong, mergeWithAmbientKrathongs, playKrathongSfx, showToast, broadcastRealtimeEvent]
-  );
-
   useEffect(() => {
     const handleIncomingRealtimeEvent = (event: string, payload: any) => {
       if (!payload) return;
       if (payload._senderInstance && payload._senderInstance === clientInstanceIdRef.current) {
+        return;
+      }
+
+      if (event === 'session_kick') {
+        const kickedUid = Number(payload.userId || 0);
+        const incomingToken = typeof payload.sessionToken === 'string' ? payload.sessionToken.trim() : '';
+        const myToken = getActiveTabSessionToken();
+        if (
+          kickedUid > 0 &&
+          kickedUid === currentUserIdRef.current &&
+          incomingToken &&
+          incomingToken !== myToken
+        ) {
+          handleForceSessionKickRef.current(
+            'มีการเข้าสู่ระบบตัวละครนี้จากเครื่องอื่น เครื่องเดิมจึงถูกออกจากระบบอัตโนมัติ'
+          );
+        }
+        return;
+      }
+      if (event === 'tab_takeover') {
+        const incomingInst = typeof payload.instanceId === 'string' ? payload.instanceId : '';
+        if (
+          currentUserIdRef.current &&
+          currentUserIdRef.current > 0 &&
+          incomingInst &&
+          incomingInst !== clientInstanceIdRef.current
+        ) {
+          handleForceSessionKickRef.current(
+            'ตัวละครนี้ถูกเปิดใช้งานในแท็บใหม่ แท็บเดิมจึงถูกตัดการเชื่อมต่ออัตโนมัติ',
+            { preserveLocalStorage: true }
+          );
+        }
         return;
       }
 
@@ -1713,6 +1760,24 @@ export default function Arena3DPage() {
               'มีของขวัญส่งถึงกลางสนาม!!',
               `${payload.actorEmoji || ''} ${payload.actorName} ${payload.detail}`
             );
+          } else if (
+            payload.reason === 'champion_checkin' &&
+            Number(payload.actorId) !== currentUserIdRef.current
+          ) {
+            confetti({
+              particleCount: 65,
+              spread: 75,
+              origin: { y: 0.35 },
+              colors: ['#facc15', '#fb923c', '#fef08a', '#ffffff'],
+            });
+            showToast(
+              '👑',
+              'เบี้ยเลี้ยงเจ้าบัลลังก์ประจำเช้านี้!',
+              `${payload.actorEmoji || '👑'} ${payload.actorName} ${
+                payload.detail ||
+                'ครองอันดับ 1 ตอน 07:00 น. รับโบนัสเข้าสนาม +15 💰! (พรุ่งนี้รีบเดินแซงชิงมงนะ! 🔥)'
+              }`
+            );
           } else if (payload.reason === 'weight_logged') {
             const divs = Array.isArray(payload.dividends) ? payload.dividends : [];
             const myWin = divs.find((d: any) => Number(d.userId) === currentUserIdRef.current);
@@ -1757,7 +1822,19 @@ export default function Arena3DPage() {
           fetchArenaDataRef.current({ force: true });
         }
       } else if (event === 'vb_lobby') {
-        if (payload.status === 'waiting' && payload.roomCode) {
+        if ((payload.status === 'waiting' || payload.status === 'started') && payload.roomCode) {
+          const parsedRoster: VbCourtRosterSlot[] = Array.isArray(payload.roster)
+            ? payload.roster
+                .filter((r: any) => r && typeof r.slotId === 'string')
+                .map((r: any) => ({
+                  slotId: r.slotId as VbCourtRosterSlot['slotId'],
+                  clientId: r.clientId ? String(r.clientId) : undefined,
+                  playerId: Number(r.playerId || 0),
+                  name: String(r.name || 'ผู้เล่น'),
+                  emoji: String(r.emoji || '🏐'),
+                  isBot: Boolean(r.isBot),
+                }))
+            : [];
           setLiveVbLobby({
             roomCode: String(payload.roomCode),
             mode: payload.mode === '2v2' ? '2v2' : '1v1',
@@ -1767,10 +1844,31 @@ export default function Arena3DPage() {
             targetName: payload.targetName ? String(payload.targetName) : undefined,
             count: Number(payload.count || 1),
             max: Number(payload.max || 2),
+            status: payload.status === 'started' ? 'started' : 'waiting',
+            scoreLeft: typeof payload.scoreLeft === 'number' ? payload.scoreLeft : 0,
+            scoreRight: typeof payload.scoreRight === 'number' ? payload.scoreRight : 0,
+            roster: parsedRoster,
             updatedAt: Date.now(),
           });
         } else {
           setLiveVbLobby((prev) =>
+            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
+          );
+        }
+      } else if (event === 'penalty_lobby') {
+        if (payload.status === 'waiting' && payload.roomCode) {
+          setLivePenaltyLobby({
+            roomCode: String(payload.roomCode),
+            hostUserId: Number(payload.hostUserId || 0),
+            hostName: String(payload.hostName || 'เพื่อน'),
+            hostEmoji: String(payload.hostEmoji || '⚽'),
+            targetName: payload.targetName ? String(payload.targetName) : undefined,
+            count: Number(payload.count || 1),
+            max: Number(payload.max || 2),
+            updatedAt: Date.now(),
+          });
+        } else {
+          setLivePenaltyLobby((prev) =>
             prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
           );
         }
@@ -1915,22 +2013,8 @@ export default function Arena3DPage() {
             fetchArenaDataRef.current({ force: true });
           }, 1150);
         }
-      } else if (event === 'krathong_launched') {
-        const incoming = payload.krathong as KrathongItem | undefined;
-        if (!incoming || incoming.id === undefined) return;
-        const exists = krathongsRef.current.some((k) => String(k.id) === String(incoming.id));
-        if (!exists) {
-          const nextList = [incoming, ...krathongsRef.current];
-          krathongsRef.current = nextList;
-          setKrathongs(nextList);
-        }
-        focusedKrathongIdRef.current = incoming.id;
-        focusedKrathongUntilRef.current = performance.now() + 7000;
-        showToast(
-          '🪷',
-          `${incoming.userEmoji || '🪷'} ${incoming.userName} ลอยกระทงริมเกาะ!`,
-          incoming.caption ? `“${incoming.caption}”` : 'ปล่อยกระทงลงสู่สายน้ำรอบเกาะแล้ว ✨'
-        );
+      } else if (ALL_FESTIVAL_REALTIME_EVENTS.includes(event)) {
+        handleFestivalRealtimeRef.current(event, payload);
       }
     };
 
@@ -1944,7 +2028,49 @@ export default function Arena3DPage() {
         }
       };
       localBroadcastRef.current = bc;
+      if (currentUserIdRef.current && currentUserIdRef.current > 0) {
+        try {
+          bc.postMessage({
+            event: 'tab_takeover',
+            payload: {
+              userId: currentUserIdRef.current,
+              instanceId: clientInstanceIdRef.current,
+              _senderInstance: clientInstanceIdRef.current,
+            },
+          });
+        } catch {
+          // ignore
+        }
+      }
     }
+
+    // ดักจับการเปิดแท็บใหม่ซ้อนในเบราว์เซอร์เดียวกันผ่าน localStorage event
+    const onStorageChange = (ev: StorageEvent) => {
+      const myUid = currentUserIdRef.current;
+      if (!myUid || myUid <= 0) return;
+      if (ev.key === STORAGE_ACTIVE_INSTANCE_KEY) {
+        if (ev.newValue && ev.newValue !== clientInstanceIdRef.current) {
+          handleForceSessionKickRef.current(
+            'ตัวละครนี้ถูกเปิดใช้งานในแท็บใหม่ แท็บเดิมจึงถูกตัดการเชื่อมต่ออัตโนมัติ',
+            { preserveLocalStorage: true }
+          );
+        } else if (ev.newValue === null) {
+          handleForceSessionKickRef.current(
+            'ออกจากระบบจากอีกแท็บหนึ่งแล้ว',
+            { preserveLocalStorage: true }
+          );
+        }
+      } else if (ev.key === STORAGE_SESSION_TOKEN_KEY) {
+        const myToken = getActiveTabSessionToken();
+        if (ev.newValue && myToken && ev.newValue !== myToken) {
+          handleForceSessionKickRef.current(
+            'มีการเข้าสู่ระบบใหม่ในแท็บอื่น แท็บเดิมจึงถูกตัดการเชื่อมต่ออัตโนมัติ',
+            { preserveLocalStorage: true }
+          );
+        }
+      }
+    };
+    window.addEventListener('storage', onStorageChange);
 
     // 2. Smart Background Diff-Polling + Tab Focus Sync (ยืดรอบเป็น 25 วิเมื่อ Realtime ทำงานอยู่ เพื่อประหยัดแบตมือถือ)
     let pollTick = 0;
@@ -2003,6 +2129,9 @@ export default function Arena3DPage() {
         .on('broadcast', { event: 'vb_lobby' }, ({ payload }) =>
           handleIncomingRealtimeEvent('vb_lobby', payload)
         )
+        .on('broadcast', { event: 'penalty_lobby' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('penalty_lobby', payload)
+        )
         .on('broadcast', { event: 'shabu_lobby' }, ({ payload }) =>
           handleIncomingRealtimeEvent('shabu_lobby', payload)
         )
@@ -2021,8 +2150,8 @@ export default function Arena3DPage() {
         .on('broadcast', { event: 'busy_status' }, ({ payload }) =>
           handleIncomingRealtimeEvent('busy_status', payload)
         )
-        .on('broadcast', { event: 'krathong_launched' }, ({ payload }) =>
-          handleIncomingRealtimeEvent('krathong_launched', payload)
+        .on('broadcast', { event: 'session_kick' }, ({ payload }) =>
+          handleIncomingRealtimeEvent('session_kick', payload)
         )
         .on('broadcast', { event: 'hello' }, () => {
           const myId = walkingSpectatorIdRef.current;
@@ -2073,13 +2202,33 @@ export default function Arena3DPage() {
               });
             }
           }
-        })
-        .subscribe((status) => {
-          realtimeSubscribedRef.current = status === 'SUBSCRIBED';
-          if (status === 'SUBSCRIBED' && channel) {
-            channel.send({ type: 'broadcast', event: 'hello', payload: {} });
-          }
         });
+
+      for (const festEvent of ALL_FESTIVAL_REALTIME_EVENTS) {
+        channel.on('broadcast', { event: festEvent }, ({ payload }) =>
+          handleIncomingRealtimeEvent(festEvent, payload)
+        );
+      }
+
+      channel.subscribe((status) => {
+        realtimeSubscribedRef.current = status === 'SUBSCRIBED';
+        if (status === 'SUBSCRIBED' && channel) {
+          channel.send({ type: 'broadcast', event: 'hello', payload: {} });
+          if (pendingSessionKickRef.current) {
+            const pending = pendingSessionKickRef.current;
+            pendingSessionKickRef.current = null;
+            channel.send({
+              type: 'broadcast',
+              event: 'session_kick',
+              payload: {
+                userId: pending.userId,
+                sessionToken: pending.sessionToken,
+                _senderInstance: clientInstanceIdRef.current,
+              },
+            });
+          }
+        }
+      });
 
       realtimeChannelRef.current = channel;
     }
@@ -2088,6 +2237,7 @@ export default function Arena3DPage() {
       realtimeSubscribedRef.current = false;
       clearInterval(pollInterval);
       window.removeEventListener('focus', onVisibilityOrFocus);
+      window.removeEventListener('storage', onStorageChange);
       document.removeEventListener('visibilitychange', onVisibilityOrFocus);
       if (bc) {
         bc.close();
@@ -2101,70 +2251,43 @@ export default function Arena3DPage() {
   }, [showToast]);
 
   useEffect(() => {
-    const getBangkokDayPhase = (): 'dawn' | 'day' | 'dusk' | 'night' => {
-      const bkkNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
-      const bkkHour = bkkNow.getUTCHours() + bkkNow.getUTCMinutes() / 60;
-      if (bkkHour >= 5.5 && bkkHour < 8) return 'dawn';
-      if (bkkHour >= 8 && bkkHour < 17) return 'day';
-      if (bkkHour >= 17 && bkkHour < 19) return 'dusk';
-      return 'night';
+    let cancelled = false;
+    const syncHokkaidoWeather = async () => {
+      const nextWeather = await fetchHokkaidoHybridWeather();
+      if (!nextWeather || cancelled) return;
+      bkkWeatherRef.current = nextWeather;
+      setBkkWeather(nextWeather);
     };
 
-    const mapWmoWeather = (code: number, dayPhase: 'dawn' | 'day' | 'dusk' | 'night') => {
-      const isDay = dayPhase !== 'night';
-      if (code === 95 || code === 96 || code === 99) {
-        return { condition: 'storm' as const, label: 'พายุฝนฟ้าคะนอง', emoji: '⛈️' };
-      }
-      if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
-        return { condition: 'rain' as const, label: 'ฝนตก', emoji: '🌧️' };
-      }
-      if (code === 0 || code === 1) {
-        if (dayPhase === 'dawn') return { condition: 'clear' as const, label: 'หัวเช้าสดใส', emoji: '🌅' };
-        if (dayPhase === 'dusk') return { condition: 'clear' as const, label: 'ยามเย็น', emoji: '🌇' };
-        return {
-          condition: 'clear' as const,
-          label: isDay ? 'แดดจ้า' : 'ฟ้าโปร่ง',
-          emoji: isDay ? '☀️' : '🌙',
+    // Re-evaluate Thai clock dayPhase every minute so dawn/day/dusk/night transitions stay punctual
+    const syncThaiClockPhase = () => {
+      const cur = bkkWeatherRef.current;
+      if (!cur) return;
+      const nextPhase = getBangkokDayPhase();
+      if (nextPhase !== cur.dayPhase) {
+        const updated: HokkaidoWeatherSnapshot = {
+          ...cur,
+          dayPhase: nextPhase,
+          isDay: nextPhase !== 'night',
         };
-      }
-      if (dayPhase === 'dawn') return { condition: 'cloudy' as const, label: 'หัวเช้ามีเมฆ', emoji: '🌅' };
-      if (dayPhase === 'dusk') return { condition: 'cloudy' as const, label: 'ยามเย็นครึ้มๆ', emoji: '🌇' };
-      return {
-        condition: 'cloudy' as const,
-        label: isDay ? 'มีเมฆมาก' : 'มีเมฆครึ้ม',
-        emoji: isDay ? '⛅' : '☁️',
-      };
-    };
-
-    const fetchBangkokWeather = async () => {
-      try {
-        const res = await fetch(
-          'https://api.open-meteo.com/v1/forecast?latitude=13.7563&longitude=100.5018&current=temperature_2m,weather_code,is_day&timezone=Asia%2FBangkok'
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const cur = data?.current;
-        if (!cur) return;
-        const dayPhase = getBangkokDayPhase();
-        const isDay = dayPhase !== 'night' && Number(cur.is_day) === 1 ? true : dayPhase !== 'night';
-        const code = Number(cur.weather_code ?? 0);
-        const temp = Math.round(Number(cur.temperature_2m ?? 30));
-        const mapped = mapWmoWeather(code, dayPhase);
-        const nextWeather = { temp, isDay, dayPhase, ...mapped };
-        bkkWeatherRef.current = nextWeather;
-        setBkkWeather(nextWeather);
-      } catch {
-        // ignore network errors
+        bkkWeatherRef.current = updated;
+        setBkkWeather(updated);
       }
     };
 
-    fetchBangkokWeather();
-    const timer = setInterval(fetchBangkokWeather, 10 * 60 * 1000);
-    return () => clearInterval(timer);
+    void syncHokkaidoWeather();
+    const weatherTimer = setInterval(syncHokkaidoWeather, 10 * 60 * 1000);
+    const clockTimer = setInterval(syncThaiClockPhase, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(weatherTimer);
+      clearInterval(clockTimer);
+    };
   }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (pauseArenaRenderRef.current) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       keysPressedRef.current[e.code] = true;
@@ -2196,48 +2319,11 @@ export default function Arena3DPage() {
       } catch {
         // ignore storage error
       }
-      if (next) startBgm(isFullMoonSkyRef.current ? 'loy_krathong' : 'arena');
+      if (next) startBgm(festival.activeBgmTrackRef.current ?? 'arena');
       else stopBgm();
       return next;
     });
-  }, []);
-
-  // เริ่มบรรเลงทำนองเพลงลอยกระทงคลอเบาๆ อัตโนมัติเมื่อผู้เล่นคลิกเข้าเกาะครั้งแรก (เว้นแต่เคยกดปิดเสียงไว้)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    preloadBgm();
-    let mutedPref = false;
-    try {
-      mutedPref = localStorage.getItem('waist_bgm_muted') === '1';
-    } catch {
-      // ignore
-    }
-    if (mutedPref) return;
-
-    const unlockAndPlay = () => {
-      window.removeEventListener('pointerdown', unlockAndPlay);
-      window.removeEventListener('keydown', unlockAndPlay);
-      try {
-        if (localStorage.getItem('waist_bgm_muted') === '1') return;
-      } catch {
-        // ignore
-      }
-      startBgm(isFullMoonSkyRef.current ? 'loy_krathong' : 'arena');
-      setIsMusicOn(true);
-    };
-    window.addEventListener('pointerdown', unlockAndPlay, { passive: true });
-    window.addEventListener('keydown', unlockAndPlay);
-    return () => {
-      window.removeEventListener('pointerdown', unlockAndPlay);
-      window.removeEventListener('keydown', unlockAndPlay);
-    };
-  }, []);
-
-  // สลับเพลงประกอบตามโหมดคืนวันเพ็ญ / อากาศจริงเมื่อเปิดเพลงอยู่
-  useEffect(() => {
-    if (!isMusicOn) return;
-    startBgm(isFullMoonSky ? 'loy_krathong' : 'arena');
-  }, [isFullMoonSky, isMusicOn]);
+  }, [festival.activeBgmTrackRef]);
 
   const competitors = React.useMemo(
     () => players.filter((p) => p.role !== 'spectator'),
@@ -2431,7 +2517,7 @@ export default function Arena3DPage() {
       if (prankingGuard) return;
       setPrankingGuard(true);
       try {
-        const res = await fetch('/api/guard-prank', {
+        const res = await sessionFetch('/api/guard-prank', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: uid, prankId: prank.id }),
@@ -2645,83 +2731,14 @@ export default function Arena3DPage() {
     leaderIdRef.current = rankedPlayers[0]?.id ?? null;
     loserIdRef.current = rankedPlayers.length > 1 ? rankedPlayers[rankedPlayers.length - 1].id : null;
 
-    const resolveWeatherTargets = (w: typeof bkkWeatherRef.current, forceFullMoon = false) => {
-      if (forceFullMoon) {
-        return {
-          targetHex: 0x08122e,
-          targetLightHex: 0xfef3c7,
-          targetHemi: 0.68,
-          targetDir: 0.88,
-          isRaining: false,
-          showNight: true,
-        };
-      }
-      let targetHex = 0xbae6fd;
-      let targetLightHex = 0xffffff;
-      let targetHemi = 0.78;
-      let targetDir = 0.95;
-      if (w) {
-        if (w.dayPhase === 'night') {
-          targetLightHex = 0xfef08a;
-          if (w.condition === 'rain' || w.condition === 'storm') {
-            targetHex = 0x090d16;
-            targetHemi = 0.42;
-            targetDir = 0.38;
-          } else {
-            targetHex = 0x0a1535;
-            targetHemi = 0.62;
-            targetDir = 0.78;
-          }
-        } else if (w.dayPhase === 'dawn') {
-          targetLightHex = 0xffedd5;
-          if (w.condition === 'rain' || w.condition === 'storm') {
-            targetHex = 0x6b7280;
-            targetHemi = 0.52;
-            targetDir = 0.45;
-          } else if (w.condition === 'cloudy') {
-            targetHex = 0xfbcfe8;
-            targetHemi = 0.68;
-            targetDir = 0.65;
-          } else {
-            targetHex = 0xfde68a;
-            targetHemi = 0.74;
-            targetDir = 0.8;
-          }
-        } else if (w.dayPhase === 'dusk') {
-          targetLightHex = 0xfdba74;
-          if (w.condition === 'rain' || w.condition === 'storm') {
-            targetHex = 0x57534e;
-            targetHemi = 0.48;
-            targetDir = 0.42;
-          } else if (w.condition === 'cloudy') {
-            targetHex = 0xfdba74;
-            targetHemi = 0.62;
-            targetDir = 0.62;
-          } else {
-            targetHex = 0xfb923c;
-            targetHemi = 0.68;
-            targetDir = 0.78;
-          }
-        } else if (w.condition === 'rain' || w.condition === 'storm') {
-          targetHex = 0x64748b;
-          targetHemi = 0.52;
-          targetDir = 0.45;
-        } else if (w.condition === 'cloudy') {
-          targetHex = 0xcbd5e1;
-          targetHemi = 0.65;
-          targetDir = 0.68;
-        }
-      }
-      const isRaining = Boolean(w && (w.condition === 'rain' || w.condition === 'storm'));
-      const showNight = Boolean(w && w.dayPhase === 'night' && !isRaining);
-      return { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight };
-    };
-
-    const initWeather = resolveWeatherTargets(bkkWeatherRef.current, isFullMoonSkyRef.current);
+    const initWeather = resolveIslandWeatherTargets(
+      bkkWeatherRef.current,
+      festival.activeWeatherOverrideRef.current
+    );
     const scene = new THREE.Scene();
     const skyColor = new THREE.Color(initWeather.targetHex);
     scene.background = skyColor;
-    scene.fog = new THREE.FogExp2(initWeather.targetHex, 0.0034);
+    scene.fog = new THREE.FogExp2(initWeather.targetHex, initWeather.fogDensity);
 
     const roamingList = players.filter((pl) => pl.isRoaming || pl.role === 'spectator');
     // ล็อกความกว้างลู่วิ่งสวยๆ ที่ 7 ช่องหลัก (Top 7 ตัวใหญ่เต็มลู่ • อันดับ #8 ลงไปย่อเป็นจิบิมินิวิ่งตามหลัง!)
@@ -2733,15 +2750,116 @@ export default function Arena3DPage() {
     const trackWidth = laneCount * 2.2 + 1.2;
     const specPerSide = Math.max(1, Math.ceil(roamingList.length / 2));
     const specRows = Math.max(1, Math.ceil(specPerSide / 14));
-    const islandCenterX = -2.5;
-    const islandW = halfLen * 2 + 24;
-    const islandD = Math.max(38, trackWidth + 21 + (specRows - 1) * 5.0);
+    const islandCenterX = 9.0;
+    const islandW = halfLen * 2 + 52;
+    const islandD = Math.max(64, trackWidth + 46 + (specRows - 1) * 5.0);
     islandBoundsRef.current = { centerX: islandCenterX, w: islandW, d: islandD };
 
     // Adaptive quality profile (Desktop = High unchanged, iPad = Medium, Mobile = Lite)
     const qCfg = getQualityConfig(qualityMode);
 
-    // 3D Rain particles (synced with Bangkok weather)
+    // Soft radial snowflake / frost breath sprite texture
+    const snowFlakeCanvas = document.createElement('canvas');
+    snowFlakeCanvas.width = 64;
+    snowFlakeCanvas.height = 64;
+    const sfCtx = snowFlakeCanvas.getContext('2d');
+    if (sfCtx) {
+      const sg = sfCtx.createRadialGradient(32, 32, 3, 32, 32, 30);
+      sg.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      sg.addColorStop(0.45, 'rgba(224, 242, 254, 0.85)');
+      sg.addColorStop(1, 'rgba(186, 230, 253, 0)');
+      sfCtx.fillStyle = sg;
+      sfCtx.fillRect(0, 0, 64, 64);
+    }
+    const snowFlakeTex = new THREE.CanvasTexture(snowFlakeCanvas);
+    snowFlakeTex.colorSpace = THREE.SRGBColorSpace;
+
+    // 3D Hokkaido Falling Snowflakes / Blizzard Particles (synced live with Sapporo weather)
+    const snowCount = Math.round(qCfg.rainCount * 1.25);
+    const snowPositions = new Float32Array(snowCount * 3);
+    const snowSeeds = new Float32Array(snowCount);
+    const snowSpanX = islandW + 28;
+    const snowSpanZ = islandD + 28;
+    for (let i = 0; i < snowCount; i++) {
+      snowPositions[i * 3] = islandCenterX + (Math.random() - 0.5) * snowSpanX;
+      snowPositions[i * 3 + 1] = Math.random() * 28;
+      snowPositions[i * 3 + 2] = (Math.random() - 0.5) * snowSpanZ;
+      snowSeeds[i] = Math.random() * Math.PI * 2;
+    }
+    const snowGeo = new THREE.BufferGeometry();
+    snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+    const snowMat = new THREE.PointsMaterial({
+      map: snowFlakeTex,
+      color: 0xffffff,
+      size: 0.46,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+    });
+    const snowPoints = new THREE.Points(snowGeo, snowMat);
+    snowPoints.visible = initWeather.isSnowing;
+    scene.add(snowPoints);
+
+    // 3D Hokkaido Diamond Dust (ละอองเพชรน้ำแข็งระยิบระยับเมื่อฟ้าใสและอุณหภูมิ <= 0°C)
+    const dustCount = qCfg.tier === 'lite' ? 70 : qCfg.tier === 'medium' ? 120 : 190;
+    const dustPositions = new Float32Array(dustCount * 3);
+    for (let i = 0; i < dustCount; i++) {
+      dustPositions[i * 3] = islandCenterX + (Math.random() - 0.5) * (islandW + 8);
+      dustPositions[i * 3 + 1] = 0.6 + Math.random() * 9.5;
+      dustPositions[i * 3 + 2] = (Math.random() - 0.5) * (islandD + 8);
+    }
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+    const dustMat = new THREE.PointsMaterial({
+      map: snowFlakeTex,
+      color: 0xfef08a,
+      size: 0.3,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const diamondDustPoints = new THREE.Points(dustGeo, dustMat);
+    diamondDustPoints.visible = initWeather.isDiamondDust;
+    scene.add(diamondDustPoints);
+
+    // Pooled Character Frost Breath Puffs (ไอหายใจสีขาวเมื่อฮอกไกโดหนาว <= 4°C)
+    const breathPoolSize = qCfg.tier === 'lite' ? 10 : qCfg.tier === 'medium' ? 18 : 28;
+    interface FrostBreathPuff {
+      sprite: THREE.Sprite;
+      mat: THREE.SpriteMaterial;
+      active: boolean;
+      bornAt: number;
+      duration: number;
+      vx: number;
+      vz: number;
+    }
+    const frostBreathPool: FrostBreathPuff[] = [];
+    for (let bi = 0; bi < breathPoolSize; bi++) {
+      const bMat = new THREE.SpriteMaterial({
+        map: snowFlakeTex,
+        color: 0xf0f9ff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const bSprite = new THREE.Sprite(bMat);
+      bSprite.visible = false;
+      scene.add(bSprite);
+      frostBreathPool.push({
+        sprite: bSprite,
+        mat: bMat,
+        active: false,
+        bornAt: 0,
+        duration: 0.85,
+        vx: 0,
+        vz: 0,
+      });
+    }
+    const lastCharBreathAt: Record<number, number> = {};
+    let breathCursor = 0;
+
+    // 3D Rain particles (for rare above-freezing Hokkaido rain)
     const rainCount = qCfg.rainCount;
     const rainPositions = new Float32Array(rainCount * 3);
     for (let i = 0; i < rainCount; i++) {
@@ -2761,225 +2879,16 @@ export default function Arena3DPage() {
     rainPoints.visible = initWeather.isRaining;
     scene.add(rainPoints);
 
-    // Full Moon Loy Krathong Night Sky (พระจันทร์วันเพ็ญเต็มดวง + ลำแสงจันทร์ + ดาวรอบฟ้า + เงาจันทร์สะท้อนน้ำ + โคมลอย)
-    const nightGroup = new THREE.Group();
-    const moonPos = new THREE.Vector3(-10, 15.5, -(islandD / 2 + 38));
-
-    // Detailed Full Moon texture with subtle golden Moon-Rabbit silhouette
-    const moonCanvas = document.createElement('canvas');
-    moonCanvas.width = 256;
-    moonCanvas.height = 256;
-    const mCtx = moonCanvas.getContext('2d');
-    if (mCtx) {
-      const mGrad = mCtx.createRadialGradient(118, 112, 16, 128, 128, 128);
-      mGrad.addColorStop(0, '#ffffff');
-      mGrad.addColorStop(0.55, '#fef9c3');
-      mGrad.addColorStop(0.88, '#fde047');
-      mGrad.addColorStop(1, '#f59e0b');
-      mCtx.fillStyle = mGrad;
-      mCtx.fillRect(0, 0, 256, 256);
-
-      // Soft lunar maria / cute Moon Rabbit hint
-      mCtx.fillStyle = 'rgba(217, 119, 6, 0.16)';
-      mCtx.beginPath();
-      mCtx.ellipse(134, 146, 34, 24, -0.25, 0, Math.PI * 2);
-      mCtx.fill();
-      mCtx.beginPath();
-      mCtx.ellipse(106, 118, 20, 18, 0.2, 0, Math.PI * 2);
-      mCtx.fill();
-      mCtx.beginPath();
-      mCtx.ellipse(116, 86, 8, 22, 0.35, 0, Math.PI * 2);
-      mCtx.fill();
-      mCtx.beginPath();
-      mCtx.ellipse(130, 90, 7, 20, 0.6, 0, Math.PI * 2);
-      mCtx.fill();
-    }
-    const moonTex = new THREE.CanvasTexture(moonCanvas);
-    moonTex.colorSpace = THREE.SRGBColorSpace;
-
-    const moonMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(5.2, 32, 32),
-      new THREE.MeshBasicMaterial({ map: moonTex, fog: false })
-    );
-    moonMesh.position.copy(moonPos);
-    moonMesh.rotation.y = -Math.PI / 2;
-    nightGroup.add(moonMesh);
-
-    // Multi-layered radiant full-moon corona & outer atmospheric halo
-    const haloCanvas = document.createElement('canvas');
-    haloCanvas.width = 256;
-    haloCanvas.height = 256;
-    const hCtx = haloCanvas.getContext('2d');
-    if (hCtx) {
-      const hGrad = hCtx.createRadialGradient(128, 128, 12, 128, 128, 126);
-      hGrad.addColorStop(0, 'rgba(255, 253, 235, 0.92)');
-      hGrad.addColorStop(0.26, 'rgba(254, 240, 138, 0.52)');
-      hGrad.addColorStop(0.58, 'rgba(251, 191, 36, 0.18)');
-      hGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      hCtx.fillStyle = hGrad;
-      hCtx.fillRect(0, 0, 256, 256);
-    }
-    const moonHaloTex = new THREE.CanvasTexture(haloCanvas);
-    moonHaloTex.colorSpace = THREE.SRGBColorSpace;
-
-    const moonInnerHalo = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: moonHaloTex,
-        color: 0xfef08a,
-        transparent: true,
-        opacity: 0.88,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      })
-    );
-    moonInnerHalo.position.copy(moonPos);
-    moonInnerHalo.scale.set(22, 22, 1);
-    nightGroup.add(moonInnerHalo);
-
-    const moonOuterHalo = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: moonHaloTex,
-        color: 0xbae6fd,
-        transparent: true,
-        opacity: 0.42,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      })
-    );
-    moonOuterHalo.position.copy(moonPos);
-    moonOuterHalo.scale.set(44, 44, 1);
-    nightGroup.add(moonOuterHalo);
-
-    // Volumetric Moonbeam shafts shining diagonally from the full moon onto the island & sea
-    const beamCanvas = document.createElement('canvas');
-    beamCanvas.width = 64;
-    beamCanvas.height = 256;
-    const bCtx = beamCanvas.getContext('2d');
-    if (bCtx) {
-      const bGrad = bCtx.createLinearGradient(0, 0, 0, 256);
-      bGrad.addColorStop(0, 'rgba(254, 249, 195, 0.42)');
-      bGrad.addColorStop(0.45, 'rgba(254, 240, 138, 0.14)');
-      bGrad.addColorStop(1, 'rgba(254, 240, 138, 0)');
-      bCtx.fillStyle = bGrad;
-      bCtx.fillRect(0, 0, 64, 256);
-    }
-    const beamTex = new THREE.CanvasTexture(beamCanvas);
-    beamTex.colorSpace = THREE.SRGBColorSpace;
-    const moonBeamMeshes: THREE.Mesh[] = [];
-    [
-      { target: new THREE.Vector3(-4, 0, -4), rTop: 2.6, rBot: 13.5, op: 0.13 },
-      { target: new THREE.Vector3(-16, 0, -14), rTop: 2.1, rBot: 9.5, op: 0.09 },
-      { target: new THREE.Vector3(9, 0, -10), rTop: 2.1, rBot: 10.5, op: 0.09 },
-    ].forEach((bm) => {
-      const dir = new THREE.Vector3().subVectors(bm.target, moonPos);
-      const len = dir.length();
-      const mid = new THREE.Vector3().addVectors(moonPos, bm.target).multiplyScalar(0.5);
-      const cone = new THREE.Mesh(
-        new THREE.CylinderGeometry(bm.rTop, bm.rBot, len, 18, 1, true),
-        new THREE.MeshBasicMaterial({
-          map: beamTex,
-          transparent: true,
-          opacity: bm.op,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-          fog: false,
-        })
-      );
-      cone.position.copy(mid);
-      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
-      nightGroup.add(cone);
-      moonBeamMeshes.push(cone);
+    // Night & Seasonal Festival Sky Controller (pluggable via @/festivals)
+    const nightSkyController = createIslandNightSkyController(festival.moduleRef.current, {
+      scene,
+      islandCenterX,
+      islandW,
+      islandD,
+      qualityTier: qCfg.tier,
+      starCount: qCfg.starCount,
+      initialVisible: initWeather.showNight,
     });
-
-    // Shimmering Golden Moonlight Reflection Path across the Sea
-    const shimmerCanvas = document.createElement('canvas');
-    shimmerCanvas.width = 128;
-    shimmerCanvas.height = 256;
-    const shCtx = shimmerCanvas.getContext('2d');
-    if (shCtx) {
-      for (let r = 0; r < 46; r++) {
-        const py = (r / 46) * 248 + 4;
-        const spread = 12 + (r / 46) * 38;
-        const alpha = (1 - Math.abs(r / 46 - 0.35)) * 0.48;
-        const g = shCtx.createRadialGradient(64, py, 2, 64, py, spread);
-        g.addColorStop(0, `rgba(254, 249, 195, ${Math.max(0.08, alpha).toFixed(2)})`);
-        g.addColorStop(0.55, `rgba(250, 204, 21, ${(alpha * 0.5).toFixed(2)})`);
-        g.addColorStop(1, 'rgba(250, 204, 21, 0)');
-        shCtx.fillStyle = g;
-        shCtx.fillRect(0, py - 3, 128, 6);
-      }
-    }
-    const shimmerTex = new THREE.CanvasTexture(shimmerCanvas);
-    shimmerTex.colorSpace = THREE.SRGBColorSpace;
-    const moonWaterShimmer = new THREE.Mesh(
-      new THREE.PlaneGeometry(19, 34),
-      new THREE.MeshBasicMaterial({
-        map: shimmerTex,
-        transparent: true,
-        opacity: 0.72,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    moonWaterShimmer.rotation.x = -Math.PI / 2;
-    moonWaterShimmer.position.set(moonPos.x * 0.65, -0.32, -(islandD / 2 + 19));
-    nightGroup.add(moonWaterShimmer);
-
-    // 360° Celestial Starry Dome surrounding the entire island
-    const starCount = Math.max(220, qCfg.starCount * 2);
-    const starPos = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const radius = 58 + Math.random() * 85;
-      starPos[i * 3] = islandCenterX + Math.cos(theta) * radius;
-      starPos[i * 3 + 1] = 8 + Math.random() * 56;
-      starPos[i * 3 + 2] = Math.sin(theta) * radius;
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({
-      color: 0xfef9c3,
-      size: 0.42,
-      transparent: true,
-      opacity: 0.92,
-      fog: false,
-    });
-    nightGroup.add(new THREE.Points(starGeo, starMat));
-
-    // Distant Floating Sky Lanterns (โคมลอยคืนวันเพ็ญ)
-    const skyLanterns: Array<{ group: THREE.Group; baseX: number; baseZ: number; speed: number; phase: number }> = [];
-    const lanternCount = qCfg.tier === 'lite' ? 8 : 16;
-    const lanternShellMat = new THREE.MeshBasicMaterial({ color: 0xfdba74, fog: false });
-    for (let li = 0; li < lanternCount; li++) {
-      const lg = new THREE.Group();
-      const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.2, 0.62, 8), lanternShellMat);
-      const glow = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: moonHaloTex,
-          color: 0xfb923c,
-          transparent: true,
-          opacity: 0.85,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          fog: false,
-        })
-      );
-      glow.scale.set(2.4, 2.4, 1);
-      lg.add(shell, glow);
-      const angle = (li / lanternCount) * Math.PI * 2 + 0.3;
-      const dist = Math.max(islandW, islandD) * 0.62 + (li % 3) * 9;
-      const bx = islandCenterX + Math.cos(angle) * dist;
-      const bz = Math.sin(angle) * dist - 8;
-      lg.position.set(bx, 8 + (li % 5) * 4.5, bz);
-      nightGroup.add(lg);
-      skyLanterns.push({ group: lg, baseX: bx, baseZ: bz, speed: 0.42 + (li % 4) * 0.12, phase: li * 1.7 });
-    }
-
-    nightGroup.visible = initWeather.showNight;
-    scene.add(nightGroup);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 340);
     if (savedCameraPosRef.current) {
@@ -3009,7 +2918,7 @@ export default function Arena3DPage() {
       cameraTargetPosRef.current = null;
     });
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfef08a, initWeather.targetHemi);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbae6fd, initWeather.targetHemi);
     hemiLight.position.set(0, 34, 0);
     scene.add(hemiLight);
 
@@ -3029,22 +2938,23 @@ export default function Arena3DPage() {
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
-    // Golden Tropical Sandy Beach Island Texture
+    // Hokkaido Powder Snow Island Ground Texture (ทุ่งหิมะขาวฟูประกายคริสตัล)
     const sandCanvas = document.createElement('canvas');
     sandCanvas.width = 512;
     sandCanvas.height = 512;
     const sCtx = sandCanvas.getContext('2d');
     if (sCtx) {
-      const grad = sCtx.createRadialGradient(256, 256, 80, 256, 256, 340);
-      grad.addColorStop(0, '#fef3c7');
-      grad.addColorStop(0.72, '#fde68a');
-      grad.addColorStop(1, '#fcd34d');
+      const grad = sCtx.createRadialGradient(256, 256, 70, 256, 256, 350);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.68, '#f0f9ff');
+      grad.addColorStop(1, '#dbeafe');
       sCtx.fillStyle = grad;
       sCtx.fillRect(0, 0, 512, 512);
-      for (let i = 0; i < 1600; i++) {
+      for (let i = 0; i < 1800; i++) {
         const sx = (i * 73) % 512;
         const sy = (i * 137) % 512;
-        sCtx.fillStyle = i % 2 === 0 ? 'rgba(217, 119, 6, 0.12)' : 'rgba(255, 255, 255, 0.22)';
+        sCtx.fillStyle =
+          i % 3 === 0 ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255, 255, 255, 0.78)';
         sCtx.fillRect(sx, sy, 2, 2);
       }
     }
@@ -3053,7 +2963,7 @@ export default function Arena3DPage() {
 
     const island = new THREE.Mesh(
       new THREE.BoxGeometry(islandW, 1.1, islandD),
-      new THREE.MeshStandardMaterial({ map: sandTex, roughness: 0.86 })
+      new THREE.MeshStandardMaterial({ map: sandTex, roughness: 0.78 })
     );
     island.position.set(islandCenterX, -0.55, 0);
     island.receiveShadow = true;
@@ -3090,30 +3000,30 @@ export default function Arena3DPage() {
     trackGeo.setIndex(indices);
     trackGeo.computeVertexNormals();
 
-    // Procedural grassy racing track texture with dynamic multi-lane dividers + glowing magic rune circle
+    // Cleared Hokkaido Alpine Slate-Blue Racing Track + Ice-Crystal Magic Rune Circle
     const trackCanvas = document.createElement('canvas');
     trackCanvas.width = 1024;
     trackCanvas.height = 1024;
     const tCtx = trackCanvas.getContext('2d');
     if (tCtx) {
-      tCtx.fillStyle = '#65a30d';
+      tCtx.fillStyle = '#1e3a5f';
       tCtx.fillRect(0, 0, 1024, 1024);
       const lanePx = 1024 / laneCount;
-      // Alternating subtle grass stripes
-      tCtx.fillStyle = '#84cc16';
+      // Alternating subtle frost-slate lane stripes so characters & white snow contrast sharply
+      tCtx.fillStyle = '#254773';
       for (let l = 0; l < laneCount; l += 2) {
         tCtx.fillRect(0, l * lanePx, 1024, lanePx);
       }
-      // Crisp white lane dividers
-      tCtx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      // Crisp snowy-white lane dividers
+      tCtx.fillStyle = 'rgba(240, 249, 255, 0.82)';
       for (let l = 1; l < laneCount; l++) {
         tCtx.fillRect(0, l * lanePx - 3, 1024, 6);
       }
-      // Glowing magic rune circle in the center of the arena (aspect-compensated so it stays round on the longer track)
+      // Glowing Hokkaido Snowflake Magic Rune Circle in the center of the arena
       tCtx.save();
       tCtx.translate(512, 512);
       tCtx.scale(Math.min(1, trackWidth / (halfLen * 2)), 1);
-      tCtx.strokeStyle = 'rgba(254, 240, 138, 0.65)';
+      tCtx.strokeStyle = 'rgba(125, 211, 252, 0.78)';
       tCtx.lineWidth = 10;
       tCtx.beginPath();
       tCtx.arc(0, 0, 220, 0, Math.PI * 2);
@@ -3122,11 +3032,11 @@ export default function Arena3DPage() {
       tCtx.beginPath();
       tCtx.arc(0, 0, 174, 0, Math.PI * 2);
       tCtx.stroke();
-      for (let r = 0; r < 8; r++) {
-        const a = (r / 8) * Math.PI * 2;
+      for (let r = 0; r < 12; r++) {
+        const a = (r / 12) * Math.PI * 2;
         tCtx.beginPath();
-        tCtx.moveTo(Math.cos(a) * 174, Math.sin(a) * 174);
-        tCtx.lineTo(Math.cos(a) * 220, Math.sin(a) * 220);
+        tCtx.moveTo(Math.cos(a) * 168, Math.sin(a) * 168);
+        tCtx.lineTo(Math.cos(a) * 224, Math.sin(a) * 224);
         tCtx.stroke();
       }
       tCtx.restore();
@@ -3136,17 +3046,22 @@ export default function Arena3DPage() {
 
     const trackMesh = new THREE.Mesh(
       trackGeo,
-      new THREE.MeshStandardMaterial({ map: trackTex, roughness: 0.75, side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ map: trackTex, roughness: 0.65, side: THREE.DoubleSide })
     );
     trackMesh.receiveShadow = true;
     scene.add(trackMesh);
 
-    // Stone curbs along the outer edges of the track
+    // Fluffy White Snowbank Curbs (กองหิมะนูนขนาบขอบลู่วิ่ง)
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-    const curbMat = new THREE.MeshStandardMaterial({ color: 0x94A3B8, roughness: 0.7 });
+    const curbMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      emissive: 0xe0f2fe,
+      emissiveIntensity: 0.1,
+      roughness: 0.72,
+    });
     [
-      { offset: -trackWidth / 2, radius: 0.16, mat: curbMat },
-      { offset: trackWidth / 2, radius: 0.16, mat: curbMat },
+      { offset: -trackWidth / 2, radius: 0.24, mat: curbMat },
+      { offset: trackWidth / 2, radius: 0.24, mat: curbMat },
     ].forEach(({ offset, radius, mat }) => {
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i <= segments; i++) {
@@ -3192,14 +3107,22 @@ export default function Arena3DPage() {
     }
     scene.add(finishGroup);
 
-    const { decorGroup, balloons, floatingIslands, oceanMesh, foamRings, palmCrowns } =
-      buildFantasyArenaDecor(halfLen, trackWidth, endPt, endTan, {
-        islandCenterX,
-        islandW,
-        islandD,
-        specRows,
-        oceanSegments: qCfg.oceanSegments,
-      });
+    const {
+      decorGroup,
+      balloons,
+      floatingIslands,
+      oceanMesh,
+      foamRings,
+      palmCrowns,
+      otaruLamps,
+      onsenSteamPuffs,
+    } = buildFantasyArenaDecor(halfLen, trackWidth, endPt, endTan, {
+      islandCenterX,
+      islandW,
+      islandD,
+      specRows,
+      oceanSegments: qCfg.oceanSegments,
+    });
     scene.add(decorGroup);
 
     // Zebra crossing (ทางม้าลาย) at center of S-curve (t = 0.5)
@@ -3316,7 +3239,13 @@ export default function Arena3DPage() {
     cafeBody.receiveShadow = true;
     petCafeGroup.add(cafeBody);
 
-    // Pitched Cozy Brown Roof
+    // Pitched Cozy Brown Roof + Hokkaido Snow Cap
+    const roofSnowMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      emissive: 0xe0f2fe,
+      emissiveIntensity: 0.08,
+      roughness: 0.72,
+    });
     const cafeRoof = new THREE.Mesh(
       new THREE.ConeGeometry(3.45, 1.65, 4),
       new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.65 })
@@ -3324,7 +3253,10 @@ export default function Arena3DPage() {
     cafeRoof.rotation.y = Math.PI / 4;
     cafeRoof.position.set(0, 3.65, -0.35);
     cafeRoof.castShadow = true;
-    petCafeGroup.add(cafeRoof);
+    const cafeRoofSnow = new THREE.Mesh(new THREE.ConeGeometry(3.32, 0.85, 4), roofSnowMat);
+    cafeRoofSnow.rotation.y = Math.PI / 4;
+    cafeRoofSnow.position.set(0, 4.08, -0.35);
+    petCafeGroup.add(cafeRoof, cafeRoofSnow);
 
     // Cute Pink-and-White Striped Awning over front entrance
     for (let i = 0; i < 6; i++) {
@@ -3389,19 +3321,221 @@ export default function Arena3DPage() {
     `;
     labelsContainer.appendChild(cafeTagEl);
 
-    // 3D Taekwondo Dojang Pavilion (สนามหลังจุดเริ่มต้น ฝั่งตรงข้าม Pet Café — เดินเข้ามาฝึกเตะเป้าเลื่อนสาย!)
-    const rawDojangX = -halfLen - 8.5;
-    const rawDojangZ = -(trackWidth / 2 + 5.2);
-    const dojangPos = new THREE.Vector3(
-      Math.max(islandCenterX - islandW / 2 + 4.2, Math.min(islandCenterX + islandW / 2 - 4.2, rawDojangX)),
+    // Spacious Hokkaido Sports Plaza behind Finish Line:
+    //   North Wing (z = -19.0) : 🏯 สังเวียนซูโม่ฮอกไกโด (Sumo Dohyo Pavilion)
+    //   Center     (z = -2.2)  : 🏐❄️ สนามวอลเลย์บอลหิมะ (Snow Volleyball Court)
+    //   Lower-Mid  (z = +10.6) : ⚽ ดวลจุดโทษ 3D (Penalty Pitch)
+    //   South Wing (z = +23.2) : 🥋 สำนักเทควันโด (Taekwondo Dojang Pavilion)
+    const sportsPlazaX = Math.min(islandCenterX + islandW / 2 - 9.5, halfLen + 16.5);
+
+    // A) North Wing: 3D Hokkaido Sumo Dohyo Pavilion (สังเวียนซูโม่ฮอกไกโด — ห่างจากคอร์ทวอลเลย์เกือบ 9 เมตร!)
+    const rawSumoZ = -19.0;
+    const sumoPos = new THREE.Vector3(
+      sportsPlazaX,
       0.2,
-      Math.max(-(islandD / 2 - 4.2), Math.min(islandD / 2 - 4.2, rawDojangZ))
+      Math.max(-(islandD / 2 - 4.8), Math.min(islandD / 2 - 4.8, rawSumoZ))
+    );
+    const sumoGroup = new THREE.Group();
+    sumoGroup.position.copy(sumoPos);
+    sumoGroup.rotation.y = -Math.PI * 0.08;
+
+    const dohyoStonePlinth = new THREE.Mesh(
+      new THREE.BoxGeometry(6.4, 0.16, 6.2),
+      new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85 })
+    );
+    dohyoStonePlinth.position.y = 0.08;
+    dohyoStonePlinth.receiveShadow = true;
+    sumoGroup.add(dohyoStonePlinth);
+
+    const clayEarthMat = new THREE.MeshStandardMaterial({ color: 0xc8a276, roughness: 0.88 });
+    const clayInnerMat = new THREE.MeshStandardMaterial({ color: 0xdfc198, roughness: 0.82 });
+    const dohyoMound = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.85, 4.25, 0.36, 4),
+      clayEarthMat
+    );
+    dohyoMound.rotation.y = Math.PI / 4;
+    dohyoMound.position.y = 0.28;
+    dohyoMound.receiveShadow = true;
+    dohyoMound.castShadow = true;
+    sumoGroup.add(dohyoMound);
+
+    const hinokiMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.72 });
+    const step1 = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.14, 0.46), hinokiMat);
+    step1.position.set(0, 0.12, 2.95);
+    const step2 = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.14, 0.38), hinokiMat);
+    step2.position.set(0, 0.26, 2.72);
+    sumoGroup.add(step1, step2);
+
+    const dohyoCircle = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.15, 2.15, 0.05, 32),
+      clayInnerMat
+    );
+    dohyoCircle.position.y = 0.47;
+    dohyoCircle.receiveShadow = true;
+    const strawRingMat = new THREE.MeshStandardMaterial({
+      color: 0xeab308,
+      emissive: 0xa16207,
+      emissiveIntensity: 0.12,
+      roughness: 0.75,
+    });
+    const tawaraRing = new THREE.Mesh(
+      new THREE.TorusGeometry(2.15, 0.11, 10, 36),
+      strawRingMat
+    );
+    tawaraRing.rotation.x = Math.PI / 2;
+    tawaraRing.position.y = 0.5;
+    tawaraRing.castShadow = true;
+    sumoGroup.add(dohyoCircle, tawaraRing);
+
+    [-2.58, 2.58].forEach((edgePos) => {
+      const strawX = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.06, 0.09), strawRingMat);
+      strawX.position.set(0, 0.48, edgePos);
+      const strawZ = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 5.2), strawRingMat);
+      strawZ.position.set(edgePos, 0.48, 0);
+      sumoGroup.add(strawX, strawZ);
+    });
+
+    const shikiriLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const shikiriAccentMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+    [-0.46, 0.46].forEach((sx) => {
+      const lineWhite = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.03, 0.92), shikiriLineMat);
+      lineWhite.position.set(sx, 0.505, 0);
+      const lineTip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.032, 0.16), shikiriAccentMat);
+      lineTip.position.set(sx, 0.506, 0);
+      sumoGroup.add(lineWhite, lineTip);
+    });
+
+    const saltBucket = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.19, 0.24, 10), hinokiMat);
+    saltBucket.position.set(-2.15, 0.58, 2.05);
+    const saltPile = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.18, 10), roofSnowMat);
+    saltPile.position.set(-2.15, 0.76, 2.05);
+    sumoGroup.add(saltBucket, saltPile);
+
+    const kohakuRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.55 });
+    const kohakuWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.55 });
+    const sumoPillarCoords: [number, number, number][] = [
+      [-2.35, -2.25, 0x16a34a],
+      [2.35, -2.25, 0xdc2626],
+      [-2.35, 2.25, 0xf8fafc],
+      [2.35, 2.25, 0x1e293b],
+    ];
+    for (const [px, pz, tasselHex] of sumoPillarCoords) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.21, 2.95, 12), hinokiMat);
+      pillar.position.set(px, 1.92, pz);
+      pillar.castShadow = true;
+      sumoGroup.add(pillar);
+
+      for (let b = 0; b < 4; b++) {
+        const wrap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.215, 0.22, 0.26, 12),
+          b % 2 === 0 ? kohakuRedMat : kohakuWhiteMat
+        );
+        wrap.position.set(px, 0.72 + b * 0.26, pz);
+        sumoGroup.add(wrap);
+      }
+
+      const tassel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.16, 0.62, 10),
+        new THREE.MeshStandardMaterial({ color: tasselHex, roughness: 0.5 })
+      );
+      tassel.position.set(px * 0.78, 2.76, pz * 0.78);
+      sumoGroup.add(tassel);
+    }
+
+    const purpleCurtainMat = new THREE.MeshStandardMaterial({
+      color: 0x581c87,
+      emissive: 0x3b0764,
+      emissiveIntensity: 0.25,
+      roughness: 0.65,
+    });
+    const curtainFront = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.42, 0.12), purpleCurtainMat);
+    curtainFront.position.set(0, 3.02, 2.28);
+    const curtainBack = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.42, 0.12), purpleCurtainMat);
+    curtainBack.position.set(0, 3.02, -2.28);
+    const curtainLeft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 4.65), purpleCurtainMat);
+    curtainLeft.position.set(-2.36, 3.02, 0);
+    const curtainRight = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 4.65), purpleCurtainMat);
+    curtainRight.position.set(2.36, 3.02, 0);
+    sumoGroup.add(curtainFront, curtainBack, curtainLeft, curtainRight);
+
+    const sumoRoofBase = new THREE.Mesh(
+      new THREE.BoxGeometry(6.4, 0.28, 6.1),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.52 })
+    );
+    sumoRoofBase.position.set(0, 3.34, 0);
+    sumoRoofBase.castShadow = true;
+    const sumoRoofTop = new THREE.Mesh(
+      new THREE.ConeGeometry(4.45, 1.55, 4),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.52 })
+    );
+    sumoRoofTop.rotation.y = Math.PI / 4;
+    sumoRoofTop.position.set(0, 4.2, 0);
+    sumoRoofTop.castShadow = true;
+    const sumoRoofSnow = new THREE.Mesh(new THREE.ConeGeometry(4.26, 0.82, 4), roofSnowMat);
+    sumoRoofSnow.rotation.y = Math.PI / 4;
+    sumoRoofSnow.position.set(0, 4.62, 0);
+    const sumoTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(6.5, 0.11, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.4 })
+    );
+    sumoTrim.position.set(0, 3.28, 3.06);
+    sumoGroup.add(sumoRoofBase, sumoRoofTop, sumoRoofSnow, sumoTrim);
+
+    const gunbaiGoldMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.4,
+      metalness: 0.5,
+      roughness: 0.3,
+    });
+    const gunbaiFan = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.14, 18), kohakuRedMat);
+    gunbaiFan.scale.set(0.88, 1, 1.08);
+    gunbaiFan.rotation.x = Math.PI / 2;
+    gunbaiFan.position.set(0, 3.82, 2.22);
+    const gunbaiRim = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.055, 8, 20), gunbaiGoldMat);
+    gunbaiRim.position.set(0, 3.82, 2.28);
+    const gunbaiHandle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.48, 0.12), gunbaiGoldMat);
+    gunbaiHandle.position.set(0, 3.35, 2.28);
+    sumoGroup.add(gunbaiFan, gunbaiRim, gunbaiHandle);
+
+    const teppoPost = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.65, 12), hinokiMat);
+    teppoPost.position.set(1.95, 1.28, 1.85);
+    teppoPost.castShadow = true;
+    const teppoBand = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.24, 12), kohakuWhiteMat);
+    teppoBand.position.set(1.95, 1.55, 1.85);
+    sumoGroup.add(teppoPost, teppoBand);
+
+    scene.add(sumoGroup);
+
+    const sumoTagEl = document.createElement('div');
+    sumoTagEl.className = 'player-tag cursor-pointer';
+    sumoTagEl.onclick = () => {
+      cameraLookAtRef.current.set(sumoPos.x, 2.1, sumoPos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(sumoPos.x + 2.2, 5.6, sumoPos.z + 9.0);
+      if (isNearSumoRef.current) {
+        setIsSumoOpen(true);
+      } else if (walkingSpectatorIdRef.current !== null) {
+        walkTargetRef.current = new THREE.Vector3(sumoPos.x, 0.2, sumoPos.z + 3.4);
+      }
+    };
+    sumoTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-purple-900 via-red-700 to-amber-500 text-amber-100 border-2 border-amber-200 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        🏯 สังเวียนซูโม่ฮอกไกโด (ชนพุงดันตกเวที 1v1 / ไต่ยศโยโกซึนะ!)
+      </div>
+    `;
+    labelsContainer.appendChild(sumoTagEl);
+
+    // B) South Wing: 3D Taekwondo Dojang Pavilion (สำนักเทควันโด — ขนาบฝั่งใต้ของลานกีฬาห่างจากคอร์ทอย่างโปร่งสบาย!)
+    const rawDojangZ = 23.2;
+    const dojangPos = new THREE.Vector3(
+      sportsPlazaX,
+      0.2,
+      Math.max(-(islandD / 2 - 4.5), Math.min(islandD / 2 - 4.5, rawDojangZ))
     );
     const dojangGroup = new THREE.Group();
     dojangGroup.position.copy(dojangPos);
-    dojangGroup.rotation.y = Math.PI * 0.15; // หันหน้าสำนักเข้าหาลานด้านหลังจุดเริ่มต้น
+    dojangGroup.rotation.y = -Math.PI * 0.1;
 
-    // Wooden Raised Stage
     const dojangDeck = new THREE.Mesh(
       new THREE.BoxGeometry(5.6, 0.24, 5.0),
       new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 })
@@ -3410,7 +3544,6 @@ export default function Arena3DPage() {
     dojangDeck.receiveShadow = true;
     dojangGroup.add(dojangDeck);
 
-    // Classic Blue & Red Taekwondo Competition Mat
     const matBlue = new THREE.Mesh(
       new THREE.BoxGeometry(4.6, 0.08, 4.0),
       new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.7 })
@@ -3424,7 +3557,6 @@ export default function Arena3DPage() {
     matRed.position.set(0, 0.285, 0);
     dojangGroup.add(matBlue, matRed);
 
-    // Traditional White Back Wall & 4 Red Wooden Pillars
     const dojangBackWall = new THREE.Mesh(
       new THREE.BoxGeometry(4.6, 2.6, 0.22),
       new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.75 })
@@ -3435,20 +3567,19 @@ export default function Arena3DPage() {
     dojangGroup.add(dojangBackWall);
 
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.6 });
-    const pillarCoords: [number, number][] = [
+    const tkdPillarCoords: [number, number][] = [
       [-2.25, -1.85],
       [2.25, -1.85],
       [-2.25, 1.85],
       [2.25, 1.85],
     ];
-    for (const [px, pz] of pillarCoords) {
+    for (const [px, pz] of tkdPillarCoords) {
       const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 2.7, 10), pillarMat);
       pillar.position.set(px, 1.58, pz);
       pillar.castShadow = true;
       dojangGroup.add(pillar);
     }
 
-    // Traditional Dark-Slate Korean Dojang Roof + Gold Trim
     const dojangRoofBase = new THREE.Mesh(
       new THREE.BoxGeometry(6.1, 0.26, 5.4),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 })
@@ -3462,14 +3593,16 @@ export default function Arena3DPage() {
     dojangRoofTop.rotation.y = Math.PI / 4;
     dojangRoofTop.position.set(0, 3.82, 0);
     dojangRoofTop.castShadow = true;
+    const dojangRoofSnow = new THREE.Mesh(new THREE.ConeGeometry(3.96, 0.74, 4), roofSnowMat);
+    dojangRoofSnow.rotation.y = Math.PI / 4;
+    dojangRoofSnow.position.set(0, 4.22, 0);
     const dojangTrim = new THREE.Mesh(
       new THREE.BoxGeometry(6.2, 0.1, 0.16),
       new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.35 })
     );
     dojangTrim.position.set(0, 2.94, 2.72);
-    dojangGroup.add(dojangRoofBase, dojangRoofTop, dojangTrim);
+    dojangGroup.add(dojangRoofBase, dojangRoofTop, dojangRoofSnow, dojangTrim);
 
-    // Taegeuk Crest Emblem on Front Roof
     const crestRed = new THREE.Mesh(
       new THREE.CylinderGeometry(0.52, 0.52, 0.14, 18),
       new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.35 })
@@ -3484,7 +3617,6 @@ export default function Arena3DPage() {
     crestBlue.position.set(0, 3.45, 1.97);
     dojangGroup.add(crestRed, crestBlue);
 
-    // Standing Kicking Target Pad on Front-Right Corner
     const padStand = new THREE.Mesh(
       new THREE.CylinderGeometry(0.34, 0.42, 0.32, 12),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 })
@@ -3509,17 +3641,333 @@ export default function Arena3DPage() {
     dojangTagEl.className = 'player-tag cursor-pointer';
     dojangTagEl.onclick = () => {
       cameraLookAtRef.current.set(dojangPos.x, 1.9, dojangPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(dojangPos.x + 2.4, 4.6, dojangPos.z + 6.8);
+      cameraTargetPosRef.current = new THREE.Vector3(dojangPos.x + 2.4, 5.2, dojangPos.z + 8.5);
       if (isNearDojangRef.current) {
         setIsTaekwondoOpen(true);
+      } else if (walkingSpectatorIdRef.current !== null) {
+        walkTargetRef.current = new THREE.Vector3(dojangPos.x - 1.2, 0.2, dojangPos.z - 2.6);
       }
     };
     dojangTagEl.innerHTML = `
       <div class="bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-        🥋 สำนักเทควันโด (เดินเข้ามาเตะเป้าเลื่อนสาย!)
+        🥋 สำนักเทควันโด (เดินเข้ามาเตะเป้าเลื่อนสาย &amp; ดวล PvP!)
       </div>
     `;
     labelsContainer.appendChild(dojangTagEl);
+
+    // C) Center: 3D Hokkaido Snow Volleyball Court Zone
+    const vbCourtPos = new THREE.Vector3(
+      sportsPlazaX,
+      0.08,
+      -2.2
+    );
+    const vbCourtGroup = new THREE.Group();
+    vbCourtGroup.position.copy(vbCourtPos);
+
+    // Raised Hokkaido Snow Volleyball Court Pad
+    const vbSandPad = new THREE.Mesh(
+      new THREE.BoxGeometry(13.6, 0.14, 8.6),
+      new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.75 })
+    );
+    vbSandPad.position.y = 0.07;
+    vbSandPad.receiveShadow = true;
+    vbCourtGroup.add(vbSandPad);
+
+    // Subtle Blue Team (Left) & Red Team (Right) Court Zones
+    const vbBlueHalf = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.95, 7.3),
+      new THREE.MeshBasicMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.32 })
+    );
+    vbBlueHalf.rotation.x = -Math.PI / 2;
+    vbBlueHalf.position.set(-3.05, 0.15, 0);
+    const vbRedHalf = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.95, 7.3),
+      new THREE.MeshBasicMaterial({ color: 0xe11d48, transparent: true, opacity: 0.32 })
+    );
+    vbRedHalf.rotation.x = -Math.PI / 2;
+    vbRedHalf.position.set(3.05, 0.15, 0);
+    vbCourtGroup.add(vbBlueHalf, vbRedHalf);
+
+    // Crisp White Court Boundary Lines & Center Line
+    const vbLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    [-3.72, 3.72].forEach((lz) => {
+      const longLine = new THREE.Mesh(new THREE.BoxGeometry(12.2, 0.04, 0.16), vbLineMat);
+      longLine.position.set(0, 0.155, lz);
+      vbCourtGroup.add(longLine);
+    });
+    [-6.05, 0, 6.05].forEach((lx) => {
+      const shortLine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 7.6), vbLineMat);
+      shortLine.position.set(lx, 0.155, 0);
+      vbCourtGroup.add(shortLine);
+    });
+
+    // 4 Corner Team Pennant Flags (Blue on Left, Red on Right)
+    [
+      [-6.1, -3.8, 0x2563eb],
+      [-6.1, 3.8, 0x2563eb],
+      [6.1, -3.8, 0xe11d48],
+      [6.1, 3.8, 0xe11d48],
+    ].forEach(([fx, fz, fCol]) => {
+      const fPole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, 1.55, 6),
+        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 })
+      );
+      fPole.position.set(fx, 0.9, fz);
+      const flag = new THREE.Mesh(
+        new THREE.ConeGeometry(0.24, 0.62, 3),
+        new THREE.MeshStandardMaterial({ color: fCol, roughness: 0.5 })
+      );
+      flag.rotation.z = fx < 0 ? Math.PI / 2 : -Math.PI / 2;
+      flag.position.set(fx + (fx < 0 ? -0.28 : 0.28), 1.48, fz);
+      vbCourtGroup.add(fPole, flag);
+    });
+
+    // Center Volleyball Net Posts + Yellow Top Tape + Checkered Mesh + Red Antennas
+    const vbPostMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.25, roughness: 0.35 });
+    [-4.1, 4.1].forEach((pz) => {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 2.75, 10), vbPostMat);
+      post.position.set(0, 1.5, pz);
+      post.castShadow = true;
+      const antenna = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.65, 6),
+        new THREE.MeshStandardMaterial({ color: 0xef4444 })
+      );
+      antenna.position.set(0, 3.05, pz * 0.9);
+      vbCourtGroup.add(post, antenna);
+    });
+
+    const vbTopTape = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.16, 8.3),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.25 })
+    );
+    vbTopTape.position.set(0, 2.72, 0);
+    vbCourtGroup.add(vbTopTape);
+
+    const vbNetCanvas = document.createElement('canvas');
+    vbNetCanvas.width = 128;
+    vbNetCanvas.height = 64;
+    const vnCtx = vbNetCanvas.getContext('2d');
+    if (vnCtx) {
+      vnCtx.clearRect(0, 0, 128, 64);
+      vnCtx.strokeStyle = 'rgba(255,255,255,0.88)';
+      vnCtx.lineWidth = 3;
+      for (let nx = 0; nx <= 128; nx += 16) {
+        vnCtx.beginPath();
+        vnCtx.moveTo(nx, 0);
+        vnCtx.lineTo(nx, 64);
+        vnCtx.stroke();
+      }
+      for (let ny = 0; ny <= 64; ny += 16) {
+        vnCtx.beginPath();
+        vnCtx.moveTo(0, ny);
+        vnCtx.lineTo(128, ny);
+        vnCtx.stroke();
+      }
+    }
+    const vbNetTex = new THREE.CanvasTexture(vbNetCanvas);
+    vbNetTex.wrapS = THREE.RepeatWrapping;
+    vbNetTex.wrapT = THREE.RepeatWrapping;
+    vbNetTex.repeat.set(4, 1);
+    const vbNetPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(8.1, 1.55),
+      new THREE.MeshBasicMaterial({ map: vbNetTex, transparent: true, side: THREE.DoubleSide })
+    );
+    vbNetPlane.rotation.y = Math.PI / 2;
+    vbNetPlane.position.set(0, 1.88, 0);
+    vbCourtGroup.add(vbNetPlane);
+
+    // Tall Beach Referee Chair beside Back Net Post
+    const refChair = new THREE.Group();
+    const chairWoodMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
+    [
+      [-0.35, -0.35],
+      [0.35, -0.35],
+      [-0.35, 0.35],
+      [0.35, 0.35],
+    ].forEach(([lx, lz]) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.2, 6), chairWoodMat);
+      leg.position.set(lx, 1.1, lz);
+      refChair.add(leg);
+    });
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 0.85), chairWoodMat);
+    seat.position.y = 2.2;
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(0.95, 0.55, 4),
+      new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.5 })
+    );
+    canopy.rotation.y = Math.PI / 4;
+    canopy.position.y = 3.35;
+    refChair.add(seat, canopy);
+    refChair.position.set(0, 0.12, -4.85);
+    vbCourtGroup.add(refChair);
+
+    // Giant Floating Pikachu-Style Beach Volleyball Mascot spinning above the court!
+    const vbBallCanvas = document.createElement('canvas');
+    vbBallCanvas.width = 128;
+    vbBallCanvas.height = 64;
+    const vbcCtx = vbBallCanvas.getContext('2d');
+    if (vbcCtx) {
+      const cols = ['#ffffff', '#facc15', '#38bdf8', '#f43f5e', '#ffffff', '#facc15'];
+      const sw = 128 / cols.length;
+      cols.forEach((cHex, ci) => {
+        vbcCtx.fillStyle = cHex;
+        vbcCtx.fillRect(ci * sw, 0, sw + 1, 64);
+      });
+    }
+    const vbBallTex = new THREE.CanvasTexture(vbBallCanvas);
+    vbBallTex.colorSpace = THREE.SRGBColorSpace;
+    const vbMascotBall = new THREE.Mesh(
+      new THREE.SphereGeometry(0.72, 20, 16),
+      new THREE.MeshStandardMaterial({
+        map: vbBallTex,
+        roughness: 0.3,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.18,
+      })
+    );
+    vbMascotBall.position.set(0, 3.85, 0);
+    vbMascotBall.castShadow = true;
+    vbCourtGroup.add(vbMascotBall);
+
+    const vbActivePlayersGroup = new THREE.Group();
+    vbCourtGroup.add(vbActivePlayersGroup);
+    interface VbIslandCourtActor {
+      slotId: 'L1' | 'L2' | 'R1' | 'R2';
+      playerId: number;
+      isBot: boolean;
+      team: 'left' | 'right';
+      root: THREE.Group;
+      charParts: ReturnType<typeof buildCharacterMesh>;
+      baseX: number;
+      baseZ: number;
+      tagEl: HTMLDivElement;
+    }
+    let vbCourtActors: VbIslandCourtActor[] = [];
+    let vbRenderedRosterSig = '';
+    let vbRenderedTagSig = '';
+
+    const clearVbCourtActors = () => {
+      vbCourtActors.forEach((a) => {
+        a.charParts.rootGroup.userData.disposed = true;
+        a.tagEl.remove();
+      });
+      vbCourtActors = [];
+      while (vbActivePlayersGroup.children.length > 0) {
+        const ch = vbActivePlayersGroup.children[0];
+        vbActivePlayersGroup.remove(ch);
+        disposeObject3D(ch);
+      }
+    };
+
+    scene.add(vbCourtGroup);
+
+    const vbCourtTagEl = document.createElement('div');
+    vbCourtTagEl.className = 'player-tag cursor-pointer';
+    vbCourtTagEl.onclick = () => {
+      cameraLookAtRef.current.set(vbCourtPos.x, 1.8, vbCourtPos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(vbCourtPos.x, 8.2, vbCourtPos.z + 13.5);
+      if (isNearVbCourtRef.current || liveVbLobbyRef.current?.status === 'started') {
+        setVbSession({
+          roomCode: '7777',
+          mode: liveVbLobbyRef.current?.mode || '2v2',
+          isHost: false,
+        });
+      } else if (walkingSpectatorIdRef.current !== null) {
+        walkTargetRef.current = new THREE.Vector3(vbCourtPos.x - 2.2, 0.2, vbCourtPos.z + 1.5);
+      }
+    };
+    vbCourtTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-sky-300 via-cyan-200 to-blue-400 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        🏐❄️ สนามวอลเลย์บอลหิมะฮอกไกโด (เดินเข้าคอร์ทเพื่อเข้าห้องรอ 1v1 / 2v2!)
+      </div>
+    `;
+    labelsContainer.appendChild(vbCourtTagEl);
+
+    // 3D Mini Football Penalty Shootout Pitch Zone (ข้างสนามวอลเลย์บอลฝั่งใต้ — เดินเข้ามาดวลจุดโทษ 3D 1v1 ได้เลย!)
+    const penaltyPitchPos = new THREE.Vector3(
+      vbCourtPos.x,
+      0.08,
+      Math.min(islandD / 2 - 6.8, 10.6)
+    );
+    const penaltyPitchGroup = new THREE.Group();
+    penaltyPitchGroup.position.copy(penaltyPitchPos);
+
+    const penTurf = new THREE.Mesh(
+      new THREE.BoxGeometry(9.6, 0.14, 6.8),
+      new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.78 })
+    );
+    penTurf.position.y = 0.07;
+    penTurf.receiveShadow = true;
+    penaltyPitchGroup.add(penTurf);
+
+    const penLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const penBoxBorder = new THREE.Mesh(new THREE.RingGeometry(2.6, 2.75, 4), penLineMat);
+    penBoxBorder.rotation.x = -Math.PI / 2;
+    penBoxBorder.rotation.z = Math.PI / 4;
+    penBoxBorder.scale.set(1.45, 0.95, 1);
+    penBoxBorder.position.set(0, 0.15, 0);
+    penaltyPitchGroup.add(penBoxBorder);
+
+    const penSpotDot = new THREE.Mesh(new THREE.CircleGeometry(0.18, 14), penLineMat);
+    penSpotDot.rotation.x = -Math.PI / 2;
+    penSpotDot.position.set(-1.3, 0.155, 0);
+    penaltyPitchGroup.add(penSpotDot);
+
+    // 3D Football Goalpost on East end of the mini pitch
+    const penPostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+    [-1.8, 1.8].forEach((gz) => {
+      const gPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2, 10), penPostMat);
+      gPost.position.set(3.6, 1.15, gz);
+      gPost.castShadow = true;
+      penaltyPitchGroup.add(gPost);
+    });
+    const gCrossbar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.76, 10), penPostMat);
+    gCrossbar.rotation.x = Math.PI / 2;
+    gCrossbar.position.set(3.6, 2.25, 0);
+    penaltyPitchGroup.add(gCrossbar);
+
+    const gBackNet = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.6, 2.15),
+      new THREE.MeshBasicMaterial({ map: vbNetTex, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+    );
+    gBackNet.rotation.y = Math.PI / 2;
+    gBackNet.position.set(4.15, 1.15, 0);
+    penaltyPitchGroup.add(gBackNet);
+
+    const penBallMascot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.45, 16, 14),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35 })
+    );
+    penBallMascot.position.set(-1.3, 0.6, 0);
+    penBallMascot.castShadow = true;
+    penaltyPitchGroup.add(penBallMascot);
+
+    scene.add(penaltyPitchGroup);
+
+    const penaltyTagEl = document.createElement('div');
+    penaltyTagEl.className = 'player-tag cursor-pointer';
+    penaltyTagEl.onclick = () => {
+      cameraLookAtRef.current.set(penaltyPitchPos.x, 1.5, penaltyPitchPos.z);
+      cameraTargetPosRef.current = new THREE.Vector3(
+        penaltyPitchPos.x - 2.5,
+        7.4,
+        penaltyPitchPos.z + 11.2
+      );
+      if (isNearPenaltyPitchRef.current) {
+        setPenaltySession({
+          roomCode: '6666',
+          isHost: false,
+        });
+      } else if (walkingSpectatorIdRef.current !== null) {
+        walkTargetRef.current = new THREE.Vector3(penaltyPitchPos.x - 1.8, 0.2, penaltyPitchPos.z);
+      }
+    };
+    penaltyTagEl.innerHTML = `
+      <div class="bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+        ⚽🥅 สนามดวลจุดโทษ 3D (เดินเข้ามาดวลจุดโทษ 1v1 / ซ้อม AI!)
+      </div>
+    `;
+    labelsContainer.appendChild(penaltyTagEl);
 
     // 3D Ragnarok Mobile Style Wooden Quest Board (วางไว้ใกล้พี่ยามแบบมีระยะห่างกำลังดี — กดเปิดกระดานเควสได้ทันที!)
     const rawBoardPos = guardPostPos
@@ -3571,19 +4019,25 @@ export default function Arena3DPage() {
     boardBack.position.set(0, 1.78, 0.01);
     questBoardGroup.add(boardFrame, boardBack);
 
-    // Sloped shingled wooden roof + carved crest on top
+    // Sloped shingled wooden roof + carved crest + Hokkaido snow blanket on top
     const roofLeft = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.16, 1.15), roWoodRoofMat);
     roofLeft.position.set(-0.76, 2.86, 0.06);
     roofLeft.rotation.z = 0.28;
     roofLeft.castShadow = true;
+    const roofLeftSnow = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.11, 1.2), roofSnowMat);
+    roofLeftSnow.position.set(-0.78, 2.97, 0.06);
+    roofLeftSnow.rotation.z = 0.28;
     const roofRight = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.16, 1.15), roWoodRoofMat);
     roofRight.position.set(0.76, 2.86, 0.06);
     roofRight.rotation.z = -0.28;
     roofRight.castShadow = true;
+    const roofRightSnow = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.11, 1.2), roofSnowMat);
+    roofRightSnow.position.set(0.78, 2.97, 0.06);
+    roofRightSnow.rotation.z = -0.28;
     const roofCrest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.42, 0.26), roWoodMidMat);
     roofCrest.position.set(0, 3.22, 0.06);
     roofCrest.castShadow = true;
-    questBoardGroup.add(roofLeft, roofRight, roofCrest);
+    questBoardGroup.add(roofLeft, roofLeftSnow, roofRight, roofRightSnow, roofCrest);
 
     // Pinned parchment quest notices (cream, gold, mint green) with red/gold pushpins
     const pinnedNotices = [
@@ -3614,25 +4068,18 @@ export default function Arena3DPage() {
     });
     scene.add(questBoardGroup);
 
-    // 3D Floating Krathongs Orbiting the Island (Dynamic Zero-Flicker Sync)
-    const krathongSceneGroup = new THREE.Group();
-    scene.add(krathongSceneGroup);
-    const maxVisibleKrathongs = qCfg.tier === 'lite' ? 18 : qCfg.tier === 'medium' ? 28 : 42;
-    interface ActiveKrathongEntry {
-      key: string;
-      item: KrathongItem;
-      isMine: boolean;
-      parts: KrathongMeshParts;
-      tagEl: HTMLDivElement;
-    }
-    const activeKrathongMap = new Map<string, ActiveKrathongEntry>();
-    const escapeKrathongHtml = (str: string) =>
-      str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    let lastKrathongSyncSig = '';
+    // Pluggable 3D Seasonal Festival World Controller (e.g., floating Krathongs around the island)
+    const festivalSceneController: FestivalSceneController | null =
+      festival.moduleRef.current?.createSceneController({
+        scene,
+        labelsContainer,
+        qualityTier: qCfg.tier,
+        islandCenterX,
+        islandW,
+        islandD,
+        showToast,
+        onFocusItem: festival.focusItem,
+      }) ?? null;
 
     const questBoardTagEl = document.createElement('div');
     questBoardTagEl.className = 'player-tag pointer-events-none';
@@ -4533,6 +4980,168 @@ export default function Arena3DPage() {
         isl.position.y = -0.35 + Math.sin(elapsed * 1.6 + ii * 2.1) * 0.08;
         isl.rotation.z = Math.sin(elapsed * 1.25 + ii * 1.5) * 0.045;
       });
+      // Sync live 3D characters & court banner onto the Island Volleyball Court!
+      const liveVb = liveVbLobbyRef.current;
+      const nextVbRosterSig = liveVb
+        ? `${liveVb.status}|${liveVb.mode}|${(liveVb.roster || [])
+            .map((r) => `${r.slotId}:${r.playerId}:${r.name}:${r.isBot ? 1 : 0}`)
+            .join(',')}`
+        : '';
+      if (nextVbRosterSig !== vbRenderedRosterSig) {
+        vbRenderedRosterSig = nextVbRosterSig;
+        clearVbCourtActors();
+        if (liveVb && liveVb.roster && liveVb.roster.length > 0) {
+          const curPlayers = playersRef.current;
+          liveVb.roster.forEach((slotEntry, sIdx) => {
+            const found = slotEntry.playerId
+              ? curPlayers.find((p) => p.id === slotEntry.playerId) ||
+                curPlayers[(sIdx + 1) % Math.max(1, curPlayers.length)]
+              : curPlayers[(sIdx + 1) % Math.max(1, curPlayers.length)];
+            const team: 'left' | 'right' = slotEntry.slotId.startsWith('L') ? 'left' : 'right';
+            const cParts = buildCharacterMesh({
+              colorHex: found?.colorHex || (team === 'left' ? '#38BDF8' : '#FB7185'),
+              accessory: 'headband',
+              bandColor: team === 'left' ? '#38BDF8' : '#EF4444',
+              bellyScale: found?.bellyScale ?? found?.bmiBellyScale ?? 1,
+              muscleScale: found?.muscleScale ?? 1,
+              showDumbbells: false,
+              species: found?.breed || found?.species || 'bunny',
+              equipHat: found?.equipHat || 'none',
+              equipFace: found?.equipFace || 'face_none',
+              equipArmor: found?.equipArmor || 'armor_none',
+              equipWeapon: found?.equipWeapon || 'weapon_none',
+              equipWings: found?.equipWings || 'wings_none',
+              equipAura: found?.equipAura || 'aura_none',
+              equipMount: 'mount_none',
+              propColors: found?.propColors,
+              animMode: 'cheer',
+              animSeed: sIdx * 1.6,
+            });
+            cParts.rootGroup.scale.setScalar(0.84);
+            const actorRoot = new THREE.Group();
+            actorRoot.add(cParts.rootGroup);
+            const ring = new THREE.Mesh(
+              new THREE.RingGeometry(0.48, 0.62, 20),
+              new THREE.MeshBasicMaterial({
+                color: team === 'left' ? 0x38bdf8 : 0xf43f5e,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9,
+              })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.02;
+            actorRoot.add(ring);
+
+            const is2v2 = liveVb.mode === '2v2';
+            const baseX =
+              slotEntry.slotId === 'L1'
+                ? is2v2
+                  ? -2.35
+                  : -2.85
+                : slotEntry.slotId === 'L2'
+                  ? -4.15
+                  : slotEntry.slotId === 'R1'
+                    ? is2v2
+                      ? 2.35
+                      : 2.85
+                    : 4.15;
+            const baseZ = !is2v2
+              ? 0
+              : slotEntry.slotId.endsWith('1')
+                ? -1.35
+                : 1.35;
+            actorRoot.position.set(baseX, 0.15, baseZ);
+            actorRoot.rotation.y = team === 'left' ? 0 : Math.PI;
+            vbActivePlayersGroup.add(actorRoot);
+
+            const actorTag = document.createElement('div');
+            actorTag.className = 'player-tag pointer-events-none';
+            const pillStyle =
+              team === 'left'
+                ? 'bg-sky-950/90 border-sky-300 text-sky-100'
+                : 'bg-rose-950/90 border-rose-300 text-rose-100';
+            actorTag.innerHTML = `
+              <div class="px-2 py-0.5 rounded-full border ${pillStyle} text-[9.5px] font-extrabold whitespace-nowrap shadow">
+                ${slotEntry.emoji} ${slotEntry.name}
+              </div>
+            `;
+            labelsContainer.appendChild(actorTag);
+
+            vbCourtActors.push({
+              slotId: slotEntry.slotId,
+              playerId: slotEntry.playerId,
+              isBot: Boolean(slotEntry.isBot),
+              team,
+              root: actorRoot,
+              charParts: cParts,
+              baseX,
+              baseZ,
+              tagEl: actorTag,
+            });
+          });
+        }
+      }
+
+      const nextVbTagSig = liveVb
+        ? `${liveVb.status}|${liveVb.mode}|${liveVb.count}|${liveVb.max}|${liveVb.scoreLeft ?? 0}|${liveVb.scoreRight ?? 0}`
+        : 'idle';
+      if (nextVbTagSig !== vbRenderedTagSig) {
+        vbRenderedTagSig = nextVbTagSig;
+        if (liveVb?.status === 'started') {
+          vbCourtTagEl.innerHTML = `
+            <div class="bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white border-2 border-amber-200 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+              🔒 กำลังแข่ง ${liveVb.mode.toUpperCase()} (${liveVb.scoreLeft ?? 0} : ${liveVb.scoreRight ?? 0}) • ล็อกทีละ 1 รอบ (คลิกดูผู้เล่นในสนาม!)
+            </div>
+          `;
+        } else if (liveVb?.status === 'waiting') {
+          vbCourtTagEl.innerHTML = `
+            <div class="bg-gradient-to-r from-emerald-300 via-amber-200 to-cyan-300 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+              🟢 ห้องรอวอลเลย์บอล ${liveVb.mode.toUpperCase()} (${liveVb.count}/${liveVb.max} คน) • เดินเข้าคอร์ทเพื่อร่วมตี้!
+            </div>
+          `;
+        } else {
+          vbCourtTagEl.innerHTML = `
+            <div class="bg-gradient-to-r from-sky-300 via-cyan-200 to-blue-400 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
+              🏐❄️ สนามวอลเลย์บอลหิมะฮอกไกโด (เดินเข้าคอร์ทเพื่อเข้าห้องรอ 1v1 / 2v2!)
+            </div>
+          `;
+        }
+      }
+
+      if (liveVb?.status === 'started') {
+        const rallyPhase = elapsed * 2.6;
+        const rallySin = Math.sin(rallyPhase);
+        vbMascotBall.position.set(
+          rallySin * 3.35,
+          1.85 + Math.abs(Math.cos(rallyPhase)) * 2.25,
+          Math.sin(elapsed * 1.35) * 1.15
+        );
+        vbMascotBall.rotation.y = elapsed * 3.2;
+        vbMascotBall.rotation.z = -rallySin * 2.4;
+
+        vbCourtActors.forEach((act, ai) => {
+          const ballTowardMe = act.team === 'left' ? rallySin < -0.55 : rallySin > 0.55;
+          const jumpY = ballTowardMe ? Math.abs(Math.sin(elapsed * 7.5 + ai)) * 0.72 : Math.abs(Math.sin(elapsed * 3.8 + ai)) * 0.08;
+          const swayX = Math.sin(elapsed * 2.8 + ai * 1.4) * 0.28;
+          act.root.position.set(act.baseX + swayX, 0.15 + jumpY, act.baseZ);
+          act.charParts.mixer?.update(delta);
+          if (!act.charParts.mixer) {
+            act.charParts.armL.rotation.z = ballTowardMe ? 2.4 : 0.35;
+            act.charParts.armR.rotation.z = ballTowardMe ? 2.4 : -0.35;
+          }
+        });
+      } else {
+        vbMascotBall.position.set(0, 3.85 + Math.sin(elapsed * 2.8) * 0.32, 0);
+        vbMascotBall.rotation.y = elapsed * 1.4;
+        vbMascotBall.rotation.z = elapsed * 0.7;
+
+        vbCourtActors.forEach((act, ai) => {
+          const hop = Math.abs(Math.sin(elapsed * 4.2 + ai * 1.3)) * 0.14;
+          act.root.position.set(act.baseX, 0.15 + hop, act.baseZ);
+          act.charParts.mixer?.update(delta);
+        });
+      }
       palmCrowns.forEach((crown, pi) => {
         crown.rotation.z = Math.sin(elapsed * 1.5 + pi * 0.85) * 0.05;
         crown.rotation.x = Math.cos(elapsed * 1.2 + pi * 1.1) * 0.038;
@@ -4563,22 +5172,36 @@ export default function Arena3DPage() {
       }
 
       const bkkW = bkkWeatherRef.current;
-      const forceFullMoon = isFullMoonSkyRef.current;
-      if (forceFullMoon || bkkW) {
-        const { targetHex, targetLightHex, targetHemi, targetDir, isRaining, showNight } =
-          resolveWeatherTargets(bkkW, forceFullMoon);
+      const activeFestivalWeather = festival.activeWeatherOverrideRef.current;
+      const {
+        targetHex,
+        targetLightHex,
+        targetHemi,
+        targetDir,
+        isRaining,
+        isSnowing,
+        isBlizzard,
+        isDiamondDust,
+        fogDensity,
+        showNight,
+        oceanColorHex,
+        oceanEmissiveHex,
+        cloudColorHex,
+      } = resolveIslandWeatherTargets(bkkW, activeFestivalWeather);
 
+      if (activeFestivalWeather || bkkW) {
         tempSkyCol.setHex(targetHex);
         skyColor.lerp(tempSkyCol, 0.04);
         scene.background = skyColor;
         if (scene.fog instanceof THREE.FogExp2) {
           scene.fog.color.lerp(tempSkyCol, 0.04);
+          scene.fog.density += (fogDensity - scene.fog.density) * 0.04;
         }
         tempLightCol.setHex(targetLightHex);
         dirLight.color.lerp(tempLightCol, 0.05);
         hemiLight.intensity += (targetHemi - hemiLight.intensity) * 0.05;
         const lightningFlash =
-          !forceFullMoon &&
+          !activeFestivalWeather &&
             bkkW?.condition === 'storm' &&
             Math.sin(elapsed * 7.3) > 0.97 &&
             Math.sin(elapsed * 19.1) > 0.6
@@ -4586,16 +5209,54 @@ export default function Arena3DPage() {
             : 0;
         dirLight.intensity += (targetDir + lightningFlash - dirLight.intensity) * 0.12;
 
-        // ปรับสีน้ำทะเลและเมฆให้เข้ากับแสงจันทร์วันเพ็ญอย่างนุ่มนวล
         if (oceanMesh) {
           const oMat = oceanMesh.material as THREE.MeshStandardMaterial;
-          tempLightCol.setHex(showNight ? 0x072b59 : 0x0ea5e9);
+          tempLightCol.setHex(oceanColorHex);
           oMat.color.lerp(tempLightCol, 0.04);
-          tempLightCol.setHex(showNight ? 0x0c4a6e : 0x0369a1);
+          tempLightCol.setHex(oceanEmissiveHex);
           oMat.emissive.lerp(tempLightCol, 0.04);
         }
-        tempLightCol.setHex(showNight ? 0x475569 : 0xffffff);
+        tempLightCol.setHex(cloudColorHex);
         cloudMat.color.lerp(tempLightCol, 0.04);
+
+        // Live Hokkaido Snowfall & Blizzard particle physics
+        snowPoints.visible = isSnowing;
+        if (isSnowing) {
+          const fallSpeed = isBlizzard ? 0.31 : 0.095;
+          const windPush = isBlizzard
+            ? Math.max(0.18, ((bkkW?.windKmh ?? 30) / 100) * 0.65)
+            : Math.max(0.015, ((bkkW?.windKmh ?? 8) / 100) * 0.14);
+          snowMat.size = isBlizzard ? 0.54 : 0.44;
+          const sAttr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
+          const halfSpanX = snowSpanX / 2;
+          const halfSpanZ = snowSpanZ / 2;
+          for (let i = 0; i < snowCount; i++) {
+            const seed = snowSeeds[i];
+            let sx = sAttr.getX(i) + windPush + Math.sin(elapsed * 1.6 + seed) * 0.026;
+            let sy = sAttr.getY(i) - fallSpeed;
+            let sz = sAttr.getZ(i) + (isBlizzard ? windPush * 0.35 : Math.cos(elapsed * 1.3 + seed) * 0.018);
+            if (sy < 0) sy = 26;
+            if (sx > islandCenterX + halfSpanX) sx -= snowSpanX;
+            if (sx < islandCenterX - halfSpanX) sx += snowSpanX;
+            if (sz > halfSpanZ) sz -= snowSpanZ;
+            if (sz < -halfSpanZ) sz += snowSpanZ;
+            sAttr.setXYZ(i, sx, sy, sz);
+          }
+          sAttr.needsUpdate = true;
+        }
+
+        // Crisp Sub-zero Clear Sky Diamond Dust Shimmer
+        diamondDustPoints.visible = isDiamondDust;
+        if (isDiamondDust) {
+          dustMat.opacity = 0.55 + Math.sin(elapsed * 3.4) * 0.25;
+          const dAttr = dustGeo.getAttribute('position') as THREE.BufferAttribute;
+          for (let i = 0; i < dustCount; i++) {
+            let dy = dAttr.getY(i) - 0.014;
+            if (dy < 0.4) dy = 9.8;
+            dAttr.setY(i, dy);
+          }
+          dAttr.needsUpdate = true;
+        }
 
         rainPoints.visible = isRaining;
         if (isRaining) {
@@ -4608,28 +5269,61 @@ export default function Arena3DPage() {
           }
           posAttr.needsUpdate = true;
         }
-        nightGroup.visible = showNight;
+        nightSkyController.setVisible(showNight);
         if (showNight) {
-          const moonPulse = 1 + Math.sin(elapsed * 1.4) * 0.045;
-          moonInnerHalo.scale.set(22 * moonPulse, 22 * moonPulse, 1);
-          moonOuterHalo.scale.set(44 * (2 - moonPulse), 44 * (2 - moonPulse), 1);
-          starMat.opacity = 0.8 + Math.sin(elapsed * 2.2) * 0.14;
-          moonWaterShimmer.scale.set(1 + Math.sin(elapsed * 1.9) * 0.06, 1, 1);
-          (moonWaterShimmer.material as THREE.MeshBasicMaterial).opacity =
-            0.64 + Math.sin(elapsed * 2.7) * 0.12;
-          moonBeamMeshes.forEach((bm, bi) => {
-            (bm.material as THREE.MeshBasicMaterial).opacity =
-              (bi === 0 ? 0.12 : 0.08) + Math.sin(elapsed * 1.3 + bi * 1.5) * 0.025;
-          });
-          skyLanterns.forEach((sl) => {
-            const h = ((elapsed * sl.speed + sl.phase * 4) % 28) + 6;
-            sl.group.position.set(
-              sl.baseX + Math.sin(elapsed * 0.6 + sl.phase) * 1.6,
-              h,
-              sl.baseZ + Math.cos(elapsed * 0.5 + sl.phase) * 1.2
-            );
-          });
+          nightSkyController.update(elapsed, Boolean(activeFestivalWeather));
         }
+      }
+
+      // Otaru Canal Gas Lamps & Snow-Candle Domes (auto-lit at Thai dusk/night 17:00-05:30 or during blizzard!)
+      const lampsWarmLit =
+        showNight ||
+        isBlizzard ||
+        bkkW?.dayPhase === 'dusk' ||
+        bkkW?.dayPhase === 'night';
+      for (let li = 0; li < otaruLamps.length; li++) {
+        const lamp = otaruLamps[li];
+        const flicker = lamp.isSnowCandle ? Math.sin(elapsed * 7.5 + li * 1.9) * 0.14 : Math.sin(elapsed * 2.4 + li) * 0.04;
+        const targetGlow = lampsWarmLit ? (lamp.isSnowCandle ? 0.88 : 0.78) + flicker : 0.08;
+        const targetEmissive = lampsWarmLit ? 1.25 + flicker : 0.22;
+        lamp.glowSprite.material.opacity += (targetGlow - lamp.glowSprite.material.opacity) * 0.08;
+        lamp.bulbMat.emissiveIntensity += (targetEmissive - lamp.bulbMat.emissiveIntensity) * 0.08;
+      }
+
+      // Outdoor Rotenburo Onsen Rising Steam (thicker & taller when Hokkaido temperature drops <= 0°C!)
+      const steamColdMult =
+        bkkW && bkkW.temp <= 0 ? 1.42 : bkkW && bkkW.temp <= 8 ? 1.15 : 0.85;
+      for (let si = 0; si < onsenSteamPuffs.length; si++) {
+        const sp = onsenSteamPuffs[si];
+        const cycle = (elapsed * sp.speed + sp.phase) % 1;
+        const fade = cycle < 0.25 ? cycle / 0.25 : 1 - (cycle - 0.25) / 0.75;
+        sp.sprite.position.set(
+          sp.baseX + Math.sin(elapsed * 1.2 + sp.phase * 4) * 0.35,
+          sp.baseY + cycle * (2.6 * steamColdMult),
+          sp.baseZ + Math.cos(elapsed * 1.1 + sp.phase * 3) * 0.28
+        );
+        const sScale = sp.radius * (0.75 + cycle * 0.95) * steamColdMult;
+        sp.sprite.scale.set(sScale, sScale, 1);
+        sp.sprite.material.opacity = Math.min(0.55, fade * 0.38 * steamColdMult);
+      }
+
+      // Update active Character Frost Breath Puffs
+      for (let bi = 0; bi < frostBreathPool.length; bi++) {
+        const bp = frostBreathPool[bi];
+        if (!bp.active) continue;
+        const age = elapsed - bp.bornAt;
+        if (age >= bp.duration) {
+          bp.active = false;
+          bp.sprite.visible = false;
+          continue;
+        }
+        const t = age / bp.duration;
+        bp.sprite.position.x += bp.vx;
+        bp.sprite.position.y += 0.012;
+        bp.sprite.position.z += bp.vz;
+        const sc = 0.26 + t * 0.52;
+        bp.sprite.scale.set(sc, sc, 1);
+        bp.mat.opacity = (1 - t) * 0.48;
       }
 
       const now = performance.now();
@@ -4823,11 +5517,54 @@ export default function Arena3DPage() {
             setIsNearCafe(nearCafeNow);
           }
 
-          const distToDojang = c.rootGroup.position.distanceTo(dojangPos);
-          const nearDojangNow = distToDojang < 5.8;
+          const distToSumo = Math.hypot(
+            c.rootGroup.position.x - sumoPos.x,
+            c.rootGroup.position.z - sumoPos.z
+          );
+          const nearSumoNow = distToSumo < 5.6;
+          if (nearSumoNow !== isNearSumoRef.current) {
+            isNearSumoRef.current = nearSumoNow;
+            setIsNearSumo(nearSumoNow);
+          }
+
+          const distToDojang = Math.hypot(
+            c.rootGroup.position.x - dojangPos.x,
+            c.rootGroup.position.z - dojangPos.z
+          );
+          const nearDojangNow = distToDojang < 5.6;
           if (nearDojangNow !== isNearDojangRef.current) {
             isNearDojangRef.current = nearDojangNow;
             setIsNearDojang(nearDojangNow);
+          }
+
+          const distToVb = Math.hypot(
+            c.rootGroup.position.x - vbCourtPos.x,
+            c.rootGroup.position.z - vbCourtPos.z
+          );
+          const nearVbNow = distToVb < 6.8;
+          if (nearVbNow !== isNearVbCourtRef.current) {
+            isNearVbCourtRef.current = nearVbNow;
+            setIsNearVbCourt(nearVbNow);
+          }
+
+          const distToPenalty = Math.hypot(
+            c.rootGroup.position.x - penaltyPitchPos.x,
+            c.rootGroup.position.z - penaltyPitchPos.z
+          );
+          const nearPenaltyNow = distToPenalty < 6.2;
+          if (nearPenaltyNow !== isNearPenaltyPitchRef.current) {
+            isNearPenaltyPitchRef.current = nearPenaltyNow;
+            setIsNearPenaltyPitch(nearPenaltyNow);
+          }
+
+          const distToFoodStall = Math.hypot(
+            c.rootGroup.position.x - (-halfLen - 10.5),
+            c.rootGroup.position.z
+          );
+          const nearFoodStallNow = distToFoodStall < 7.2;
+          if (nearFoodStallNow !== isNearFoodStallRef.current) {
+            isNearFoodStallRef.current = nearFoodStallNow;
+            setIsNearFoodStall(nearFoodStallNow);
           }
 
           const distToBoard = c.rootGroup.position.distanceTo(questBoardPos);
@@ -5084,6 +5821,32 @@ export default function Arena3DPage() {
 
         const rScale = c.rankScale ?? 1;
         const riderLift = (c.charParts?.riderGroup?.position.y ?? 0) * hScale * rScale;
+
+        // Emit rhythmic white Frost Breath Puff when live Hokkaido temperature is <= 4°C
+        if (!activeFestivalWeather && bkkW && bkkW.temp <= 4) {
+          const lastB = lastCharBreathAt[c.id] ?? -10 + (idx % 7) * 0.27;
+          if (elapsed - lastB >= 1.85) {
+            lastCharBreathAt[c.id] = elapsed;
+            const slot = frostBreathPool[breathCursor % frostBreathPool.length];
+            breathCursor++;
+            const facing = c.rootGroup.rotation.y;
+            const fwdX = Math.cos(facing);
+            const fwdZ = -Math.sin(facing);
+            slot.active = true;
+            slot.bornAt = elapsed;
+            slot.duration = 0.85;
+            slot.vx = fwdX * 0.012;
+            slot.vz = fwdZ * 0.012;
+            slot.sprite.position.set(
+              c.rootGroup.position.x + fwdX * 0.46 * rScale,
+              c.rootGroup.position.y + riderLift + 1.58 * hScale * rScale,
+              c.rootGroup.position.z + fwdZ * 0.46 * rScale
+            );
+            slot.sprite.scale.set(0.24, 0.24, 1);
+            slot.mat.opacity = 0.46;
+            slot.sprite.visible = true;
+          }
+        }
 
         if (c.id === leaderIdRef.current) {
           crownMesh.position.set(
@@ -5698,6 +6461,16 @@ export default function Arena3DPage() {
         cafeTagEl.style.opacity = '0';
       }
 
+      tempProjVec.set(sumoPos.x, sumoPos.y + 5.15, sumoPos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        sumoTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        sumoTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        sumoTagEl.style.opacity = '1';
+      } else {
+        sumoTagEl.style.opacity = '0';
+      }
+
       tempProjVec.set(dojangPos.x, dojangPos.y + 4.75, dojangPos.z);
       tempProjVec.project(camera);
       if (tempProjVec.z < 1) {
@@ -5706,6 +6479,43 @@ export default function Arena3DPage() {
         dojangTagEl.style.opacity = '1';
       } else {
         dojangTagEl.style.opacity = '0';
+      }
+
+      tempProjVec.set(vbCourtPos.x, vbCourtPos.y + 5.1, vbCourtPos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        vbCourtTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        vbCourtTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        vbCourtTagEl.style.opacity = '1';
+      } else {
+        vbCourtTagEl.style.opacity = '0';
+      }
+
+      for (let vai = 0; vai < vbCourtActors.length; vai++) {
+        const vAct = vbCourtActors[vai];
+        tempProjVec.set(
+          vbCourtPos.x + vAct.root.position.x,
+          vbCourtPos.y + vAct.root.position.y + 2.25,
+          vbCourtPos.z + vAct.root.position.z
+        );
+        tempProjVec.project(camera);
+        if (tempProjVec.z < 1) {
+          vAct.tagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+          vAct.tagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+          vAct.tagEl.style.opacity = '1';
+        } else {
+          vAct.tagEl.style.opacity = '0';
+        }
+      }
+
+      tempProjVec.set(penaltyPitchPos.x, penaltyPitchPos.y + 3.2, penaltyPitchPos.z);
+      tempProjVec.project(camera);
+      if (tempProjVec.z < 1) {
+        penaltyTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
+        penaltyTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
+        penaltyTagEl.style.opacity = '1';
+      } else {
+        penaltyTagEl.style.opacity = '0';
       }
 
       tempProjVec.set(questBoardPos.x, questBoardPos.y + 3.85, questBoardPos.z);
@@ -5718,160 +6528,22 @@ export default function Arena3DPage() {
         questBoardTagEl.style.opacity = '0';
       }
 
-      // ซิงก์และขยับขบวนกระทง 3D รอบเกาะ + ป้ายคำอธิษฐานลอยน้ำ
-      const rawKrathongs = krathongsRef.current;
-      const viewerUid = currentUserIdRef.current;
-      const syncSig = `${viewerUid ?? 0}|${rawKrathongs.length}|${rawKrathongs[0]?.id ?? ''}|${rawKrathongs[rawKrathongs.length - 1]?.id ?? ''}`;
-      if (syncSig !== lastKrathongSyncSig) {
-        lastKrathongSyncSig = syncSig;
-        const desiredList: KrathongItem[] = [];
-        const pickedKeys = new Set<string>();
-        // ให้ความสำคัญกับกระทงของตัวเองทุกใบก่อนเสมอ
-        if (viewerUid !== null && viewerUid > 0) {
-          for (const k of rawKrathongs) {
-            if (k.userId === viewerUid) {
-              const key = `${k.id}`;
-              if (!pickedKeys.has(key)) {
-                pickedKeys.add(key);
-                desiredList.push(k);
-              }
-            }
-          }
-        }
-        for (const k of rawKrathongs) {
-          if (desiredList.length >= maxVisibleKrathongs) break;
-          const key = `${k.id}`;
-          if (!pickedKeys.has(key)) {
-            pickedKeys.add(key);
-            desiredList.push(k);
-          }
-        }
-
-        // ลบกระทงที่ไม่อยู่ในรายการแสดงผลออกอย่างปลอดภัย
-        Array.from(activeKrathongMap.keys()).forEach((existingKey) => {
-          if (!pickedKeys.has(existingKey)) {
-            const old = activeKrathongMap.get(existingKey);
-            if (old) {
-              krathongSceneGroup.remove(old.parts.group);
-              disposeObject3D(old.parts.group);
-              old.tagEl.remove();
-              activeKrathongMap.delete(existingKey);
-            }
-          }
-        });
-
-        // สร้างโมเดล 3D และป้ายชื่อสำหรับกระทงใบใหม่ทันทีโดยไม่ต้องรีเซ็ตฉาก
-        for (const item of desiredList) {
-          const key = `${item.id}`;
-          const isMine = viewerUid !== null && viewerUid > 0 && item.userId === viewerUid;
-          const existing = activeKrathongMap.get(key);
-          if (existing) {
-            existing.item = item;
-            existing.isMine = isMine;
-            continue;
-          }
-          const parts = buildKrathongMesh(item.styleId, {
-            colorHex: item.avatarColor,
-            bandColor: item.avatarBand,
-            species: item.avatarSpecies,
-            emoji: item.userEmoji,
-          });
-          parts.group.scale.setScalar(isMine ? 1.18 : 1.05);
-          parts.group.traverse((obj) => {
-            obj.userData.krathongKey = key;
-          });
-          krathongSceneGroup.add(parts.group);
-
-          const tagEl = document.createElement('div');
-          tagEl.className = 'player-tag pointer-events-none transition-opacity duration-200';
-          const safeName = escapeKrathongHtml(item.userName || 'นักเดินทาง');
-          const safeEmoji = escapeKrathongHtml(item.userEmoji || '🪷');
-          const safeCaption = escapeKrathongHtml(item.caption || '');
-          if (isMine) {
-            tagEl.innerHTML = `
-              <div class="rounded-2xl bg-gradient-to-r from-amber-950/95 via-rose-950/95 to-indigo-950/95 border-2 border-amber-300 px-2.5 py-1 shadow-[0_3px_12px_rgba(251,191,36,0.55)] text-center max-w-[210px]">
-                <div class="text-[9.5px] font-black text-amber-300 truncate">🪷 กระทงของคุณ • ${safeEmoji} ${safeName}</div>
-                ${safeCaption ? `<div class="text-[10.5px] font-bold text-white truncate">“${safeCaption}”</div>` : ''}
-              </div>
-            `;
-          } else {
-            tagEl.innerHTML = `
-              <div class="rounded-2xl bg-slate-950/85 border border-amber-300/55 px-2.5 py-0.5 shadow-md text-center max-w-[195px]">
-                <div class="text-[9px] font-extrabold text-amber-200 truncate">${safeEmoji} ${safeName}</div>
-                ${safeCaption ? `<div class="text-[10px] font-semibold text-amber-50/95 truncate">“${safeCaption}”</div>` : ''}
-              </div>
-            `;
-          }
-          labelsContainer.appendChild(tagEl);
-          activeKrathongMap.set(key, { key, item, isMine, parts, tagEl });
-        }
-      }
-
-      const ORBIT_SPEED = 0.0082;
-      const nowWallMs = Date.now();
-      const maxTagDist = qCfg.tier === 'lite' ? 36 : 48;
-      activeKrathongMap.forEach((entry, kIdx) => {
-        const { item, parts, tagEl, isMine } = entry;
-        const ageSec = Math.max(0, (nowWallMs - item.createdAt) / 1000);
-        const orbitPt = sampleIslandKrathongOrbit(
-          item.orbitSeed + ageSec * ORBIT_SPEED,
-          item.laneOffset,
-          islandCenterX,
-          islandW,
-          islandD
-        );
-        let kx = orbitPt.x;
-        let kz = orbitPt.z;
-        if (item.startX != null && item.startZ != null && ageSec < 5.0) {
-          const u = Math.min(1, ageSec / 5.0);
-          const smooth = u * u * (3 - 2 * u);
-          kx = item.startX + (orbitPt.x - item.startX) * smooth;
-          kz = item.startZ + (orbitPt.z - item.startZ) * smooth;
-        }
-        const waveH =
-          (Math.sin(kx * 0.18 + elapsed * 1.9) + Math.cos(-kz * 0.21 + elapsed * 1.5)) *
-          0.5 *
-          0.16;
-        const ky = -0.39 + waveH;
-        parts.group.position.set(kx, ky, kz);
-        parts.group.rotation.y = orbitPt.rotY + Math.sin(elapsed * 0.45 + item.orbitSeed * 25) * 0.28;
-
-        const isFocused =
-          focusedKrathongIdRef.current !== null &&
-          String(focusedKrathongIdRef.current) === String(item.id) &&
-          now < focusedKrathongUntilRef.current;
-        animateKrathongParts(
-          parts,
+      if (festivalSceneController) {
+        festivalSceneController.update({
           elapsed,
-          item.orbitSeed + Number(String(kIdx).length) * 0.07,
-          isFocused ? 0.65 : isMine ? 0.28 : 0
-        );
-
-        const camDist = Math.hypot(
-          camera.position.x - kx,
-          camera.position.y - ky,
-          camera.position.z - kz
-        );
-        const showLabel = isMine || isFocused || camDist < maxTagDist;
-        if (showLabel) {
-          tempProjVec.set(kx, ky + 1.18, kz);
-          tempProjVec.project(camera);
-          if (tempProjVec.z < 1) {
-            tagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-            tagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-            const distAlpha =
-              isMine || isFocused
-                ? 1
-                : Math.max(0, Math.min(1, (maxTagDist - camDist) / 10));
-            tagEl.style.opacity = distAlpha.toFixed(2);
-            tagEl.style.zIndex = isFocused ? '98' : isMine ? '90' : '18';
-          } else {
-            tagEl.style.opacity = '0';
-          }
-        } else {
-          tagEl.style.opacity = '0';
-        }
-      });
+          nowPerfMs: now,
+          nowWallMs: Date.now(),
+          isVisible: festival.isWorldActiveRef.current && festival.phaseRef.current !== 'ended',
+          viewerUserId: currentUserIdRef.current,
+          items: festival.itemsRef.current,
+          itemsSig: festival.itemsSigRef.current,
+          focusedItemId: festival.focusedItemIdRef.current,
+          focusedUntilPerfMs: festival.focusedUntilPerfMsRef.current,
+          camera,
+          viewportWidth: cachedVw,
+          viewportHeight: cachedVh,
+        });
+      }
 
       if (cameraTargetPosRef.current) {
         camera.position.lerp(cameraTargetPosRef.current, 0.06);
@@ -6011,28 +6683,8 @@ export default function Arena3DPage() {
         }
       }
 
-      // คลิกส่องกระทงที่ลอยอยู่ในน้ำเพื่ออ่านแคปชั่นคำอธิษฐานเต็มๆ
-      if (krathongSceneGroup.children.length > 0) {
-        const kHits = raycaster.intersectObjects(krathongSceneGroup.children, true);
-        if (kHits.length > 0) {
-          let hitObj: THREE.Object3D | null = kHits[0].object;
-          while (hitObj && hitObj.userData.krathongKey === undefined) {
-            hitObj = hitObj.parent;
-          }
-          const kKey = hitObj?.userData.krathongKey as string | undefined;
-          const kEntry = kKey ? activeKrathongMap.get(kKey) : undefined;
-          if (kEntry) {
-            focusedKrathongIdRef.current = kEntry.item.id;
-            focusedKrathongUntilRef.current = performance.now() + 8500;
-            const stMeta = getKrathongStyleMeta(kEntry.item.styleId);
-            showToast(
-              stMeta.emoji,
-              `กระทงของ ${kEntry.item.userEmoji} ${kEntry.item.userName}`,
-              kEntry.item.caption ? `“${kEntry.item.caption}”` : stMeta.name
-            );
-            return;
-          }
-        }
+      if (festivalSceneController?.onPointerTap?.(raycaster)) {
+        return;
       }
 
       if (walkingSpectatorIdRef.current !== null) {
@@ -6093,10 +6745,8 @@ export default function Arena3DPage() {
         // ignore
       }
       cancelAnimationFrame(frameId);
-      activeKrathongMap.forEach((entry) => {
-        entry.tagEl.remove();
-      });
-      activeKrathongMap.clear();
+      clearVbCourtActors();
+      festivalSceneController?.dispose();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
@@ -6108,7 +6758,7 @@ export default function Arena3DPage() {
       renderer.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playersLoadedOnce, sceneSignature, pairedActivities, currentUserId, qualityMode]);
+  }, [playersLoadedOnce, sceneSignature, pairedActivities, currentUserId, qualityMode, festival.definition?.id]);
 
   const loadFeedbackItems = useCallback(async () => {
     setLoadingFeedback(true);
@@ -6226,7 +6876,7 @@ export default function Arena3DPage() {
     setGiftError('');
     setSendingGiftId(item.id);
     try {
-      const res = await fetch('/api/shop', {
+      const res = await sessionFetch('/api/shop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -6275,7 +6925,7 @@ export default function Arena3DPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/rewards', {
+        const res = await sessionFetch('/api/rewards', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: me.id, type: 'daily_checkin' }),
@@ -6283,12 +6933,50 @@ export default function Arena3DPage() {
         if (!res.ok || cancelled) return;
         const data = await res.json();
         if (cancelled) return;
-        confetti({ particleCount: 75, spread: 70, origin: { y: 0.28 } });
-        showToast(
-          '🎁',
-          `รับโบนัสเข้าเกมรายวัน +${data.earned} 💰!`,
-          `สะสมเป็น ${data.points} 💰 แล้ว! (รีเซ็ตใหม่ทุกวัน 07:00 น.)`
-        );
+        if (data.isMorningChampion) {
+          const champColors = ['#facc15', '#fb923c', '#fef08a', '#ffffff'];
+          confetti({
+            particleCount: 110,
+            spread: 85,
+            origin: { y: 0.28 },
+            colors: champColors,
+          });
+          setTimeout(() => {
+            confetti({
+              particleCount: 80,
+              spread: 105,
+              origin: { y: 0.35 },
+              colors: champColors,
+            });
+          }, 340);
+          const stepsTxt =
+            typeof data.championStepsAt7Am === 'number' && data.championStepsAt7Am > 0
+              ? `ยอดก้าวตัดรอบ 07:00 น. ${data.championStepsAt7Am.toLocaleString()} ก้าว • `
+              : '';
+          const isTie = Number(data.coChampionCount || 1) > 1;
+          showToast(
+            '👑',
+            isTie
+              ? `โบนัสแชมป์ร่วมอันดับ 1 เช้านี้ +${data.earned} 💰!`
+              : `โบนัสครองบัลลังก์อันดับ 1 เช้านี้ +${data.earned} 💰!`,
+            `${stepsTxt}สะสมเป็น ${data.points} 💰 แล้ว! (เบี้ยเลี้ยงเจ้าบัลลังก์ 07:00 น.)`
+          );
+          broadcastArenaSync('champion_checkin', {
+            actorId: me.id,
+            actorName: me.name,
+            actorEmoji: me.emoji || '👑',
+            detail: isTie
+              ? `ครองแชมป์ร่วมอันดับ 1 ตอน 07:00 น. รับเบี้ยเลี้ยง +${data.earned} 💰! (พรุ่งนี้รีบเดินแซงชิงมงนะ! 🔥)`
+              : `ครองอันดับ 1 ตอน 07:00 น. รับเบี้ยเลี้ยงเจ้าบัลลังก์ +${data.earned} 💰! (พรุ่งนี้รีบเดินแซงชิงมงนะ! 🔥)`,
+          });
+        } else {
+          confetti({ particleCount: 75, spread: 70, origin: { y: 0.28 } });
+          showToast(
+            '🎁',
+            `รับโบนัสเข้าเกมรายวัน +${data.earned} 💰!`,
+            `สะสมเป็น ${data.points} 💰 แล้ว! (รีเซ็ตใหม่ทุกวัน 07:00 น.)`
+          );
+        }
         await fetchArenaData({ force: true });
       } catch {
         // Silent fail for automatic login bonus
@@ -6311,7 +6999,7 @@ export default function Arena3DPage() {
     if (claimingCoinRef.current) return;
     claimingCoinRef.current = true;
     try {
-      const res = await fetch('/api/rewards', {
+      const res = await sessionFetch('/api/rewards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: uid, type: 'beach_coin', slotId, spawnToken }),
@@ -6656,7 +7344,7 @@ export default function Arena3DPage() {
           excuseTag: '',
         };
 
-      const res = await fetch('/api/weights', {
+      const res = await sessionFetch('/api/weights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -6750,7 +7438,7 @@ export default function Arena3DPage() {
   const handleUnlockOrEquipItem = async (itemId: string) => {
     const targetUid = editingPlayerId || currentUserId;
     if (!targetUid) return;
-    const res = await fetch('/api/shop', {
+    const res = await sessionFetch('/api/shop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: targetUid, itemId }),
@@ -6768,7 +7456,7 @@ export default function Arena3DPage() {
     if (!targetUid) {
       throw new Error('กรุณาเข้าสู่ระบบก่อนหมุนGacha');
     }
-    const res = await fetch('/api/gacha', {
+    const res = await sessionFetch('/api/gacha', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: targetUid, count }),
@@ -6808,13 +7496,40 @@ export default function Arena3DPage() {
       if (!res.ok) {
         setSignInError(data.error || 'เข้าสู่ระบบไม่สำเร็จ');
       } else if (data.exists && data.user) {
-        localStorage.setItem('waist_user_id', String(data.user.id));
+        const claimed = claimBrowserSession(data.user.id, data.sessionToken);
+        currentUserIdRef.current = data.user.id;
         setCurrentUserId(data.user.id);
         setBoardSenderId(String(data.user.id));
         const shouldWalk = Boolean(data.user.isRoaming || data.user.role === 'spectator');
         setWalkingSpectatorId(shouldWalk ? data.user.id : null);
         setSelectedPlayerId(data.user.id);
         setSignInUsername('');
+        setSignInError('');
+
+        if (realtimeSubscribedRef.current && realtimeChannelRef.current) {
+          broadcastRealtimeEvent('session_kick', {
+            userId: data.user.id,
+            sessionToken: claimed.sessionToken,
+          });
+        } else {
+          pendingSessionKickRef.current = {
+            userId: data.user.id,
+            sessionToken: claimed.sessionToken,
+          };
+        }
+        try {
+          localBroadcastRef.current?.postMessage({
+            event: 'tab_takeover',
+            payload: {
+              userId: data.user.id,
+              instanceId: claimed.instanceId,
+              _senderInstance: claimed.instanceId,
+            },
+          });
+        } catch {
+          // ignore
+        }
+
         await fetchArenaData({ force: true, viewerId: data.user.id });
         showToast(
           '👋',
@@ -6836,7 +7551,9 @@ export default function Arena3DPage() {
   };
 
   const handleSignOut = () => {
-    localStorage.removeItem('waist_user_id');
+    clearTabSession();
+    currentUserIdRef.current = null;
+    walkingSpectatorIdRef.current = null;
     setCurrentUserId(null);
     setWalkingSpectatorId(null);
     setSignInUsername('');
@@ -6885,7 +7602,7 @@ export default function Arena3DPage() {
     setWalkingSpectatorId(nextRoam ? me.id : null);
 
     try {
-      const res = await fetch('/api/users', {
+      const res = await sessionFetch('/api/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -6967,7 +7684,7 @@ export default function Arena3DPage() {
         startWeight: effectiveStartStr ? parseFloat(effectiveStartStr) : 0,
         goalWeight: joinGoal ? parseFloat(joinGoal) : 0,
       };
-      const res = await fetch('/api/users', {
+      const res = await sessionFetch('/api/users', {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -6990,10 +7707,24 @@ export default function Arena3DPage() {
       } else {
         const activeId = !isEdit && data.id ? Number(data.id) : editingPlayerId;
         if (!isEdit && data.id) {
-          localStorage.setItem('waist_user_id', String(data.id));
-          setCurrentUserId(Number(data.id));
-          setBoardSenderId(String(data.id));
-          setSelectedPlayerId(Number(data.id));
+          const newUid = Number(data.id);
+          const claimed = claimBrowserSession(newUid, data.sessionToken);
+          currentUserIdRef.current = newUid;
+          setCurrentUserId(newUid);
+          setBoardSenderId(String(newUid));
+          setSelectedPlayerId(newUid);
+          try {
+            localBroadcastRef.current?.postMessage({
+              event: 'tab_takeover',
+              payload: {
+                userId: newUid,
+                instanceId: claimed.instanceId,
+                _senderInstance: claimed.instanceId,
+              },
+            });
+          } catch {
+            // ignore
+          }
         }
         confetti({ particleCount: isEdit ? 45 : 70, spread: 60, origin: { y: 0.6 } });
         showToast(
@@ -7178,7 +7909,7 @@ export default function Arena3DPage() {
     if (statusSaveTimerRef.current) clearTimeout(statusSaveTimerRef.current);
     statusSaveTimerRef.current = setTimeout(async () => {
       try {
-        await fetch('/api/users', {
+        await sessionFetch('/api/users', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -7215,24 +7946,14 @@ export default function Arena3DPage() {
               <span className="hidden sm:inline bg-emerald-500 text-black text-[9px] font-extrabold px-1.5 py-0.5 rounded">
                 MMO ARENA
               </span>
-              <button
-                type="button"
-                onClick={() => setIsFullMoonSky((prev) => !prev)}
-                className={`border text-[9.5px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0 cursor-pointer transition ${isFullMoonSky
-                  ? 'bg-indigo-950/90 border-amber-300 text-amber-200 shadow-[0_0_10px_rgba(253,224,71,0.45)]'
-                  : 'bg-black/45 border-slate-500 text-slate-200'
-                  }`}
-                title="คลิกสลับโหมดท้องฟ้าคืนวันเพ็ญลอยกระทง / สภาพอากาศจริง"
-              >
-                <span>{isFullMoonSky ? '🌕' : '🌤️'}</span>
-                <span>{isFullMoonSky ? 'คืนวันเพ็ญ' : 'อากาศจริง'}</span>
-              </button>
-              {bkkWeather && !isFullMoonSky && (
+              <FestivalHeaderBadge festival={festival} />
+              {bkkWeather && !festival.isWorldActive && (
                 <span
-                  className="bg-black/45 border border-amber-400/50 text-amber-200 text-[9.5px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 sm:gap-1 shrink-0"
-                  title={`สภาพอากาศกรุงเทพฯ ล่าสุด: ${bkkWeather.label} ${bkkWeather.temp}°C`}
+                  className="bg-sky-950/80 border border-sky-300/70 text-sky-100 text-[9.5px] sm:text-[10px] font-extrabold px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-0.5 sm:gap-1 shrink-0 shadow-[0_0_8px_rgba(125,211,252,0.3)]"
+                  title={`สภาพอากาศซัปโปโร ฮอกไกโดสด (เวลาไทย): ${bkkWeather.label} ${bkkWeather.temp}°C • ลม ${bkkWeather.windKmh ?? 0} km/h`}
                 >
                   <span>{bkkWeather.emoji}</span>
+                  <span className="hidden sm:inline text-sky-300">ฮอกไกโด</span>
                   <span>{bkkWeather.temp}°C</span>
                 </span>
               )}
@@ -7357,10 +8078,18 @@ export default function Arena3DPage() {
                 ? 'bg-amber-400 text-black'
                 : 'text-amber-100 hover:bg-amber-400 hover:text-black'
                 }`}
-              title="เปิด/ปิดเพลงลอยกระทงประกอบฉาก"
+              title={
+                festival.isWorldActive && festival.definition
+                  ? festival.definition.bgm.buttonTitle
+                  : 'เปิด/ปิดเพลงประกอบฉาก'
+              }
             >
               <span>{isMusicOn ? '🔊' : '🔇'}</span>
-              <span className="hidden lg:inline">{isFullMoonSky ? 'เพลงลอยกระทง' : 'เพลง'}</span>
+              <span className="hidden lg:inline">
+                {festival.isWorldActive && festival.definition
+                  ? festival.definition.bgm.buttonLabel
+                  : 'เพลง'}
+              </span>
             </button>
             {players.some((pl) => pl.id === currentUserId) && (
               <button
@@ -7433,6 +8162,10 @@ export default function Arena3DPage() {
                 <span>💬</span>
                 <span>แจ้งบั๊ก / Feedback</span>
               </button>
+              <FestivalMobileMenuItem
+                festival={festival}
+                onAfterToggle={() => setIsMobileMenuOpen(false)}
+              />
               <button
                 type="button"
                 onClick={() => {
@@ -7444,8 +8177,12 @@ export default function Arena3DPage() {
                 <span>{isMusicOn ? '🔊' : '🔇'}</span>
                 <span>
                   {isMusicOn
-                    ? 'ปิดเพลงลอยกระทง'
-                    : 'เปิดเพลงลอยกระทง'}
+                    ? festival.isWorldActive && festival.definition
+                      ? festival.definition.bgm.mobileOnLabel
+                      : 'ปิดเพลงประกอบ'
+                    : festival.isWorldActive && festival.definition
+                      ? festival.definition.bgm.mobileOffLabel
+                      : 'เปิดเพลงประกอบ'}
                 </span>
               </button>
               {players.some((pl) => pl.id === currentUserId) && (
@@ -9007,58 +9744,30 @@ export default function Arena3DPage() {
                         onClick={() => {
                           if (act.animType === 'volleyball') {
                             setIsPairMenuOpen(false);
-                            if (liveVbLobby && liveVbLobby.count < liveVbLobby.max) {
-                              setVbSession({
-                                roomCode: liveVbLobby.roomCode,
-                                mode: liveVbLobby.mode,
-                                isHost: false,
-                                targetName: liveVbLobby.hostName,
-                              });
-                            } else {
-                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                              setVbSession({
-                                roomCode: newCode,
-                                mode: '1v1',
-                                isHost: true,
-                                targetName: nearbySpectator.name,
-                              });
-                            }
+                            setVbSession({
+                              roomCode: liveVbLobby?.roomCode || '7777',
+                              mode: liveVbLobby?.mode || '2v2',
+                              isHost: false,
+                              targetName: nearbySpectator.name,
+                            });
                             return;
                           }
                           if (act.animType === 'play_cards') {
                             setIsPairMenuOpen(false);
-                            if (liveCardLobby && liveCardLobby.count < liveCardLobby.max) {
-                              setCardSession({
-                                roomCode: liveCardLobby.roomCode,
-                                isHost: false,
-                                targetName: liveCardLobby.hostName,
-                              });
-                            } else {
-                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                              setCardSession({
-                                roomCode: newCode,
-                                isHost: true,
-                                targetName: nearbySpectator.name,
-                              });
-                            }
+                            setCardSession({
+                              roomCode: liveCardLobby?.roomCode || '9999',
+                              isHost: false,
+                              targetName: nearbySpectator.name,
+                            });
                             return;
                           }
                           if (act.animType === 'picnic_shabu') {
                             setIsPairMenuOpen(false);
-                            if (liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max) {
-                              setShabuSession({
-                                roomCode: liveShabuLobby.roomCode,
-                                isHost: false,
-                                targetName: liveShabuLobby.hostName,
-                              });
-                            } else {
-                              const newCode = String(Math.floor(1000 + Math.random() * 9000));
-                              setShabuSession({
-                                roomCode: newCode,
-                                isHost: true,
-                                targetName: nearbySpectator.name,
-                              });
-                            }
+                            setShabuSession({
+                              roomCode: liveShabuLobby?.roomCode || '5555',
+                              isHost: false,
+                              targetName: nearbySpectator.name,
+                            });
                             return;
                           }
                           const walker = players.find((pl) => pl.id === walkingSpectatorId);
@@ -9101,13 +9810,15 @@ export default function Arena3DPage() {
                               : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
                           }`}
                       >
-                        {act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
-                          ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
-                          : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
-                            ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
-                            : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
-                              ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
-                              : act.label}
+                        {act.animType === 'volleyball' && liveVbLobby?.status === 'started'
+                          ? `🔒 วอลเลย์กำลังแข่ง (${liveVbLobby.scoreLeft ?? 0}-${liveVbLobby.scoreRight ?? 0})`
+                          : act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
+                            ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
+                            : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
+                              ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
+                              : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
+                                ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
+                                : act.label}
                       </button>
                     ))}
                   </div>
@@ -9131,12 +9842,51 @@ export default function Arena3DPage() {
               )}
 
               {!isPairMenuOpen && isNearGuard && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
+                    className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  >
+                    😈 แกล้งพี่ยาม!
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCardSession({
+                        roomCode: liveCardLobby?.roomCode || '9999',
+                        isHost: false,
+                      })
+                    }
+                    className="neo-btn bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  >
+                    🃏 วงไพ่พี่ยาม
+                    {liveCardLobby && liveCardLobby.count > 0 ? (
+                      <span> ({liveCardLobby.count}/{liveCardLobby.max})</span>
+                    ) : (
+                      <span className="hidden sm:inline"> (1–5 คน!)</span>
+                    )}
+                  </button>
+                </>
+              )}
+
+              {!isPairMenuOpen && isNearFoodStall && (
                 <button
                   type="button"
-                  onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
-                  className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  onClick={() =>
+                    setShabuSession({
+                      roomCode: liveShabuLobby?.roomCode || '5555',
+                      isHost: false,
+                    })
+                  }
+                  className="neo-btn bg-gradient-to-r from-orange-400 via-amber-300 to-rose-400 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
                 >
-                  😈 แกล้งพี่ยาม!
+                  🍲 ตี้ชาบูบุฟเฟ่ต์
+                  {liveShabuLobby && liveShabuLobby.count > 0 ? (
+                    <span> ({liveShabuLobby.count}/{liveShabuLobby.max} คนรอ!)</span>
+                  ) : (
+                    <span className="hidden sm:inline"> (1–4 คน!)</span>
+                  )}
                 </button>
               )}
 
@@ -9150,13 +9900,79 @@ export default function Arena3DPage() {
                 </button>
               )}
 
+              {!isPairMenuOpen && isNearSumo && (
+                <button
+                  type="button"
+                  onClick={() => setIsSumoOpen(true)}
+                  className="neo-btn bg-gradient-to-r from-purple-900 via-red-700 to-amber-500 text-amber-100 border-2 border-amber-200 font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap animate-bounce"
+                >
+                  🏯 ขึ้นสังเวียนซูโม่<span className="hidden sm:inline"> (ชนพุงดันตกเวที 1v1 / ไต่ยศโยโกซึนะ!)</span>
+                </button>
+              )}
+
               {!isPairMenuOpen && isNearDojang && (
                 <button
                   type="button"
                   onClick={() => setIsTaekwondoOpen(true)}
                   className="neo-btn bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
                 >
-                  🥋 สำนักเทควันโด<span className="hidden sm:inline"> (เตะเป้าเลื่อนสาย!)</span>
+                  🥋 สำนักเทควันโด<span className="hidden sm:inline"> (เตะเป้าเลื่อนสาย &amp; ดวล PvP!)</span>
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearVbCourt && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVbSession({
+                      roomCode: '7777',
+                      mode: liveVbLobby?.mode || '2v2',
+                      isHost: false,
+                    })
+                  }
+                  className={`neo-btn border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap ${
+                    liveVbLobby?.status === 'started'
+                      ? 'bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white'
+                      : 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-500 text-slate-950 animate-bounce'
+                  }`}
+                >
+                  {liveVbLobby?.status === 'started' ? (
+                    <>
+                      🔒 สนามกำลังแข่ง ({liveVbLobby.scoreLeft ?? 0}-{liveVbLobby.scoreRight ?? 0})
+                      <span className="hidden sm:inline"> • กดดูตัวละครที่กำลังเล่น</span>
+                    </>
+                  ) : liveVbLobby && liveVbLobby.count >= liveVbLobby.max ? (
+                    <>⏳ ห้องรอวอลเลย์เต็ม ({liveVbLobby.count}/{liveVbLobby.max}) • รอรอบถัดไป</>
+                  ) : (
+                    <>
+                      🏐 เข้าสนามวอลเลย์บอล
+                      {liveVbLobby && liveVbLobby.count > 0 ? (
+                        <span> ({liveVbLobby.count}/{liveVbLobby.max} คนรอในห้อง!)</span>
+                      ) : (
+                        <span className="hidden sm:inline"> (เข้าห้องรอตี้ 1v1 / 2v2!)</span>
+                      )}
+                    </>
+                  )}
+                </button>
+              )}
+
+              {!isPairMenuOpen && isNearPenaltyPitch && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPenaltySession({
+                      roomCode: livePenaltyLobby?.roomCode || '6666',
+                      isHost: false,
+                    })
+                  }
+                  className="neo-btn bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap animate-bounce"
+                >
+                  ⚽ ดวลจุดโทษ 3D
+                  {livePenaltyLobby && livePenaltyLobby.count > 0 ? (
+                    <span> ({livePenaltyLobby.count}/{livePenaltyLobby.max} คนรอในห้อง!)</span>
+                  ) : (
+                    <span className="hidden sm:inline"> (1v1 ออนไลน์ / ซ้อม AI!)</span>
+                  )}
                 </button>
               )}
 
@@ -9171,37 +9987,20 @@ export default function Arena3DPage() {
               )}
 
               {!isPairMenuOpen && isNearOcean && (
-                <>
-                  <button
-                    type="button"
-                    onClick={startFishing}
-                    className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                  >
-                    🎣 ตกปลา<span className="hidden sm:inline">ริมทะเล!</span>
-                  </button>
-                  {fishingPhase === 'idle' && (
-                    <button
-                      type="button"
-                      onClick={() => setIsKrathongModalOpen(true)}
-                      className="neo-btn bg-gradient-to-r from-amber-300 via-pink-400 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                    >
-                      🪷 ลอยกระทง<span className="hidden sm:inline">ริมหาด!</span>
-                    </button>
-                  )}
-                </>
+                <button
+                  type="button"
+                  onClick={startFishing}
+                  className="neo-btn bg-gradient-to-r from-sky-400 via-cyan-400 to-teal-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                >
+                  🎣 ตกปลา<span className="hidden sm:inline">ริมทะเล!</span>
+                </button>
               )}
-              {!isPairMenuOpen &&
-                currentUserId !== null &&
-                krathongs.some((k) => k.userId === currentUserId) && (
-                  <button
-                    type="button"
-                    onClick={handleCycleMyKrathongs}
-                    className="neo-btn bg-slate-900/95 hover:bg-slate-800 text-amber-200 border-2 border-amber-300 font-[family-name:var(--font-kanit)] font-extrabold text-[11px] sm:text-xs px-3 py-1.5 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                  >
-                    🔍 ส่องกระทงฉัน (
-                    {krathongs.filter((k) => k.userId === currentUserId).length})
-                  </button>
-                )}
+              <FestivalShoreActions
+                festival={festival}
+                isNearOcean={isNearOcean}
+                fishingPhase={fishingPhase}
+                isPairMenuOpen={isPairMenuOpen}
+              />
             </div>
           )}
 
@@ -9460,19 +10259,30 @@ export default function Arena3DPage() {
         <div className="fixed inset-0 z-50 pointer-events-none bg-gradient-to-b from-amber-300/45 via-yellow-200/25 to-transparent animate-pulse" />
       )}
 
-      {/* Live Floating Invite Banner when a friend opens a Volleyball PvP Lobby */}
+      {/* Live Floating Banner for Volleyball Lobby OR Active Single-Round Match */}
       {liveVbLobby && !vbSession && !isJoinOpen && (
         <div className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]">
-          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-amber-300">
-            <span className="text-base animate-bounce">🏐</span>
+          <div
+            className={`rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 ${
+              liveVbLobby.status === 'started' ? 'border-rose-400' : 'border-amber-300'
+            }`}
+          >
+            <span className="text-base animate-bounce">
+              {liveVbLobby.status === 'started' ? '🔒' : '🏐'}
+            </span>
             <span className="text-xs font-extrabold text-amber-100 truncate">
-              {liveVbLobby.hostEmoji} {liveVbLobby.hostName} ชวนตีวอลเลย์บอล {liveVbLobby.mode} ({liveVbLobby.count}/{liveVbLobby.max})
+              {liveVbLobby.status === 'started'
+                ? `วอลเลย์กำลังแข่ง ${liveVbLobby.mode.toUpperCase()} (${liveVbLobby.scoreLeft ?? 0}-${liveVbLobby.scoreRight ?? 0}): ${(liveVbLobby.roster || [])
+                    .filter((r) => !r.isBot)
+                    .map((r) => `${r.emoji}${r.name}`)
+                    .join(', ') || `${liveVbLobby.hostEmoji}${liveVbLobby.hostName}`}`
+                : `${liveVbLobby.hostEmoji} ${liveVbLobby.hostName} ชวนตีวอลเลย์บอล ${liveVbLobby.mode} (${liveVbLobby.count}/${liveVbLobby.max})`}
             </span>
             <button
               type="button"
               onClick={() => {
                 setVbSession({
-                  roomCode: liveVbLobby.roomCode,
+                  roomCode: '7777',
                   mode: liveVbLobby.mode,
                   isHost: false,
                   targetName: liveVbLobby.hostName,
@@ -9480,7 +10290,11 @@ export default function Arena3DPage() {
               }}
               className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
             >
-              เข้าร่วมเลย!
+              {liveVbLobby.status === 'started'
+                ? '👀 ดูผู้เล่น'
+                : liveVbLobby.count >= liveVbLobby.max
+                  ? 'เต็มแล้ว'
+                  : 'เข้าร่วมเลย!'}
             </button>
             <button
               type="button"
@@ -9497,7 +10311,12 @@ export default function Arena3DPage() {
       {vbSession && (
         <BeachVolleyballModal
           isOpen={Boolean(vbSession)}
-          onClose={() => setVbSession(null)}
+          onClose={() => {
+            setLiveVbLobby((prev) =>
+              prev && prev.hostUserId === currentUserId && prev.status === 'waiting' ? null : prev
+            );
+            setVbSession(null);
+          }}
           players={players}
           currentUserId={currentUserId}
           qualityMode={qualityMode}
@@ -9505,7 +10324,27 @@ export default function Arena3DPage() {
           initialMode={vbSession.mode}
           initialIsHost={vbSession.isHost}
           invitedTargetName={vbSession.targetName}
+          externalLobbyInfo={liveVbLobby}
           onLobbyBroadcast={(info) => {
+            if (info.status === 'waiting' || info.status === 'started') {
+              setLiveVbLobby({
+                roomCode: info.roomCode,
+                mode: info.mode,
+                hostUserId: info.hostUserId,
+                hostName: info.hostName,
+                hostEmoji: info.hostEmoji,
+                targetName: info.targetName,
+                count: info.count,
+                max: info.max,
+                status: info.status,
+                scoreLeft: info.scoreLeft ?? 0,
+                scoreRight: info.scoreRight ?? 0,
+                roster: info.roster || [],
+                updatedAt: Date.now(),
+              });
+            } else {
+              setLiveVbLobby(null);
+            }
             broadcastRealtimeEvent('vb_lobby', { ...info });
           }}
           onRewardEarned={(earned, newPoints) => {
@@ -9554,6 +10393,67 @@ export default function Arena3DPage() {
         </div>
       )}
 
+      {/* Live Floating Invite Banner when a friend opens a 3D Penalty Shootout Lobby */}
+      {livePenaltyLobby && !penaltySession && !vbSession && !shabuSession && !isJoinOpen && (
+        <div className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]">
+          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-emerald-400">
+            <span className="text-base animate-bounce">⚽</span>
+            <span className="text-xs font-extrabold text-amber-100 truncate">
+              {livePenaltyLobby.hostEmoji} {livePenaltyLobby.hostName} ท้าดวลจุดโทษ 3D 1v1 ({livePenaltyLobby.count}/{livePenaltyLobby.max})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setPenaltySession({
+                  roomCode: livePenaltyLobby.roomCode,
+                  isHost: false,
+                  targetName: livePenaltyLobby.hostName,
+                });
+              }}
+              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
+            >
+              รับคำท้าเลย!
+            </button>
+            <button
+              type="button"
+              onClick={() => setLivePenaltyLobby(null)}
+              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
+              title="ซ่อนแจ้งเตือน"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {penaltySession && (
+        <PenaltyShootoutModal
+          isOpen={Boolean(penaltySession)}
+          onClose={() => {
+            setLivePenaltyLobby((prev) =>
+              prev && prev.hostUserId === currentUserId ? null : prev
+            );
+            setPenaltySession(null);
+          }}
+          players={players}
+          currentUserId={currentUserId}
+          initialRoomCode={penaltySession.roomCode}
+          initialIsHost={penaltySession.isHost}
+          invitedTargetName={penaltySession.targetName}
+          onLobbyBroadcast={(info) => {
+            broadcastRealtimeEvent('penalty_lobby', { ...info });
+          }}
+          onRewardEarned={(earned, newPoints) => {
+            showToast(
+              '⚽',
+              `ชนะดวลจุดโทษ 3D! (+${earned} 💰)`,
+              `รับโบนัสผู้ชนะแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
+            );
+            void fetchArenaData({ force: true });
+          }}
+        />
+      )}
+
       {isPetCafeOpen && (
         <PetCafeModal
           isOpen={isPetCafeOpen}
@@ -9576,28 +10476,36 @@ export default function Arena3DPage() {
         />
       )}
 
-      {isKrathongModalOpen && (
-        <LoyKrathongModal
-          isOpen={isKrathongModalOpen}
-          onClose={() => setIsKrathongModalOpen(false)}
-          player={(() => {
-            const activeId = walkingSpectatorId ?? currentUserId;
-            const me = players.find((pl) => pl.id === activeId);
-            return {
-              id: me?.id ?? currentUserId,
-              name: me?.name || 'นักเดินทางริมหาด',
-              emoji: me?.emoji || '🪷',
-              colorHex: me?.colorHex || '#F472B6',
-              bandColor: me?.bandColor || '#FFE600',
-              species: me?.species || 'bunny',
-            };
-          })()}
-          submitting={launchingKrathong}
-          isMusicOn={isMusicOn}
-          onToggleMusic={toggleMusic}
-          onLaunch={handleLaunchKrathong}
+      {isSumoOpen && (
+        <SumoArenaModal
+          isOpen={isSumoOpen}
+          onClose={() => setIsSumoOpen(false)}
+          players={players}
+          qualityMode={qualityMode}
+          currentUserId={currentUserId}
+          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'นักซูโม่'}
+          playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🏯'}
+          onPointsUpdated={() => void fetchArenaData({ force: true })}
         />
       )}
+
+      <FestivalModalHost
+        festival={festival}
+        player={(() => {
+          const activeId = walkingSpectatorId ?? currentUserId;
+          const me = players.find((pl) => pl.id === activeId);
+          return {
+            id: me?.id ?? currentUserId,
+            name: me?.name || 'นักเดินทางริมหาด',
+            emoji: me?.emoji || '🪷',
+            colorHex: me?.colorHex || '#F472B6',
+            bandColor: me?.bandColor || '#FFE600',
+            species: me?.species || 'bunny',
+          };
+        })()}
+        isMusicOn={isMusicOn}
+        onToggleMusic={toggleMusic}
+      />
 
       {isQuestBoardOpen && (
         <QuestBoardModal

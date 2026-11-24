@@ -1,3 +1,6 @@
+import { computeFestivalPhase } from '../schedule';
+import type { FestivalDefinition, FestivalPhase, FestivalSchedule } from '../types';
+
 export type KrathongStyleId =
   | 'my_character'
   | 'moo_deng'
@@ -39,6 +42,89 @@ export interface KrathongItem {
   createdAt: number;
   isAmbientNpc?: boolean;
 }
+
+export interface KrathongLaunchInput {
+  styleId: KrathongStyleId;
+  caption: string;
+}
+
+export const LOY_KRATHONG_FESTIVAL_ID = 'loy_krathong';
+export const LOY_KRATHONG_YT_ID = '95s3Y8nVMV4';
+export const LOY_KRATHONG_BGM_TRACK_ID = 'loy_krathong';
+export const LOY_KRATHONG_REALTIME_EVENT = 'krathong_launched';
+
+// คืนวันลอยกระทงสด: ยาวถึงเช้าวันที่ 25 พ.ย. 2026 เวลา 07:00 น. (เวลาไทย)
+export const LOY_KRATHONG_LIVE_END_MS = Date.parse('2026-11-25T07:00:00+07:00');
+// ช่วงปุ่ม "ควันหลงคืนลอยกระทง" (1 วันหลังวันลอยกระทง): 25 พ.ย. 07:00 น. ถึง 26 พ.ย. 2026 เวลา 07:00 น.
+export const LOY_KRATHONG_ENCORE_END_MS = Date.parse('2026-11-26T07:00:00+07:00');
+
+export const LOY_KRATHONG_SCHEDULE: FestivalSchedule = {
+  liveEndMs: LOY_KRATHONG_LIVE_END_MS,
+  encoreEndMs: LOY_KRATHONG_ENCORE_END_MS,
+};
+
+export type LoyKrathongEventPhase = FestivalPhase;
+
+export function getLoyKrathongPhase(nowMs: number = Date.now()): LoyKrathongEventPhase {
+  return computeFestivalPhase(LOY_KRATHONG_SCHEDULE, nowMs);
+}
+
+export const LOY_KRATHONG_DEFINITION: FestivalDefinition = {
+  id: LOY_KRATHONG_FESTIVAL_ID,
+  priority: 10,
+  nameTh: 'เทศกาลวันลอยกระทง',
+  nameEn: 'Loy Krathong Full Moon Festival',
+  emoji: '🪷',
+  apiBasePath: '/api/festivals/loy_krathong',
+  realtimeEvents: [LOY_KRATHONG_REALTIME_EVENT],
+  schedule: LOY_KRATHONG_SCHEDULE,
+  weatherOverride: {
+    skyHex: 0x08122e,
+    lightHex: 0xfef3c7,
+    hemiIntensity: 0.68,
+    dirIntensity: 0.88,
+    isRaining: false,
+    showNightSky: true,
+    oceanColorHex: 0x072b59,
+    oceanEmissiveHex: 0x0c4a6e,
+    cloudColorHex: 0x475569,
+  },
+  bgm: {
+    trackId: LOY_KRATHONG_BGM_TRACK_ID,
+    youtubeVideoId: LOY_KRATHONG_YT_ID,
+    volume: 55,
+    buttonLabel: 'เพลงลอยกระทง',
+    buttonTitle: 'เปิด/ปิดเพลงลอยกระทงประกอบฉาก',
+    mobileOnLabel: 'ปิดเพลงลอยกระทง',
+    mobileOffLabel: 'เปิดเพลงลอยกระทง',
+    autoPlayOnLiveInteraction: true,
+  },
+  hud: {
+    liveActiveIcon: '🌕',
+    liveActiveLabel: 'คืนวันเพ็ญ',
+    liveInactiveIcon: '🌤️',
+    liveInactiveLabel: 'อากาศจริง',
+    liveToggleTitle: 'คลิกสลับโหมดท้องฟ้าคืนวันเพ็ญลอยกระทง / สภาพอากาศจริง',
+    encoreActiveIcon: '☀️',
+    encoreActiveLabel: 'กลับเกาะปกติ',
+    encoreInactiveIcon: '🪷',
+    encoreInactiveLabel: 'ควันหลงลอยกระทง',
+    encoreToggleTitle:
+      'ย้อนบรรยากาศคืนวันเพ็ญ ชมกระทงของเพื่อนๆ และร่วมลอยกระทงย้อนหลังได้ 1 วัน!',
+    encoreActivatedToast: {
+      emoji: '🪷',
+      title: 'เปิดโหมดควันหลงคืนวันลอยกระทง!',
+      text: 'ย้อนชมพระจันทร์เต็มดวงและขบวนกระทงของเพื่อนๆ รอบเกาะ หรือเดินไปริมน้ำเพื่อลอยตามหลังได้เลย ✨',
+    },
+    mobileActiveIcon: '☀️',
+    mobileActiveLabel: 'กลับสู่โหมดเกาะปกติ',
+    mobileLiveInactiveIcon: '🪷',
+    mobileLiveInactiveLabel: 'เปิดโหมดคืนวันเพ็ญ',
+    mobileEncoreInactiveIcon: '🪷',
+    mobileEncoreInactiveLabel: 'ควันหลงคืนลอยกระทง',
+    busyModalLabel: '🪷 กำลังอธิษฐานลอยกระทง...',
+  },
+};
 
 export const KRATHONG_STYLES: KrathongStyleMeta[] = [
   {
@@ -333,4 +419,130 @@ export function getKrathongStyleMeta(id?: string): KrathongStyleMeta {
     KRATHONG_STYLES.find((s) => s.id === 'lotus_classic') ||
     KRATHONG_STYLES[0]
   );
+}
+
+export function mergeWithAmbientKrathongs(serverItems: readonly KrathongItem[]): KrathongItem[] {
+  const seen = new Set<string>();
+  const merged: KrathongItem[] = [];
+  for (const item of serverItems) {
+    if (!item || item.id === undefined || item.id === null) continue;
+    const k = String(item.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(item);
+  }
+  for (const npc of AMBIENT_NPC_KRATHONGS) {
+    const k = String(npc.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(npc);
+  }
+  return merged;
+}
+
+export function mapRowToKrathong(row: Record<string, unknown>): KrathongItem {
+  const rawStyle = String(row.style_id || 'lotus_classic');
+  const styleId: KrathongStyleId = isValidKrathongStyle(rawStyle) ? rawStyle : 'lotus_classic';
+  const rawOrbitSeed = Number(row.orbit_seed ?? 0);
+  const rawLaneOffset = Number(row.lane_offset ?? 5.4);
+  const rawStartX = row.start_x !== null && row.start_x !== undefined ? Number(row.start_x) : null;
+  const rawStartZ = row.start_z !== null && row.start_z !== undefined ? Number(row.start_z) : null;
+
+  return {
+    id: Number(row.id),
+    userId: row.user_id !== null && row.user_id !== undefined ? Number(row.user_id) : null,
+    userName: String(row.user_name || 'นักเดินทางริมหาด'),
+    userEmoji: String(row.user_emoji || '🪷'),
+    styleId,
+    caption: String(row.caption || ''),
+    avatarColor: String(row.avatar_color || '#F472B6'),
+    avatarBand: String(row.avatar_band || '#FFE600'),
+    avatarSpecies: String(row.avatar_species || 'bunny'),
+    orbitSeed: Number.isFinite(rawOrbitSeed) ? rawOrbitSeed : 0,
+    laneOffset: Number.isFinite(rawLaneOffset) ? rawLaneOffset : 5.4,
+    startX: rawStartX !== null && Number.isFinite(rawStartX) ? rawStartX : null,
+    startZ: rawStartZ !== null && Number.isFinite(rawStartZ) ? rawStartZ : null,
+    createdAt: Number(row.created_at || Date.now()),
+  };
+}
+
+export interface SanitizedKrathongPayload {
+  uid: number | null;
+  styleId: KrathongStyleId;
+  cleanCaption: string;
+  userName: string;
+  userEmoji: string;
+  avatarColor: string;
+  avatarBand: string;
+  avatarSpecies: string;
+  orbitSeed: number;
+  laneOffset: number;
+  startX: number | null;
+  startZ: number | null;
+}
+
+export function sanitizeKrathongLaunchPayload(
+  body: Record<string, unknown>
+): SanitizedKrathongPayload {
+  const rawUid = Number(body.userId);
+  const uid = Number.isFinite(rawUid) && rawUid > 0 ? Math.trunc(rawUid) : null;
+
+  const styleId: KrathongStyleId = isValidKrathongStyle(body.styleId)
+    ? body.styleId
+    : 'lotus_classic';
+
+  const cleanCaption = String(body.caption ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 75);
+
+  const userName =
+    String(body.userName || 'นักเดินทางริมหาด').trim().slice(0, 32) || 'นักเดินทางริมหาด';
+  const userEmoji = String(body.userEmoji || '🪷').trim().slice(0, 8) || '🪷';
+  const avatarColor = String(body.avatarColor || '#F472B6').trim().slice(0, 16) || '#F472B6';
+  const avatarBand = String(body.avatarBand || '#FFE600').trim().slice(0, 16) || '#FFE600';
+  const avatarSpecies = String(body.avatarSpecies || 'bunny').trim().slice(0, 32) || 'bunny';
+
+  const rawSeed =
+    body.orbitSeed !== null && body.orbitSeed !== undefined && body.orbitSeed !== ''
+      ? Number(body.orbitSeed)
+      : NaN;
+  const orbitSeed = Number.isFinite(rawSeed)
+    ? Math.max(0, Math.min(0.9999, rawSeed))
+    : Number(Math.random().toFixed(4));
+
+  const rawLane =
+    body.laneOffset !== null && body.laneOffset !== undefined && body.laneOffset !== ''
+      ? Number(body.laneOffset)
+      : NaN;
+  const laneOffset = Number.isFinite(rawLane)
+    ? Math.max(3.6, Math.min(8.8, rawLane))
+    : Number((4.0 + Math.random() * 4.2).toFixed(2));
+
+  const parsedStartX =
+    body.startX !== null && body.startX !== undefined && body.startX !== ''
+      ? Number(body.startX)
+      : NaN;
+  const parsedStartZ =
+    body.startZ !== null && body.startZ !== undefined && body.startZ !== ''
+      ? Number(body.startZ)
+      : NaN;
+
+  const startX = Number.isFinite(parsedStartX) ? Number(parsedStartX.toFixed(2)) : null;
+  const startZ = Number.isFinite(parsedStartZ) ? Number(parsedStartZ.toFixed(2)) : null;
+
+  return {
+    uid,
+    styleId,
+    cleanCaption,
+    userName,
+    userEmoji,
+    avatarColor,
+    avatarBand,
+    avatarSpecies,
+    orbitSeed,
+    laneOffset,
+    startX,
+    startZ,
+  };
 }

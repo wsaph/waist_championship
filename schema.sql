@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
   dividend_earned_date TEXT DEFAULT '',
   dividend_earned_today INTEGER NOT NULL DEFAULT 0,
   sync_key TEXT DEFAULT '',
+  active_session_token TEXT DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

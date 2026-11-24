@@ -1,4 +1,5 @@
 import { createClient, type Client } from '@libsql/client';
+import { ensureFestivalSchemas } from '@/festivals/schema';
 
 const url = process.env.TURSO_DATABASE_URL || 'file:local.db';
 const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -60,6 +61,7 @@ async function ensureSchema() {
           dividend_earned_date TEXT DEFAULT '',
           dividend_earned_today INTEGER NOT NULL DEFAULT 0,
           sync_key TEXT DEFAULT '',
+          active_session_token TEXT DEFAULT '',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -94,6 +96,7 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_earned_today INTEGER NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN sync_key TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN active_session_token TEXT DEFAULT ''`);
       await safeAlter(`CREATE INDEX IF NOT EXISTS idx_users_sync_key ON users(sync_key)`);
 
       await client.execute(`
@@ -331,25 +334,68 @@ async function ensureSchema() {
         )
       `);
 
+      await ensureFestivalSchemas(client, safeAlter);
+
       await client.execute(`
-        CREATE TABLE IF NOT EXISTS krathongs (
+        CREATE TABLE IF NOT EXISTS vb_match_history (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER DEFAULT NULL,
-          user_name TEXT NOT NULL DEFAULT 'นักเดินทางริมหาด',
-          user_emoji TEXT NOT NULL DEFAULT '🪷',
-          style_id TEXT NOT NULL DEFAULT 'lotus_classic',
-          caption TEXT NOT NULL DEFAULT '',
-          avatar_color TEXT DEFAULT '#F472B6',
-          avatar_band TEXT DEFAULT '#FFE600',
-          avatar_species TEXT DEFAULT 'bunny',
-          orbit_seed REAL NOT NULL DEFAULT 0,
-          lane_offset REAL NOT NULL DEFAULT 5.2,
-          start_x REAL DEFAULT NULL,
-          start_z REAL DEFAULT NULL,
-          created_at INTEGER NOT NULL
+          match_uid TEXT NOT NULL UNIQUE,
+          room_code TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          winning_team TEXT NOT NULL,
+          winners_json TEXT NOT NULL DEFAULT '[]',
+          losers_json TEXT NOT NULL DEFAULT '[]',
+          score_blue INTEGER NOT NULL DEFAULT 0,
+          score_red INTEGER NOT NULL DEFAULT 0,
+          duration_seconds INTEGER NOT NULL DEFAULT 0,
+          played_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await safeAlter(`CREATE INDEX IF NOT EXISTS idx_krathongs_created_at ON krathongs(created_at DESC)`);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS vb_player_stats (
+          player_name TEXT PRIMARY KEY,
+          skin TEXT NOT NULL DEFAULT 'pikamouse',
+          wins INTEGER NOT NULL DEFAULT 0,
+          losses INTEGER NOT NULL DEFAULT 0,
+          total_points INTEGER NOT NULL DEFAULT 0,
+          matches_played INTEGER NOT NULL DEFAULT 0,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await safeAlter(`ALTER TABLE users ADD COLUMN penalty_wins_date TEXT DEFAULT ''`);
+      await safeAlter(`ALTER TABLE users ADD COLUMN penalty_wins_count INTEGER DEFAULT 0`);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS penalty_matches (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          match_uid TEXT NOT NULL UNIQUE,
+          room_code TEXT NOT NULL,
+          winner_name TEXT NOT NULL,
+          loser_name TEXT NOT NULL,
+          winner_model TEXT NOT NULL DEFAULT 'fox_hero',
+          loser_model TEXT NOT NULL DEFAULT 'bunny_hero',
+          winner_score INTEGER NOT NULL DEFAULT 0,
+          loser_score INTEGER NOT NULL DEFAULT 0,
+          total_rounds INTEGER NOT NULL DEFAULT 5,
+          sudden_death INTEGER NOT NULL DEFAULT 0,
+          duration_seconds INTEGER NOT NULL DEFAULT 0,
+          played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await client.execute(`
+        CREATE TABLE IF NOT EXISTS penalty_player_stats (
+          player_name TEXT PRIMARY KEY,
+          model_id TEXT NOT NULL DEFAULT 'fox_hero',
+          wins INTEGER NOT NULL DEFAULT 0,
+          losses INTEGER NOT NULL DEFAULT 0,
+          goals_scored INTEGER NOT NULL DEFAULT 0,
+          matches_played INTEGER NOT NULL DEFAULT 0,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
 
       const seasonCheck = await client.execute(`SELECT id FROM seasons LIMIT 1`);
       if (seasonCheck.rows.length === 0) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { resolveTaekwondoBelt, TAEKWONDO_BELTS } from '@/lib/taekwondo_catalog';
+import { assertActiveUserSession } from '@/lib/session_guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,6 +115,9 @@ export async function PATCH(req: Request) {
       });
     }
 
+    const patchKickResp = await assertActiveUserSession(req, uid);
+    if (patchKickResp) return patchKickResp;
+
     const prevRes = await turso.execute({
       sql: 'SELECT total_xp, best_score, max_belt_rewarded FROM taekwondo_progress WHERE user_id = ? LIMIT 1',
       args: [uid],
@@ -183,6 +187,9 @@ export async function POST(req: Request) {
         ...resolved,
       });
     }
+
+    const postKickResp = await assertActiveUserSession(req, uid);
+    if (postKickResp) return postKickResp;
 
     const userRes = await turso.execute({
       sql: 'SELECT id, points FROM users WHERE id = ? LIMIT 1',

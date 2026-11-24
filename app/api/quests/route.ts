@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
 import { fetchAllQuests } from '@/lib/quest_board_db';
+import { assertActiveUserSession } from '@/lib/session_guard';
 import {
   QUEST_MIN_STAKE,
   QUEST_MAX_STAKE,
@@ -52,6 +53,9 @@ export async function POST(req: Request) {
     if (!Number.isFinite(creatorId) || creatorId <= 0) {
       return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนสร้างเควส' }, { status: 400 });
     }
+
+    const kickResp = await assertActiveUserSession(req, creatorId);
+    if (kickResp) return kickResp;
     if (!title || title.length < 3) {
       return NextResponse.json({ error: 'กรุณาตั้งชื่อเควสอย่างน้อย 3 ตัวอักษร' }, { status: 400 });
     }

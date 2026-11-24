@@ -325,6 +325,12 @@ export function TaekwondoPvpArena({
   winnerSideRef.current = winnerSide;
   const sparkIdRef = useRef<number>(1);
   const rewardClaimedRef = useRef<boolean>(false);
+  // Remote opponent target for smooth 60 FPS Lerp (eliminates 16Hz packet snap jitter!)
+  const remoteTargetRef = useRef<{ x: number; y: number; active: boolean }>({
+    x: 2.3,
+    y: 0,
+    active: false,
+  });
 
   // Live 60fps input & kinematics refs for Three.js loop
   const holdInputRef = useRef<{ left: boolean; right: boolean; block: boolean }>({
@@ -485,14 +491,23 @@ export function TaekwondoPvpArena({
   }, []);
 
   const leaveRoom = useCallback(() => {
-    if (channelRef.current && sbRef.current) {
-      try {
-        sbRef.current.removeChannel(channelRef.current);
-      } catch {
-        // ignore
-      }
-    }
+    const ch = channelRef.current;
+    const sb = sbRef.current;
     channelRef.current = null;
+    sbRef.current = null;
+    if (ch && sb) {
+      void ch
+        .untrack()
+        .catch(() => {})
+        .finally(() => {
+          void sb.removeChannel(ch).finally(() => {
+            sb.realtime.disconnect();
+          });
+        });
+    } else if (sb) {
+      sb.realtime.disconnect();
+    }
+    remoteTargetRef.current.active = false;
     setIsBotMatch(false);
     setP1Profile(null);
     setP2Profile(null);
@@ -503,12 +518,21 @@ export function TaekwondoPvpArena({
 
   useEffect(() => {
     return () => {
-      if (channelRef.current && sbRef.current) {
-        try {
-          sbRef.current.removeChannel(channelRef.current);
-        } catch {
-          // ignore
-        }
+      const ch = channelRef.current;
+      const sb = sbRef.current;
+      channelRef.current = null;
+      sbRef.current = null;
+      if (ch && sb) {
+        void ch
+          .untrack()
+          .catch(() => {})
+          .finally(() => {
+            void sb.removeChannel(ch).finally(() => {
+              sb.realtime.disconnect();
+            });
+          });
+      } else if (sb) {
+        sb.realtime.disconnect();
       }
     };
   }, []);
@@ -655,11 +679,11 @@ export function TaekwondoPvpArena({
       setConnError('');
       setConnStatus('connecting');
 
-      const sb =
-        sbRef.current ||
-        createClient(url, key, {
-          realtime: { params: { eventsPerSecond: 25 } },
-        });
+      // Create isolated SupabaseClient per room join so rapid exit/rejoin never reuses a channel mid-untrack!
+      const sb = createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { params: { eventsPerSecond: 40 } },
+      });
       sbRef.current = sb;
 
       const ch = sb.channel(`waist-tkd-egg-${cleanCode}`, {
@@ -727,8 +751,9 @@ export function TaekwondoPvpArena({
         const side: 'p1' | 'p2' = payload.side;
         if (side === mySideRef.current) return;
         const k = kinRef.current[side];
-        if (typeof payload.x === 'number') k.x = payload.x;
-        if (typeof payload.y === 'number') k.y = payload.y;
+        if (typeof payload.x === 'number' && typeof payload.y === 'number') {
+          remoteTargetRef.current = { x: payload.x, y: payload.y, active: true };
+        }
         if (typeof payload.vx === 'number') k.vx = payload.vx;
         if (typeof payload.vy === 'number') k.vy = payload.vy;
         if (payload.facing === 1 || payload.facing === -1) k.facing = payload.facing;
@@ -1323,6 +1348,13 @@ export function TaekwondoPvpArena({
           const springForce = -k.wobbleAngle * 42 - k.wobbleVel * 6.5;
           k.wobbleVel += springForce * dt;
           k.wobbleAngle += k.wobbleVel * dt;
+        }
+
+        // Smoothly Lerp remote opponent toward authoritative target at 60 FPS!
+        if (!isBotMatchRef.current && remoteTargetRef.current.active && oppK.hurtTimer <= 0) {
+          const blend = 1 - Math.exp(-18 * dt);
+          oppK.x += (remoteTargetRef.current.x - oppK.x) * blend;
+          oppK.y = Math.max(0, oppK.y + (remoteTargetRef.current.y - oppK.y) * blend);
         }
 
         // Prevent horizontal body overlap on ground

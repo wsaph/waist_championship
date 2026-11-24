@@ -73,7 +73,7 @@ export interface VbStepEvents {
   win?: VbTeam;
 }
 
-export const VB_WIN_SCORE = 7;
+export const VB_WIN_SCORE = 15;
 
 export function getCourtConfig(mode: VbMode): VbCourtConfig {
   if (mode === '2v2') {
@@ -394,14 +394,13 @@ export function stepVolleyballMatch(
       // Ground jump
       if (inp.jump && p.y <= 0.001) {
         p.vy = PLAYER_JUMP_VY;
-      }
-
-      // Ground dive (1997 Pikachu Volleyball torpedo dive!)
-      if (inp.action && p.y <= 0.001 && p.diveCooldown <= 0 && moveDir !== 0) {
+      } else if (inp.action && p.y <= 0.001 && p.diveCooldown <= 0) {
+        // Ground dive (1997 Pikachu Volleyball torpedo dive — uses held direction or current facing!)
+        const diveDir: 1 | -1 = moveDir !== 0 ? (moveDir > 0 ? 1 : -1) : p.facing;
         p.diveTimer = DIVE_DURATION;
         p.diveCooldown = DIVE_COOLDOWN;
-        p.diveDir = moveDir > 0 ? 1 : -1;
-        p.facing = p.diveDir;
+        p.diveDir = diveDir;
+        p.facing = diveDir;
         p.vy = 5.2;
         events.dive = true;
       }
@@ -591,9 +590,10 @@ export function stepVolleyballMatch(
     state.screenShake = 0.4;
     events.score = scorer;
 
-    if (state.scoreLeft >= court.winScore || state.scoreRight >= court.winScore) {
+    const leadByTwo = Math.abs(state.scoreLeft - state.scoreRight) >= 2;
+    if ((state.scoreLeft >= court.winScore || state.scoreRight >= court.winScore) && leadByTwo) {
       state.phase = 'finished';
-      state.winner = state.scoreLeft >= court.winScore ? 'left' : 'right';
+      state.winner = state.scoreLeft > state.scoreRight ? 'left' : 'right';
       events.win = state.winner;
     } else {
       state.phase = 'point_pause';

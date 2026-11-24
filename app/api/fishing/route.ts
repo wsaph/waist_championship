@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { turso } from '@/lib/turso_client';
+import { assertActiveUserSession } from '@/lib/session_guard';
 import {
   FISHING_DAILY_REWARD_LIMIT,
   rollFishingCatch,
@@ -47,6 +48,9 @@ export async function POST(req: Request) {
         guestMode: true,
       });
     }
+
+    const kickResp = await assertActiveUserSession(req, uid);
+    if (kickResp) return kickResp;
 
     await ensureFishingTable();
 

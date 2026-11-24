@@ -12,7 +12,7 @@ body {
 }
 
 body {
-  background: linear-gradient(180deg, #060d24 0%, #0d1b42 58%, #1e1b4b 100%);
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 58%, #0f172a 100%);
   color: var(--foreground);
   font-family: var(--font-prompt), sans-serif;
   overflow: hidden;
