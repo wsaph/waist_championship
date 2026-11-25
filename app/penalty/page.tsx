@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import { PenaltyShootoutGame } from '@/components/PenaltyShootoutGame';
+import { PenaltyShootoutGame } from '@/games/soccer/SoccerArenaModal';
 
 export const metadata: Metadata = {
-  title: '3D Penalty Shootout Online 1v1 — ดวลจุดโทษ 3 มิติ',
+  title: 'ศึกฟุตบอลโกลหนู 3v3 (สูงสุด 6 คน) & ดวลจุดโทษ 3D Online',
   description:
-    'เว็บเกมดวลจุดโทษ 3 มิติ ออนไลน์ 1v1 มุมกล้องสไตล์ PES เล็ง 6 โซน หยุดแถบพลังยิง รองรับโมเดล .glb เล่นได้ทั้งคอมพิวเตอร์ iPad และมือถือ',
+    'เว็บเกมสตรีทฟุตบอลอาร์เคด 3 มิติ โหมดโกลหนู 3v3 ปาร์ตี้ออนไลน์สูงสุด 6 คน บังคับตัวใครตัวมัน และโหมดดวลจุดโทษ 1v1 เล่นข้ามเครื่องได้ทั้งคอมพิวเตอร์ iPad และมือถือ',
 };
 
 export default function PenaltyShootoutPage() {

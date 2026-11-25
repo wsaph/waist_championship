@@ -7,7 +7,7 @@ import {
   SUMO_RANKS,
   resolveSumoRank,
   stepSumoRingPhysics,
-} from '../lib/sumo_catalog.ts';
+} from '../games/sumo/catalog.ts';
 
 test('resolveSumoRank resolves Banzuke progression from Jonokuchi up to Grand Yokozuna', () => {
   const starter = resolveSumoRank(0);

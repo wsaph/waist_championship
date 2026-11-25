@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { PenaltyLeaderboardPanel } from '@/components/PenaltyShootoutGame';
+import { PenaltyLeaderboardPanel } from '@/games/soccer/SoccerArenaModal';
 
 export default function PenaltyLeaderboardPage() {
   return (

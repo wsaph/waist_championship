@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { LeaderboardPanel } from '@/components/PikachuCanvasVolleyball';
+import { LeaderboardPanel } from '@/games/volleyball/2d/PikachuCanvasVolleyball';
 
 export default function VolleyballLeaderboardPage() {
   return (

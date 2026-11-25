@@ -6,7 +6,7 @@ import {
   computePowerBarCursor,
   evaluateShootoutProgress,
   resolvePenaltyTurn,
-} from '../lib/penalty_rules.ts';
+} from '../games/soccer/penalty/rules.ts';
 
 test('GOAL_ZONES defines all 6 penalty target zones with valid goal coordinates', () => {
   assert.equal(GOAL_ZONES.length, 6);

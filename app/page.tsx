@@ -90,37 +90,12 @@ const LoginGateModal = dynamic(
   () => import('@/lib/WardrobeAndAdminModals').then((m) => m.LoginGateModal),
   { ssr: false }
 );
-import type { VbCourtRosterSlot } from '@/components/BeachVolleyballModal';
-const BeachVolleyballModal = dynamic(
-  () => import('@/components/BeachVolleyballModal').then((m) => m.BeachVolleyballModal),
-  { ssr: false }
-);
-const ShabuCoopModal = dynamic(
-  () => import('@/components/ShabuCoopModal').then((m) => m.ShabuCoopModal),
-  { ssr: false }
-);
 const PetCafeModal = dynamic(
   () => import('@/components/PetCafeModal').then((m) => m.PetCafeModal),
   { ssr: false }
 );
-const CasinoCardModal = dynamic(
-  () => import('@/components/CasinoCardModal').then((m) => m.CasinoCardModal),
-  { ssr: false }
-);
 const QuestBoardModal = dynamic(
   () => import('@/components/QuestBoardModal').then((m) => m.QuestBoardModal),
-  { ssr: false }
-);
-const TaekwondoModal = dynamic(
-  () => import('@/components/TaekwondoModal').then((m) => m.TaekwondoModal),
-  { ssr: false }
-);
-const SumoArenaModal = dynamic(
-  () => import('@/components/SumoArenaModal').then((m) => m.SumoArenaModal),
-  { ssr: false }
-);
-const PenaltyShootoutModal = dynamic(
-  () => import('@/components/PenaltyShootoutGame').then((m) => m.PenaltyShootoutModal),
   { ssr: false }
 );
 import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
@@ -140,6 +115,14 @@ import {
   useActiveFestival,
   type FestivalSceneController,
 } from '@/festivals';
+import {
+  ALL_GAME_REALTIME_EVENTS,
+  GameFloatingBanners,
+  GameModalHost,
+  GameProximityActions,
+  createIslandGameZonesController,
+  useIslandGames,
+} from '@/games';
 
 interface Player {
   id: number;
@@ -258,12 +241,12 @@ const PET_OPTIONS = [
 ];
 
 const GROUP_PAIR_ACTIVITIES = [
+  { animType: 'soccer_kick', label: '⚽ เตะบอลโกลหนูด้วยกัน' },
   { animType: 'volleyball', label: '🏐 ตีวอลเลย์บอลด้วยกัน' },
   { animType: 'picnic_shabu', label: '🍲 ตั้งวงชาบูด้วยกัน' },
   { animType: 'play_cards', label: '🃏 ตั้งวงเล่นไพ่ด้วยกัน' },
   { animType: 'boxing', label: '🥊 ซ้อมมวยคู่กัน' },
   { animType: 'dumbbell', label: '🏋️ ยกดัมเบลด้วยกัน' },
-  { animType: 'pushup', label: '💪 วิดพื้นข้างกัน' },
 ];
 
 const FOOD_THOUGHTS = [
@@ -386,15 +369,9 @@ export default function Arena3DPage() {
   const [nearbySpectator, setNearbySpectator] = useState<Player | null>(null);
   const [isNearGuard, setIsNearGuard] = useState(false);
   const [isNearCafe, setIsNearCafe] = useState(false);
-  const [isNearDojang, setIsNearDojang] = useState(false);
-  const [isNearSumo, setIsNearSumo] = useState(false);
-  const [isNearVbCourt, setIsNearVbCourt] = useState(false);
-  const [isNearPenaltyPitch, setIsNearPenaltyPitch] = useState(false);
   const [isNearFoodStall, setIsNearFoodStall] = useState(false);
   const [isNearQuestBoard, setIsNearQuestBoard] = useState(false);
   const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
-  const [isTaekwondoOpen, setIsTaekwondoOpen] = useState(false);
-  const [isSumoOpen, setIsSumoOpen] = useState(false);
   const [isQuestBoardOpen, setIsQuestBoardOpen] = useState(false);
   const [questBoardFocusId, setQuestBoardFocusId] = useState<number | null>(null);
   const [quests, setQuests] = useState<QuestBoardItem[]>([]);
@@ -455,10 +432,6 @@ export default function Arena3DPage() {
   const nearbySpectatorIdRef = useRef<number | null>(null);
   const isNearGuardRef = useRef<boolean>(false);
   const isNearCafeRef = useRef<boolean>(false);
-  const isNearDojangRef = useRef<boolean>(false);
-  const isNearSumoRef = useRef<boolean>(false);
-  const isNearVbCourtRef = useRef<boolean>(false);
-  const isNearPenaltyPitchRef = useRef<boolean>(false);
   const isNearFoodStallRef = useRef<boolean>(false);
   const isNearQuestBoardRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
@@ -557,91 +530,6 @@ export default function Arena3DPage() {
   const autoCheckinTriedRef = useRef<Set<number>>(new Set());
   const [qualityMode, setQualityMode] = useState<QualityMode>('auto');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
-  const [vbSession, setVbSession] = useState<{
-    roomCode: string;
-    mode: '1v1' | '2v2';
-    isHost: boolean;
-    targetName?: string;
-  } | null>(null);
-  const [liveVbLobby, setLiveVbLobby] = useState<{
-    roomCode: string;
-    mode: '1v1' | '2v2';
-    hostUserId: number;
-    hostName: string;
-    hostEmoji: string;
-    targetName?: string;
-    count: number;
-    max: number;
-    status: 'waiting' | 'started';
-    scoreLeft?: number;
-    scoreRight?: number;
-    roster?: VbCourtRosterSlot[];
-    updatedAt: number;
-  } | null>(null);
-  const liveVbLobbyRef = useRef(liveVbLobby);
-  liveVbLobbyRef.current = liveVbLobby;
-  const isVolleyballOpen = Boolean(vbSession);
-
-  // Auto-expire stale volleyball lobby/match state if host tab closed abruptly (>15s without 4.5s/5s heartbeat)
-  useEffect(() => {
-    if (!liveVbLobby) return;
-    const iv = setInterval(() => {
-      setLiveVbLobby((prev) => {
-        if (!prev) return null;
-        return Date.now() - prev.updatedAt > 15000 ? null : prev;
-      });
-    }, 3500);
-    return () => clearInterval(iv);
-  }, [liveVbLobby]);
-  const [penaltySession, setPenaltySession] = useState<{
-    roomCode: string;
-    isHost: boolean;
-    targetName?: string;
-  } | null>(null);
-  const [livePenaltyLobby, setLivePenaltyLobby] = useState<{
-    roomCode: string;
-    hostUserId: number;
-    hostName: string;
-    hostEmoji: string;
-    targetName?: string;
-    count: number;
-    max: number;
-    updatedAt: number;
-  } | null>(null);
-  const isPenaltyOpen = Boolean(penaltySession);
-  const [shabuSession, setShabuSession] = useState<{
-    roomCode: string;
-    isHost: boolean;
-    targetName?: string;
-  } | null>(null);
-  const [liveShabuLobby, setLiveShabuLobby] = useState<{
-    roomCode: string;
-    hostUserId: number;
-    hostName: string;
-    hostEmoji: string;
-    targetName?: string;
-    count: number;
-    max: number;
-    updatedAt: number;
-  } | null>(null);
-  const isShabuOpen = Boolean(shabuSession);
-  const [cardSession, setCardSession] = useState<{
-    roomCode: string;
-    isHost: boolean;
-    targetName?: string;
-  } | null>(null);
-  const [liveCardLobby, setLiveCardLobby] = useState<{
-    roomCode: string;
-    gameType: string;
-    hostUserId: number;
-    hostName: string;
-    hostEmoji: string;
-    targetName?: string;
-    count: number;
-    max: number;
-    updatedAt: number;
-  } | null>(null);
-  const isCardOpen = Boolean(cardSession);
   const realtimeSubscribedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -1004,16 +892,26 @@ export default function Arena3DPage() {
   const handleFestivalRealtimeRef = useRef(festival.handleRealtimeEvent);
   handleFestivalRealtimeRef.current = festival.handleRealtimeEvent;
 
+  const games = useIslandGames({
+    currentUserId,
+    broadcastRealtimeEvent,
+  });
+  const handleGameRealtimeRef = useRef(games.handleRealtimeEvent);
+  handleGameRealtimeRef.current = games.handleRealtimeEvent;
+  const getLiveGameLobbyRef = useRef(games.getLiveLobby);
+  getLiveGameLobbyRef.current = games.getLiveLobby;
+  const isNearGameZoneRef = useRef(games.isNearZone);
+  isNearGameZoneRef.current = games.isNearZone;
+  const setGameZoneProximityRef = useRef(games.setZoneProximity);
+  setGameZoneProximityRef.current = games.setZoneProximity;
+  const openGameRef = useRef(games.openGame);
+  openGameRef.current = games.openGame;
+
   useEffect(() => {
     const shouldPause = Boolean(
       isJoinOpen ||
-      isVolleyballOpen ||
-      isPenaltyOpen ||
-      isShabuOpen ||
-      isCardOpen ||
+      games.isAnyGameOpen ||
       isPetCafeOpen ||
-      isTaekwondoOpen ||
-      isSumoOpen ||
       isQuestBoardOpen ||
       festival.isModalOpen ||
       (authChecked && currentUserId === null)
@@ -1030,13 +928,8 @@ export default function Arena3DPage() {
     }
   }, [
     isJoinOpen,
-    isVolleyballOpen,
-    isPenaltyOpen,
-    isShabuOpen,
-    isCardOpen,
+    games.isAnyGameOpen,
     isPetCafeOpen,
-    isTaekwondoOpen,
-    isSumoOpen,
     isQuestBoardOpen,
     festival.isModalOpen,
     authChecked,
@@ -1045,39 +938,24 @@ export default function Arena3DPage() {
 
   // ซิงก์สถานะว่าผู้เล่นกำลังทำกิจกรรมหน้าต่างไหนอยู่ ให้เพื่อนเห็นป้ายบนหัวแบบเรียลไทม์!
   useEffect(() => {
-    const label = isCardOpen
-      ? '🃏 กำลังเล่นไพ่คาสิโน...'
-      : isShabuOpen
-        ? '🍲 กำลังต้มชาบู...'
-        : isVolleyballOpen
-          ? '🏐 กำลังตีวอลเลย์บอล...'
-          : isPenaltyOpen
-            ? '⚽ กำลังดวลจุดโทษ 3D...'
-            : isPetCafeOpen
-              ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
-              : isTaekwondoOpen
-                ? '🥋 กำลังฝึกเตะเทควันโด...'
-                : isSumoOpen
-                  ? '🏯 กำลังชนพุงในสังเวียนซูโม่...'
-                : isQuestBoardOpen
-                  ? '📋 กำลังดูกระดานภารกิจ...'
-                  : festival.busyModalLabel
-                    ? festival.busyModalLabel
-                    : isJoinOpen
-                      ? '👗 กำลังแต่งตัว...'
-                      : '';
+    const label = games.activeBusyLabel
+      ? games.activeBusyLabel
+      : isPetCafeOpen
+        ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
+        : isQuestBoardOpen
+          ? '📋 กำลังดูกระดานภารกิจ...'
+          : festival.busyModalLabel
+            ? festival.busyModalLabel
+            : isJoinOpen
+              ? '👗 กำลังแต่งตัว...'
+              : '';
     myBusyLabelRef.current = label;
     if (currentUserId && currentUserId > 0) {
       broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
     }
   }, [
-    isCardOpen,
-    isShabuOpen,
-    isVolleyballOpen,
-    isPenaltyOpen,
+    games.activeBusyLabel,
     isPetCafeOpen,
-    isTaekwondoOpen,
-    isSumoOpen,
     isQuestBoardOpen,
     festival.busyModalLabel,
     isJoinOpen,
@@ -1226,11 +1104,7 @@ export default function Arena3DPage() {
       broadcastRealtimeEvent('busy_status', { userId: prevUid, label: '' });
 
       cancelFishing();
-      setVbSession(null);
-      setShabuSession(null);
-      setCardSession(null);
-      setIsTaekwondoOpen(false);
-      setIsSumoOpen(false);
+      games.closeAllGames();
       setIsPetCafeOpen(false);
       setIsQuestBoardOpen(false);
       festival.closeModal();
@@ -1554,14 +1428,7 @@ export default function Arena3DPage() {
       setIsNearFoodStall(false);
       isNearCafeRef.current = false;
       setIsNearCafe(false);
-      isNearDojangRef.current = false;
-      setIsNearDojang(false);
-      isNearSumoRef.current = false;
-      setIsNearSumo(false);
-      isNearVbCourtRef.current = false;
-      setIsNearVbCourt(false);
-      isNearPenaltyPitchRef.current = false;
-      setIsNearPenaltyPitch(false);
+      games.resetAllProximities();
       isNearQuestBoardRef.current = false;
       setIsNearQuestBoard(false);
       setFishingResult(null);
@@ -1821,74 +1688,8 @@ export default function Arena3DPage() {
           );
           fetchArenaDataRef.current({ force: true });
         }
-      } else if (event === 'vb_lobby') {
-        if ((payload.status === 'waiting' || payload.status === 'started') && payload.roomCode) {
-          const parsedRoster: VbCourtRosterSlot[] = Array.isArray(payload.roster)
-            ? payload.roster
-                .filter((r: any) => r && typeof r.slotId === 'string')
-                .map((r: any) => ({
-                  slotId: r.slotId as VbCourtRosterSlot['slotId'],
-                  clientId: r.clientId ? String(r.clientId) : undefined,
-                  playerId: Number(r.playerId || 0),
-                  name: String(r.name || 'ผู้เล่น'),
-                  emoji: String(r.emoji || '🏐'),
-                  isBot: Boolean(r.isBot),
-                }))
-            : [];
-          setLiveVbLobby({
-            roomCode: String(payload.roomCode),
-            mode: payload.mode === '2v2' ? '2v2' : '1v1',
-            hostUserId: Number(payload.hostUserId || 0),
-            hostName: String(payload.hostName || 'เพื่อน'),
-            hostEmoji: String(payload.hostEmoji || '🏐'),
-            targetName: payload.targetName ? String(payload.targetName) : undefined,
-            count: Number(payload.count || 1),
-            max: Number(payload.max || 2),
-            status: payload.status === 'started' ? 'started' : 'waiting',
-            scoreLeft: typeof payload.scoreLeft === 'number' ? payload.scoreLeft : 0,
-            scoreRight: typeof payload.scoreRight === 'number' ? payload.scoreRight : 0,
-            roster: parsedRoster,
-            updatedAt: Date.now(),
-          });
-        } else {
-          setLiveVbLobby((prev) =>
-            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
-          );
-        }
-      } else if (event === 'penalty_lobby') {
-        if (payload.status === 'waiting' && payload.roomCode) {
-          setLivePenaltyLobby({
-            roomCode: String(payload.roomCode),
-            hostUserId: Number(payload.hostUserId || 0),
-            hostName: String(payload.hostName || 'เพื่อน'),
-            hostEmoji: String(payload.hostEmoji || '⚽'),
-            targetName: payload.targetName ? String(payload.targetName) : undefined,
-            count: Number(payload.count || 1),
-            max: Number(payload.max || 2),
-            updatedAt: Date.now(),
-          });
-        } else {
-          setLivePenaltyLobby((prev) =>
-            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
-          );
-        }
-      } else if (event === 'shabu_lobby') {
-        if (payload.status === 'waiting' && payload.roomCode) {
-          setLiveShabuLobby({
-            roomCode: String(payload.roomCode),
-            hostUserId: Number(payload.hostUserId || 0),
-            hostName: String(payload.hostName || 'เพื่อน'),
-            hostEmoji: String(payload.hostEmoji || '🍲'),
-            targetName: payload.targetName ? String(payload.targetName) : undefined,
-            count: Number(payload.count || 1),
-            max: Number(payload.max || 4),
-            updatedAt: Date.now(),
-          });
-        } else {
-          setLiveShabuLobby((prev) =>
-            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
-          );
-        }
+      } else if (handleGameRealtimeRef.current(event, payload)) {
+        // Handled by modular games controller (`@/games`)
       } else if (event === 'fishing') {
         if (typeof payload.userId !== 'number') return;
         if (payload.userId === walkingSpectatorIdRef.current) return;
@@ -1935,24 +1736,6 @@ export default function Arena3DPage() {
           remoteBusyStatusRef.current[uid] = { label: lbl, updatedAt: performance.now() };
         } else {
           delete remoteBusyStatusRef.current[uid];
-        }
-      } else if (event === 'card_lobby') {
-        if (payload.status === 'waiting' && payload.roomCode) {
-          setLiveCardLobby({
-            roomCode: String(payload.roomCode),
-            gameType: String(payload.gameType || 'pokdeng'),
-            hostUserId: Number(payload.hostUserId || 0),
-            hostName: String(payload.hostName || 'เพื่อน'),
-            hostEmoji: String(payload.hostEmoji || '🃏'),
-            targetName: payload.targetName ? String(payload.targetName) : undefined,
-            count: Number(payload.count || 1),
-            max: Number(payload.max || 5),
-            updatedAt: Date.now(),
-          });
-        } else {
-          setLiveCardLobby((prev) =>
-            prev && prev.roomCode === String(payload.roomCode || '') ? null : prev
-          );
         }
       } else if (event === 'interaction') {
         // แสดงแอนิเมชันยิงลูกไฟเติมพลัง / ไรเดอร์ส่งของกิน 3D ให้ผู้เล่นทุกคนเห็นแบบ Realtime!
@@ -2126,18 +1909,6 @@ export default function Arena3DPage() {
         .on('broadcast', { event: 'interaction' }, ({ payload }) =>
           handleIncomingRealtimeEvent('interaction', payload)
         )
-        .on('broadcast', { event: 'vb_lobby' }, ({ payload }) =>
-          handleIncomingRealtimeEvent('vb_lobby', payload)
-        )
-        .on('broadcast', { event: 'penalty_lobby' }, ({ payload }) =>
-          handleIncomingRealtimeEvent('penalty_lobby', payload)
-        )
-        .on('broadcast', { event: 'shabu_lobby' }, ({ payload }) =>
-          handleIncomingRealtimeEvent('shabu_lobby', payload)
-        )
-        .on('broadcast', { event: 'card_lobby' }, ({ payload }) =>
-          handleIncomingRealtimeEvent('card_lobby', payload)
-        )
         .on('broadcast', { event: 'fishing' }, ({ payload }) =>
           handleIncomingRealtimeEvent('fishing', payload)
         )
@@ -2207,6 +1978,12 @@ export default function Arena3DPage() {
       for (const festEvent of ALL_FESTIVAL_REALTIME_EVENTS) {
         channel.on('broadcast', { event: festEvent }, ({ payload }) =>
           handleIncomingRealtimeEvent(festEvent, payload)
+        );
+      }
+
+      for (const gameEvent of ALL_GAME_REALTIME_EVENTS) {
+        channel.on('broadcast', { event: gameEvent }, ({ payload }) =>
+          handleIncomingRealtimeEvent(gameEvent, payload)
         );
       }
 
@@ -2750,9 +2527,9 @@ export default function Arena3DPage() {
     const trackWidth = laneCount * 2.2 + 1.2;
     const specPerSide = Math.max(1, Math.ceil(roamingList.length / 2));
     const specRows = Math.max(1, Math.ceil(specPerSide / 14));
-    const islandCenterX = 9.0;
-    const islandW = halfLen * 2 + 52;
-    const islandD = Math.max(64, trackWidth + 46 + (specRows - 1) * 5.0);
+    const islandCenterX = 11.5;
+    const islandW = halfLen * 2 + 58;
+    const islandD = Math.max(58, trackWidth + 42 + (specRows - 1) * 5.0);
     islandBoundsRef.current = { centerX: islandCenterX, w: islandW, d: islandD };
 
     // Adaptive quality profile (Desktop = High unchanged, iPad = Medium, Mobile = Lite)
@@ -3321,653 +3098,31 @@ export default function Arena3DPage() {
     `;
     labelsContainer.appendChild(cafeTagEl);
 
-    // Spacious Hokkaido Sports Plaza behind Finish Line:
-    //   North Wing (z = -19.0) : 🏯 สังเวียนซูโม่ฮอกไกโด (Sumo Dohyo Pavilion)
-    //   Center     (z = -2.2)  : 🏐❄️ สนามวอลเลย์บอลหิมะ (Snow Volleyball Court)
-    //   Lower-Mid  (z = +10.6) : ⚽ ดวลจุดโทษ 3D (Penalty Pitch)
-    //   South Wing (z = +23.2) : 🥋 สำนักเทควันโด (Taekwondo Dojang Pavilion)
-    const sportsPlazaX = Math.min(islandCenterX + islandW / 2 - 9.5, halfLen + 16.5);
-
-    // A) North Wing: 3D Hokkaido Sumo Dohyo Pavilion (สังเวียนซูโม่ฮอกไกโด — ห่างจากคอร์ทวอลเลย์เกือบ 9 เมตร!)
-    const rawSumoZ = -19.0;
-    const sumoPos = new THREE.Vector3(
+    // Spacious Hokkaido 2×2 Grand Sports Park behind Finish Line (modular 3D zones via `@/games`)
+    const sportsPlazaX = Math.min(islandCenterX + islandW / 2 - 24.5, halfLen + 13.0);
+    const sportsPlazaBackX = Math.min(islandCenterX + islandW / 2 - 7.5, halfLen + 29.8);
+    const gameZonesController = createIslandGameZonesController({
+      scene,
+      labelsContainer,
+      qualityTier: qCfg.tier,
+      islandCenterX,
+      islandW,
+      islandD,
       sportsPlazaX,
-      0.2,
-      Math.max(-(islandD / 2 - 4.8), Math.min(islandD / 2 - 4.8, rawSumoZ))
-    );
-    const sumoGroup = new THREE.Group();
-    sumoGroup.position.copy(sumoPos);
-    sumoGroup.rotation.y = -Math.PI * 0.08;
-
-    const dohyoStonePlinth = new THREE.Mesh(
-      new THREE.BoxGeometry(6.4, 0.16, 6.2),
-      new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85 })
-    );
-    dohyoStonePlinth.position.y = 0.08;
-    dohyoStonePlinth.receiveShadow = true;
-    sumoGroup.add(dohyoStonePlinth);
-
-    const clayEarthMat = new THREE.MeshStandardMaterial({ color: 0xc8a276, roughness: 0.88 });
-    const clayInnerMat = new THREE.MeshStandardMaterial({ color: 0xdfc198, roughness: 0.82 });
-    const dohyoMound = new THREE.Mesh(
-      new THREE.CylinderGeometry(3.85, 4.25, 0.36, 4),
-      clayEarthMat
-    );
-    dohyoMound.rotation.y = Math.PI / 4;
-    dohyoMound.position.y = 0.28;
-    dohyoMound.receiveShadow = true;
-    dohyoMound.castShadow = true;
-    sumoGroup.add(dohyoMound);
-
-    const hinokiMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.72 });
-    const step1 = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.14, 0.46), hinokiMat);
-    step1.position.set(0, 0.12, 2.95);
-    const step2 = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.14, 0.38), hinokiMat);
-    step2.position.set(0, 0.26, 2.72);
-    sumoGroup.add(step1, step2);
-
-    const dohyoCircle = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.15, 2.15, 0.05, 32),
-      clayInnerMat
-    );
-    dohyoCircle.position.y = 0.47;
-    dohyoCircle.receiveShadow = true;
-    const strawRingMat = new THREE.MeshStandardMaterial({
-      color: 0xeab308,
-      emissive: 0xa16207,
-      emissiveIntensity: 0.12,
-      roughness: 0.75,
+      sportsPlazaBackX,
+      getPlayers: () => playersRef.current,
+      getLiveLobby: (gameId) => getLiveGameLobbyRef.current(gameId),
+      getWalkingSpectatorId: () => walkingSpectatorIdRef.current,
+      isNearZone: (gameId) => isNearGameZoneRef.current(gameId),
+      focusCamera: (lookAt, camPos) => {
+        cameraLookAtRef.current.copy(lookAt);
+        cameraTargetPosRef.current = camPos;
+      },
+      walkSpectatorTo: (target) => {
+        walkTargetRef.current = target;
+      },
+      openGame: (opts) => openGameRef.current(opts),
     });
-    const tawaraRing = new THREE.Mesh(
-      new THREE.TorusGeometry(2.15, 0.11, 10, 36),
-      strawRingMat
-    );
-    tawaraRing.rotation.x = Math.PI / 2;
-    tawaraRing.position.y = 0.5;
-    tawaraRing.castShadow = true;
-    sumoGroup.add(dohyoCircle, tawaraRing);
-
-    [-2.58, 2.58].forEach((edgePos) => {
-      const strawX = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.06, 0.09), strawRingMat);
-      strawX.position.set(0, 0.48, edgePos);
-      const strawZ = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 5.2), strawRingMat);
-      strawZ.position.set(edgePos, 0.48, 0);
-      sumoGroup.add(strawX, strawZ);
-    });
-
-    const shikiriLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const shikiriAccentMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
-    [-0.46, 0.46].forEach((sx) => {
-      const lineWhite = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.03, 0.92), shikiriLineMat);
-      lineWhite.position.set(sx, 0.505, 0);
-      const lineTip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.032, 0.16), shikiriAccentMat);
-      lineTip.position.set(sx, 0.506, 0);
-      sumoGroup.add(lineWhite, lineTip);
-    });
-
-    const saltBucket = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.19, 0.24, 10), hinokiMat);
-    saltBucket.position.set(-2.15, 0.58, 2.05);
-    const saltPile = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.18, 10), roofSnowMat);
-    saltPile.position.set(-2.15, 0.76, 2.05);
-    sumoGroup.add(saltBucket, saltPile);
-
-    const kohakuRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.55 });
-    const kohakuWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.55 });
-    const sumoPillarCoords: [number, number, number][] = [
-      [-2.35, -2.25, 0x16a34a],
-      [2.35, -2.25, 0xdc2626],
-      [-2.35, 2.25, 0xf8fafc],
-      [2.35, 2.25, 0x1e293b],
-    ];
-    for (const [px, pz, tasselHex] of sumoPillarCoords) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.21, 2.95, 12), hinokiMat);
-      pillar.position.set(px, 1.92, pz);
-      pillar.castShadow = true;
-      sumoGroup.add(pillar);
-
-      for (let b = 0; b < 4; b++) {
-        const wrap = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.215, 0.22, 0.26, 12),
-          b % 2 === 0 ? kohakuRedMat : kohakuWhiteMat
-        );
-        wrap.position.set(px, 0.72 + b * 0.26, pz);
-        sumoGroup.add(wrap);
-      }
-
-      const tassel = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.16, 0.62, 10),
-        new THREE.MeshStandardMaterial({ color: tasselHex, roughness: 0.5 })
-      );
-      tassel.position.set(px * 0.78, 2.76, pz * 0.78);
-      sumoGroup.add(tassel);
-    }
-
-    const purpleCurtainMat = new THREE.MeshStandardMaterial({
-      color: 0x581c87,
-      emissive: 0x3b0764,
-      emissiveIntensity: 0.25,
-      roughness: 0.65,
-    });
-    const curtainFront = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.42, 0.12), purpleCurtainMat);
-    curtainFront.position.set(0, 3.02, 2.28);
-    const curtainBack = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.42, 0.12), purpleCurtainMat);
-    curtainBack.position.set(0, 3.02, -2.28);
-    const curtainLeft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 4.65), purpleCurtainMat);
-    curtainLeft.position.set(-2.36, 3.02, 0);
-    const curtainRight = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 4.65), purpleCurtainMat);
-    curtainRight.position.set(2.36, 3.02, 0);
-    sumoGroup.add(curtainFront, curtainBack, curtainLeft, curtainRight);
-
-    const sumoRoofBase = new THREE.Mesh(
-      new THREE.BoxGeometry(6.4, 0.28, 6.1),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.52 })
-    );
-    sumoRoofBase.position.set(0, 3.34, 0);
-    sumoRoofBase.castShadow = true;
-    const sumoRoofTop = new THREE.Mesh(
-      new THREE.ConeGeometry(4.45, 1.55, 4),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.52 })
-    );
-    sumoRoofTop.rotation.y = Math.PI / 4;
-    sumoRoofTop.position.set(0, 4.2, 0);
-    sumoRoofTop.castShadow = true;
-    const sumoRoofSnow = new THREE.Mesh(new THREE.ConeGeometry(4.26, 0.82, 4), roofSnowMat);
-    sumoRoofSnow.rotation.y = Math.PI / 4;
-    sumoRoofSnow.position.set(0, 4.62, 0);
-    const sumoTrim = new THREE.Mesh(
-      new THREE.BoxGeometry(6.5, 0.11, 0.18),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.4 })
-    );
-    sumoTrim.position.set(0, 3.28, 3.06);
-    sumoGroup.add(sumoRoofBase, sumoRoofTop, sumoRoofSnow, sumoTrim);
-
-    const gunbaiGoldMat = new THREE.MeshStandardMaterial({
-      color: 0xfacc15,
-      emissive: 0xd97706,
-      emissiveIntensity: 0.4,
-      metalness: 0.5,
-      roughness: 0.3,
-    });
-    const gunbaiFan = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.14, 18), kohakuRedMat);
-    gunbaiFan.scale.set(0.88, 1, 1.08);
-    gunbaiFan.rotation.x = Math.PI / 2;
-    gunbaiFan.position.set(0, 3.82, 2.22);
-    const gunbaiRim = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.055, 8, 20), gunbaiGoldMat);
-    gunbaiRim.position.set(0, 3.82, 2.28);
-    const gunbaiHandle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.48, 0.12), gunbaiGoldMat);
-    gunbaiHandle.position.set(0, 3.35, 2.28);
-    sumoGroup.add(gunbaiFan, gunbaiRim, gunbaiHandle);
-
-    const teppoPost = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.65, 12), hinokiMat);
-    teppoPost.position.set(1.95, 1.28, 1.85);
-    teppoPost.castShadow = true;
-    const teppoBand = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.24, 12), kohakuWhiteMat);
-    teppoBand.position.set(1.95, 1.55, 1.85);
-    sumoGroup.add(teppoPost, teppoBand);
-
-    scene.add(sumoGroup);
-
-    const sumoTagEl = document.createElement('div');
-    sumoTagEl.className = 'player-tag cursor-pointer';
-    sumoTagEl.onclick = () => {
-      cameraLookAtRef.current.set(sumoPos.x, 2.1, sumoPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(sumoPos.x + 2.2, 5.6, sumoPos.z + 9.0);
-      if (isNearSumoRef.current) {
-        setIsSumoOpen(true);
-      } else if (walkingSpectatorIdRef.current !== null) {
-        walkTargetRef.current = new THREE.Vector3(sumoPos.x, 0.2, sumoPos.z + 3.4);
-      }
-    };
-    sumoTagEl.innerHTML = `
-      <div class="bg-gradient-to-r from-purple-900 via-red-700 to-amber-500 text-amber-100 border-2 border-amber-200 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-        🏯 สังเวียนซูโม่ฮอกไกโด (ชนพุงดันตกเวที 1v1 / ไต่ยศโยโกซึนะ!)
-      </div>
-    `;
-    labelsContainer.appendChild(sumoTagEl);
-
-    // B) South Wing: 3D Taekwondo Dojang Pavilion (สำนักเทควันโด — ขนาบฝั่งใต้ของลานกีฬาห่างจากคอร์ทอย่างโปร่งสบาย!)
-    const rawDojangZ = 23.2;
-    const dojangPos = new THREE.Vector3(
-      sportsPlazaX,
-      0.2,
-      Math.max(-(islandD / 2 - 4.5), Math.min(islandD / 2 - 4.5, rawDojangZ))
-    );
-    const dojangGroup = new THREE.Group();
-    dojangGroup.position.copy(dojangPos);
-    dojangGroup.rotation.y = -Math.PI * 0.1;
-
-    const dojangDeck = new THREE.Mesh(
-      new THREE.BoxGeometry(5.6, 0.24, 5.0),
-      new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 })
-    );
-    dojangDeck.position.y = 0.12;
-    dojangDeck.receiveShadow = true;
-    dojangGroup.add(dojangDeck);
-
-    const matBlue = new THREE.Mesh(
-      new THREE.BoxGeometry(4.6, 0.08, 4.0),
-      new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.7 })
-    );
-    matBlue.position.set(0, 0.28, 0);
-    matBlue.receiveShadow = true;
-    const matRed = new THREE.Mesh(
-      new THREE.BoxGeometry(2.8, 0.09, 2.4),
-      new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.7 })
-    );
-    matRed.position.set(0, 0.285, 0);
-    dojangGroup.add(matBlue, matRed);
-
-    const dojangBackWall = new THREE.Mesh(
-      new THREE.BoxGeometry(4.6, 2.6, 0.22),
-      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.75 })
-    );
-    dojangBackWall.position.set(0, 1.54, -1.9);
-    dojangBackWall.castShadow = true;
-    dojangBackWall.receiveShadow = true;
-    dojangGroup.add(dojangBackWall);
-
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.6 });
-    const tkdPillarCoords: [number, number][] = [
-      [-2.25, -1.85],
-      [2.25, -1.85],
-      [-2.25, 1.85],
-      [2.25, 1.85],
-    ];
-    for (const [px, pz] of tkdPillarCoords) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 2.7, 10), pillarMat);
-      pillar.position.set(px, 1.58, pz);
-      pillar.castShadow = true;
-      dojangGroup.add(pillar);
-    }
-
-    const dojangRoofBase = new THREE.Mesh(
-      new THREE.BoxGeometry(6.1, 0.26, 5.4),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 })
-    );
-    dojangRoofBase.position.set(0, 2.98, 0);
-    dojangRoofBase.castShadow = true;
-    const dojangRoofTop = new THREE.Mesh(
-      new THREE.ConeGeometry(4.15, 1.45, 4),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.55 })
-    );
-    dojangRoofTop.rotation.y = Math.PI / 4;
-    dojangRoofTop.position.set(0, 3.82, 0);
-    dojangRoofTop.castShadow = true;
-    const dojangRoofSnow = new THREE.Mesh(new THREE.ConeGeometry(3.96, 0.74, 4), roofSnowMat);
-    dojangRoofSnow.rotation.y = Math.PI / 4;
-    dojangRoofSnow.position.set(0, 4.22, 0);
-    const dojangTrim = new THREE.Mesh(
-      new THREE.BoxGeometry(6.2, 0.1, 0.16),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.35 })
-    );
-    dojangTrim.position.set(0, 2.94, 2.72);
-    dojangGroup.add(dojangRoofBase, dojangRoofTop, dojangRoofSnow, dojangTrim);
-
-    const crestRed = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.52, 0.52, 0.14, 18),
-      new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.35 })
-    );
-    crestRed.rotation.x = Math.PI / 2;
-    crestRed.position.set(0, 3.45, 1.95);
-    const crestBlue = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.32, 0.32, 0.17, 16),
-      new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1d4ed8, emissiveIntensity: 0.35 })
-    );
-    crestBlue.rotation.x = Math.PI / 2;
-    crestBlue.position.set(0, 3.45, 1.97);
-    dojangGroup.add(crestRed, crestBlue);
-
-    const padStand = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.34, 0.42, 0.32, 12),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 })
-    );
-    padStand.position.set(1.35, 0.44, 0.95);
-    const padBody = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.24, 0.24, 1.35, 12),
-      new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.45 })
-    );
-    padBody.position.set(1.35, 1.28, 0.95);
-    padBody.castShadow = true;
-    const padStripe = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.255, 0.255, 0.22, 12),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xf59e0b, emissiveIntensity: 0.4 })
-    );
-    padStripe.position.set(1.35, 1.38, 0.95);
-    dojangGroup.add(padStand, padBody, padStripe);
-
-    scene.add(dojangGroup);
-
-    const dojangTagEl = document.createElement('div');
-    dojangTagEl.className = 'player-tag cursor-pointer';
-    dojangTagEl.onclick = () => {
-      cameraLookAtRef.current.set(dojangPos.x, 1.9, dojangPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(dojangPos.x + 2.4, 5.2, dojangPos.z + 8.5);
-      if (isNearDojangRef.current) {
-        setIsTaekwondoOpen(true);
-      } else if (walkingSpectatorIdRef.current !== null) {
-        walkTargetRef.current = new THREE.Vector3(dojangPos.x - 1.2, 0.2, dojangPos.z - 2.6);
-      }
-    };
-    dojangTagEl.innerHTML = `
-      <div class="bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-        🥋 สำนักเทควันโด (เดินเข้ามาเตะเป้าเลื่อนสาย &amp; ดวล PvP!)
-      </div>
-    `;
-    labelsContainer.appendChild(dojangTagEl);
-
-    // C) Center: 3D Hokkaido Snow Volleyball Court Zone
-    const vbCourtPos = new THREE.Vector3(
-      sportsPlazaX,
-      0.08,
-      -2.2
-    );
-    const vbCourtGroup = new THREE.Group();
-    vbCourtGroup.position.copy(vbCourtPos);
-
-    // Raised Hokkaido Snow Volleyball Court Pad
-    const vbSandPad = new THREE.Mesh(
-      new THREE.BoxGeometry(13.6, 0.14, 8.6),
-      new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.75 })
-    );
-    vbSandPad.position.y = 0.07;
-    vbSandPad.receiveShadow = true;
-    vbCourtGroup.add(vbSandPad);
-
-    // Subtle Blue Team (Left) & Red Team (Right) Court Zones
-    const vbBlueHalf = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.95, 7.3),
-      new THREE.MeshBasicMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.32 })
-    );
-    vbBlueHalf.rotation.x = -Math.PI / 2;
-    vbBlueHalf.position.set(-3.05, 0.15, 0);
-    const vbRedHalf = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.95, 7.3),
-      new THREE.MeshBasicMaterial({ color: 0xe11d48, transparent: true, opacity: 0.32 })
-    );
-    vbRedHalf.rotation.x = -Math.PI / 2;
-    vbRedHalf.position.set(3.05, 0.15, 0);
-    vbCourtGroup.add(vbBlueHalf, vbRedHalf);
-
-    // Crisp White Court Boundary Lines & Center Line
-    const vbLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    [-3.72, 3.72].forEach((lz) => {
-      const longLine = new THREE.Mesh(new THREE.BoxGeometry(12.2, 0.04, 0.16), vbLineMat);
-      longLine.position.set(0, 0.155, lz);
-      vbCourtGroup.add(longLine);
-    });
-    [-6.05, 0, 6.05].forEach((lx) => {
-      const shortLine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 7.6), vbLineMat);
-      shortLine.position.set(lx, 0.155, 0);
-      vbCourtGroup.add(shortLine);
-    });
-
-    // 4 Corner Team Pennant Flags (Blue on Left, Red on Right)
-    [
-      [-6.1, -3.8, 0x2563eb],
-      [-6.1, 3.8, 0x2563eb],
-      [6.1, -3.8, 0xe11d48],
-      [6.1, 3.8, 0xe11d48],
-    ].forEach(([fx, fz, fCol]) => {
-      const fPole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.04, 1.55, 6),
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 })
-      );
-      fPole.position.set(fx, 0.9, fz);
-      const flag = new THREE.Mesh(
-        new THREE.ConeGeometry(0.24, 0.62, 3),
-        new THREE.MeshStandardMaterial({ color: fCol, roughness: 0.5 })
-      );
-      flag.rotation.z = fx < 0 ? Math.PI / 2 : -Math.PI / 2;
-      flag.position.set(fx + (fx < 0 ? -0.28 : 0.28), 1.48, fz);
-      vbCourtGroup.add(fPole, flag);
-    });
-
-    // Center Volleyball Net Posts + Yellow Top Tape + Checkered Mesh + Red Antennas
-    const vbPostMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.25, roughness: 0.35 });
-    [-4.1, 4.1].forEach((pz) => {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 2.75, 10), vbPostMat);
-      post.position.set(0, 1.5, pz);
-      post.castShadow = true;
-      const antenna = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.03, 0.03, 0.65, 6),
-        new THREE.MeshStandardMaterial({ color: 0xef4444 })
-      );
-      antenna.position.set(0, 3.05, pz * 0.9);
-      vbCourtGroup.add(post, antenna);
-    });
-
-    const vbTopTape = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.16, 8.3),
-      new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.25 })
-    );
-    vbTopTape.position.set(0, 2.72, 0);
-    vbCourtGroup.add(vbTopTape);
-
-    const vbNetCanvas = document.createElement('canvas');
-    vbNetCanvas.width = 128;
-    vbNetCanvas.height = 64;
-    const vnCtx = vbNetCanvas.getContext('2d');
-    if (vnCtx) {
-      vnCtx.clearRect(0, 0, 128, 64);
-      vnCtx.strokeStyle = 'rgba(255,255,255,0.88)';
-      vnCtx.lineWidth = 3;
-      for (let nx = 0; nx <= 128; nx += 16) {
-        vnCtx.beginPath();
-        vnCtx.moveTo(nx, 0);
-        vnCtx.lineTo(nx, 64);
-        vnCtx.stroke();
-      }
-      for (let ny = 0; ny <= 64; ny += 16) {
-        vnCtx.beginPath();
-        vnCtx.moveTo(0, ny);
-        vnCtx.lineTo(128, ny);
-        vnCtx.stroke();
-      }
-    }
-    const vbNetTex = new THREE.CanvasTexture(vbNetCanvas);
-    vbNetTex.wrapS = THREE.RepeatWrapping;
-    vbNetTex.wrapT = THREE.RepeatWrapping;
-    vbNetTex.repeat.set(4, 1);
-    const vbNetPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(8.1, 1.55),
-      new THREE.MeshBasicMaterial({ map: vbNetTex, transparent: true, side: THREE.DoubleSide })
-    );
-    vbNetPlane.rotation.y = Math.PI / 2;
-    vbNetPlane.position.set(0, 1.88, 0);
-    vbCourtGroup.add(vbNetPlane);
-
-    // Tall Beach Referee Chair beside Back Net Post
-    const refChair = new THREE.Group();
-    const chairWoodMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
-    [
-      [-0.35, -0.35],
-      [0.35, -0.35],
-      [-0.35, 0.35],
-      [0.35, 0.35],
-    ].forEach(([lx, lz]) => {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.2, 6), chairWoodMat);
-      leg.position.set(lx, 1.1, lz);
-      refChair.add(leg);
-    });
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.1, 0.85), chairWoodMat);
-    seat.position.y = 2.2;
-    const canopy = new THREE.Mesh(
-      new THREE.ConeGeometry(0.95, 0.55, 4),
-      new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.5 })
-    );
-    canopy.rotation.y = Math.PI / 4;
-    canopy.position.y = 3.35;
-    refChair.add(seat, canopy);
-    refChair.position.set(0, 0.12, -4.85);
-    vbCourtGroup.add(refChair);
-
-    // Giant Floating Pikachu-Style Beach Volleyball Mascot spinning above the court!
-    const vbBallCanvas = document.createElement('canvas');
-    vbBallCanvas.width = 128;
-    vbBallCanvas.height = 64;
-    const vbcCtx = vbBallCanvas.getContext('2d');
-    if (vbcCtx) {
-      const cols = ['#ffffff', '#facc15', '#38bdf8', '#f43f5e', '#ffffff', '#facc15'];
-      const sw = 128 / cols.length;
-      cols.forEach((cHex, ci) => {
-        vbcCtx.fillStyle = cHex;
-        vbcCtx.fillRect(ci * sw, 0, sw + 1, 64);
-      });
-    }
-    const vbBallTex = new THREE.CanvasTexture(vbBallCanvas);
-    vbBallTex.colorSpace = THREE.SRGBColorSpace;
-    const vbMascotBall = new THREE.Mesh(
-      new THREE.SphereGeometry(0.72, 20, 16),
-      new THREE.MeshStandardMaterial({
-        map: vbBallTex,
-        roughness: 0.3,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.18,
-      })
-    );
-    vbMascotBall.position.set(0, 3.85, 0);
-    vbMascotBall.castShadow = true;
-    vbCourtGroup.add(vbMascotBall);
-
-    const vbActivePlayersGroup = new THREE.Group();
-    vbCourtGroup.add(vbActivePlayersGroup);
-    interface VbIslandCourtActor {
-      slotId: 'L1' | 'L2' | 'R1' | 'R2';
-      playerId: number;
-      isBot: boolean;
-      team: 'left' | 'right';
-      root: THREE.Group;
-      charParts: ReturnType<typeof buildCharacterMesh>;
-      baseX: number;
-      baseZ: number;
-      tagEl: HTMLDivElement;
-    }
-    let vbCourtActors: VbIslandCourtActor[] = [];
-    let vbRenderedRosterSig = '';
-    let vbRenderedTagSig = '';
-
-    const clearVbCourtActors = () => {
-      vbCourtActors.forEach((a) => {
-        a.charParts.rootGroup.userData.disposed = true;
-        a.tagEl.remove();
-      });
-      vbCourtActors = [];
-      while (vbActivePlayersGroup.children.length > 0) {
-        const ch = vbActivePlayersGroup.children[0];
-        vbActivePlayersGroup.remove(ch);
-        disposeObject3D(ch);
-      }
-    };
-
-    scene.add(vbCourtGroup);
-
-    const vbCourtTagEl = document.createElement('div');
-    vbCourtTagEl.className = 'player-tag cursor-pointer';
-    vbCourtTagEl.onclick = () => {
-      cameraLookAtRef.current.set(vbCourtPos.x, 1.8, vbCourtPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(vbCourtPos.x, 8.2, vbCourtPos.z + 13.5);
-      if (isNearVbCourtRef.current || liveVbLobbyRef.current?.status === 'started') {
-        setVbSession({
-          roomCode: '7777',
-          mode: liveVbLobbyRef.current?.mode || '2v2',
-          isHost: false,
-        });
-      } else if (walkingSpectatorIdRef.current !== null) {
-        walkTargetRef.current = new THREE.Vector3(vbCourtPos.x - 2.2, 0.2, vbCourtPos.z + 1.5);
-      }
-    };
-    vbCourtTagEl.innerHTML = `
-      <div class="bg-gradient-to-r from-sky-300 via-cyan-200 to-blue-400 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-        🏐❄️ สนามวอลเลย์บอลหิมะฮอกไกโด (เดินเข้าคอร์ทเพื่อเข้าห้องรอ 1v1 / 2v2!)
-      </div>
-    `;
-    labelsContainer.appendChild(vbCourtTagEl);
-
-    // 3D Mini Football Penalty Shootout Pitch Zone (ข้างสนามวอลเลย์บอลฝั่งใต้ — เดินเข้ามาดวลจุดโทษ 3D 1v1 ได้เลย!)
-    const penaltyPitchPos = new THREE.Vector3(
-      vbCourtPos.x,
-      0.08,
-      Math.min(islandD / 2 - 6.8, 10.6)
-    );
-    const penaltyPitchGroup = new THREE.Group();
-    penaltyPitchGroup.position.copy(penaltyPitchPos);
-
-    const penTurf = new THREE.Mesh(
-      new THREE.BoxGeometry(9.6, 0.14, 6.8),
-      new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.78 })
-    );
-    penTurf.position.y = 0.07;
-    penTurf.receiveShadow = true;
-    penaltyPitchGroup.add(penTurf);
-
-    const penLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const penBoxBorder = new THREE.Mesh(new THREE.RingGeometry(2.6, 2.75, 4), penLineMat);
-    penBoxBorder.rotation.x = -Math.PI / 2;
-    penBoxBorder.rotation.z = Math.PI / 4;
-    penBoxBorder.scale.set(1.45, 0.95, 1);
-    penBoxBorder.position.set(0, 0.15, 0);
-    penaltyPitchGroup.add(penBoxBorder);
-
-    const penSpotDot = new THREE.Mesh(new THREE.CircleGeometry(0.18, 14), penLineMat);
-    penSpotDot.rotation.x = -Math.PI / 2;
-    penSpotDot.position.set(-1.3, 0.155, 0);
-    penaltyPitchGroup.add(penSpotDot);
-
-    // 3D Football Goalpost on East end of the mini pitch
-    const penPostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
-    [-1.8, 1.8].forEach((gz) => {
-      const gPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2, 10), penPostMat);
-      gPost.position.set(3.6, 1.15, gz);
-      gPost.castShadow = true;
-      penaltyPitchGroup.add(gPost);
-    });
-    const gCrossbar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.76, 10), penPostMat);
-    gCrossbar.rotation.x = Math.PI / 2;
-    gCrossbar.position.set(3.6, 2.25, 0);
-    penaltyPitchGroup.add(gCrossbar);
-
-    const gBackNet = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 2.15),
-      new THREE.MeshBasicMaterial({ map: vbNetTex, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
-    );
-    gBackNet.rotation.y = Math.PI / 2;
-    gBackNet.position.set(4.15, 1.15, 0);
-    penaltyPitchGroup.add(gBackNet);
-
-    const penBallMascot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.45, 16, 14),
-      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35 })
-    );
-    penBallMascot.position.set(-1.3, 0.6, 0);
-    penBallMascot.castShadow = true;
-    penaltyPitchGroup.add(penBallMascot);
-
-    scene.add(penaltyPitchGroup);
-
-    const penaltyTagEl = document.createElement('div');
-    penaltyTagEl.className = 'player-tag cursor-pointer';
-    penaltyTagEl.onclick = () => {
-      cameraLookAtRef.current.set(penaltyPitchPos.x, 1.5, penaltyPitchPos.z);
-      cameraTargetPosRef.current = new THREE.Vector3(
-        penaltyPitchPos.x - 2.5,
-        7.4,
-        penaltyPitchPos.z + 11.2
-      );
-      if (isNearPenaltyPitchRef.current) {
-        setPenaltySession({
-          roomCode: '6666',
-          isHost: false,
-        });
-      } else if (walkingSpectatorIdRef.current !== null) {
-        walkTargetRef.current = new THREE.Vector3(penaltyPitchPos.x - 1.8, 0.2, penaltyPitchPos.z);
-      }
-    };
-    penaltyTagEl.innerHTML = `
-      <div class="bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-        ⚽🥅 สนามดวลจุดโทษ 3D (เดินเข้ามาดวลจุดโทษ 1v1 / ซ้อม AI!)
-      </div>
-    `;
-    labelsContainer.appendChild(penaltyTagEl);
 
     // 3D Ragnarok Mobile Style Wooden Quest Board (วางไว้ใกล้พี่ยามแบบมีระยะห่างกำลังดี — กดเปิดกระดานเควสได้ทันที!)
     const rawBoardPos = guardPostPos
@@ -4980,168 +4135,6 @@ export default function Arena3DPage() {
         isl.position.y = -0.35 + Math.sin(elapsed * 1.6 + ii * 2.1) * 0.08;
         isl.rotation.z = Math.sin(elapsed * 1.25 + ii * 1.5) * 0.045;
       });
-      // Sync live 3D characters & court banner onto the Island Volleyball Court!
-      const liveVb = liveVbLobbyRef.current;
-      const nextVbRosterSig = liveVb
-        ? `${liveVb.status}|${liveVb.mode}|${(liveVb.roster || [])
-            .map((r) => `${r.slotId}:${r.playerId}:${r.name}:${r.isBot ? 1 : 0}`)
-            .join(',')}`
-        : '';
-      if (nextVbRosterSig !== vbRenderedRosterSig) {
-        vbRenderedRosterSig = nextVbRosterSig;
-        clearVbCourtActors();
-        if (liveVb && liveVb.roster && liveVb.roster.length > 0) {
-          const curPlayers = playersRef.current;
-          liveVb.roster.forEach((slotEntry, sIdx) => {
-            const found = slotEntry.playerId
-              ? curPlayers.find((p) => p.id === slotEntry.playerId) ||
-                curPlayers[(sIdx + 1) % Math.max(1, curPlayers.length)]
-              : curPlayers[(sIdx + 1) % Math.max(1, curPlayers.length)];
-            const team: 'left' | 'right' = slotEntry.slotId.startsWith('L') ? 'left' : 'right';
-            const cParts = buildCharacterMesh({
-              colorHex: found?.colorHex || (team === 'left' ? '#38BDF8' : '#FB7185'),
-              accessory: 'headband',
-              bandColor: team === 'left' ? '#38BDF8' : '#EF4444',
-              bellyScale: found?.bellyScale ?? found?.bmiBellyScale ?? 1,
-              muscleScale: found?.muscleScale ?? 1,
-              showDumbbells: false,
-              species: found?.breed || found?.species || 'bunny',
-              equipHat: found?.equipHat || 'none',
-              equipFace: found?.equipFace || 'face_none',
-              equipArmor: found?.equipArmor || 'armor_none',
-              equipWeapon: found?.equipWeapon || 'weapon_none',
-              equipWings: found?.equipWings || 'wings_none',
-              equipAura: found?.equipAura || 'aura_none',
-              equipMount: 'mount_none',
-              propColors: found?.propColors,
-              animMode: 'cheer',
-              animSeed: sIdx * 1.6,
-            });
-            cParts.rootGroup.scale.setScalar(0.84);
-            const actorRoot = new THREE.Group();
-            actorRoot.add(cParts.rootGroup);
-            const ring = new THREE.Mesh(
-              new THREE.RingGeometry(0.48, 0.62, 20),
-              new THREE.MeshBasicMaterial({
-                color: team === 'left' ? 0x38bdf8 : 0xf43f5e,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9,
-              })
-            );
-            ring.rotation.x = -Math.PI / 2;
-            ring.position.y = 0.02;
-            actorRoot.add(ring);
-
-            const is2v2 = liveVb.mode === '2v2';
-            const baseX =
-              slotEntry.slotId === 'L1'
-                ? is2v2
-                  ? -2.35
-                  : -2.85
-                : slotEntry.slotId === 'L2'
-                  ? -4.15
-                  : slotEntry.slotId === 'R1'
-                    ? is2v2
-                      ? 2.35
-                      : 2.85
-                    : 4.15;
-            const baseZ = !is2v2
-              ? 0
-              : slotEntry.slotId.endsWith('1')
-                ? -1.35
-                : 1.35;
-            actorRoot.position.set(baseX, 0.15, baseZ);
-            actorRoot.rotation.y = team === 'left' ? 0 : Math.PI;
-            vbActivePlayersGroup.add(actorRoot);
-
-            const actorTag = document.createElement('div');
-            actorTag.className = 'player-tag pointer-events-none';
-            const pillStyle =
-              team === 'left'
-                ? 'bg-sky-950/90 border-sky-300 text-sky-100'
-                : 'bg-rose-950/90 border-rose-300 text-rose-100';
-            actorTag.innerHTML = `
-              <div class="px-2 py-0.5 rounded-full border ${pillStyle} text-[9.5px] font-extrabold whitespace-nowrap shadow">
-                ${slotEntry.emoji} ${slotEntry.name}
-              </div>
-            `;
-            labelsContainer.appendChild(actorTag);
-
-            vbCourtActors.push({
-              slotId: slotEntry.slotId,
-              playerId: slotEntry.playerId,
-              isBot: Boolean(slotEntry.isBot),
-              team,
-              root: actorRoot,
-              charParts: cParts,
-              baseX,
-              baseZ,
-              tagEl: actorTag,
-            });
-          });
-        }
-      }
-
-      const nextVbTagSig = liveVb
-        ? `${liveVb.status}|${liveVb.mode}|${liveVb.count}|${liveVb.max}|${liveVb.scoreLeft ?? 0}|${liveVb.scoreRight ?? 0}`
-        : 'idle';
-      if (nextVbTagSig !== vbRenderedTagSig) {
-        vbRenderedTagSig = nextVbTagSig;
-        if (liveVb?.status === 'started') {
-          vbCourtTagEl.innerHTML = `
-            <div class="bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white border-2 border-amber-200 rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-              🔒 กำลังแข่ง ${liveVb.mode.toUpperCase()} (${liveVb.scoreLeft ?? 0} : ${liveVb.scoreRight ?? 0}) • ล็อกทีละ 1 รอบ (คลิกดูผู้เล่นในสนาม!)
-            </div>
-          `;
-        } else if (liveVb?.status === 'waiting') {
-          vbCourtTagEl.innerHTML = `
-            <div class="bg-gradient-to-r from-emerald-300 via-amber-200 to-cyan-300 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-              🟢 ห้องรอวอลเลย์บอล ${liveVb.mode.toUpperCase()} (${liveVb.count}/${liveVb.max} คน) • เดินเข้าคอร์ทเพื่อร่วมตี้!
-            </div>
-          `;
-        } else {
-          vbCourtTagEl.innerHTML = `
-            <div class="bg-gradient-to-r from-sky-300 via-cyan-200 to-blue-400 text-slate-950 border-2 border-white rounded-xl px-2.5 py-0.5 shadow-[2px_2px_0px_#000] text-[10.5px] font-extrabold whitespace-nowrap hover:scale-105 transition">
-              🏐❄️ สนามวอลเลย์บอลหิมะฮอกไกโด (เดินเข้าคอร์ทเพื่อเข้าห้องรอ 1v1 / 2v2!)
-            </div>
-          `;
-        }
-      }
-
-      if (liveVb?.status === 'started') {
-        const rallyPhase = elapsed * 2.6;
-        const rallySin = Math.sin(rallyPhase);
-        vbMascotBall.position.set(
-          rallySin * 3.35,
-          1.85 + Math.abs(Math.cos(rallyPhase)) * 2.25,
-          Math.sin(elapsed * 1.35) * 1.15
-        );
-        vbMascotBall.rotation.y = elapsed * 3.2;
-        vbMascotBall.rotation.z = -rallySin * 2.4;
-
-        vbCourtActors.forEach((act, ai) => {
-          const ballTowardMe = act.team === 'left' ? rallySin < -0.55 : rallySin > 0.55;
-          const jumpY = ballTowardMe ? Math.abs(Math.sin(elapsed * 7.5 + ai)) * 0.72 : Math.abs(Math.sin(elapsed * 3.8 + ai)) * 0.08;
-          const swayX = Math.sin(elapsed * 2.8 + ai * 1.4) * 0.28;
-          act.root.position.set(act.baseX + swayX, 0.15 + jumpY, act.baseZ);
-          act.charParts.mixer?.update(delta);
-          if (!act.charParts.mixer) {
-            act.charParts.armL.rotation.z = ballTowardMe ? 2.4 : 0.35;
-            act.charParts.armR.rotation.z = ballTowardMe ? 2.4 : -0.35;
-          }
-        });
-      } else {
-        vbMascotBall.position.set(0, 3.85 + Math.sin(elapsed * 2.8) * 0.32, 0);
-        vbMascotBall.rotation.y = elapsed * 1.4;
-        vbMascotBall.rotation.z = elapsed * 0.7;
-
-        vbCourtActors.forEach((act, ai) => {
-          const hop = Math.abs(Math.sin(elapsed * 4.2 + ai * 1.3)) * 0.14;
-          act.root.position.set(act.baseX, 0.15 + hop, act.baseZ);
-          act.charParts.mixer?.update(delta);
-        });
-      }
       palmCrowns.forEach((crown, pi) => {
         crown.rotation.z = Math.sin(elapsed * 1.5 + pi * 0.85) * 0.05;
         crown.rotation.x = Math.cos(elapsed * 1.2 + pi * 1.1) * 0.038;
@@ -5515,46 +4508,6 @@ export default function Arena3DPage() {
           if (nearCafeNow !== isNearCafeRef.current) {
             isNearCafeRef.current = nearCafeNow;
             setIsNearCafe(nearCafeNow);
-          }
-
-          const distToSumo = Math.hypot(
-            c.rootGroup.position.x - sumoPos.x,
-            c.rootGroup.position.z - sumoPos.z
-          );
-          const nearSumoNow = distToSumo < 5.6;
-          if (nearSumoNow !== isNearSumoRef.current) {
-            isNearSumoRef.current = nearSumoNow;
-            setIsNearSumo(nearSumoNow);
-          }
-
-          const distToDojang = Math.hypot(
-            c.rootGroup.position.x - dojangPos.x,
-            c.rootGroup.position.z - dojangPos.z
-          );
-          const nearDojangNow = distToDojang < 5.6;
-          if (nearDojangNow !== isNearDojangRef.current) {
-            isNearDojangRef.current = nearDojangNow;
-            setIsNearDojang(nearDojangNow);
-          }
-
-          const distToVb = Math.hypot(
-            c.rootGroup.position.x - vbCourtPos.x,
-            c.rootGroup.position.z - vbCourtPos.z
-          );
-          const nearVbNow = distToVb < 6.8;
-          if (nearVbNow !== isNearVbCourtRef.current) {
-            isNearVbCourtRef.current = nearVbNow;
-            setIsNearVbCourt(nearVbNow);
-          }
-
-          const distToPenalty = Math.hypot(
-            c.rootGroup.position.x - penaltyPitchPos.x,
-            c.rootGroup.position.z - penaltyPitchPos.z
-          );
-          const nearPenaltyNow = distToPenalty < 6.2;
-          if (nearPenaltyNow !== isNearPenaltyPitchRef.current) {
-            isNearPenaltyPitchRef.current = nearPenaltyNow;
-            setIsNearPenaltyPitch(nearPenaltyNow);
           }
 
           const distToFoodStall = Math.hypot(
@@ -6461,62 +5414,22 @@ export default function Arena3DPage() {
         cafeTagEl.style.opacity = '0';
       }
 
-      tempProjVec.set(sumoPos.x, sumoPos.y + 5.15, sumoPos.z);
-      tempProjVec.project(camera);
-      if (tempProjVec.z < 1) {
-        sumoTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-        sumoTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-        sumoTagEl.style.opacity = '1';
-      } else {
-        sumoTagEl.style.opacity = '0';
-      }
-
-      tempProjVec.set(dojangPos.x, dojangPos.y + 4.75, dojangPos.z);
-      tempProjVec.project(camera);
-      if (tempProjVec.z < 1) {
-        dojangTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-        dojangTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-        dojangTagEl.style.opacity = '1';
-      } else {
-        dojangTagEl.style.opacity = '0';
-      }
-
-      tempProjVec.set(vbCourtPos.x, vbCourtPos.y + 5.1, vbCourtPos.z);
-      tempProjVec.project(camera);
-      if (tempProjVec.z < 1) {
-        vbCourtTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-        vbCourtTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-        vbCourtTagEl.style.opacity = '1';
-      } else {
-        vbCourtTagEl.style.opacity = '0';
-      }
-
-      for (let vai = 0; vai < vbCourtActors.length; vai++) {
-        const vAct = vbCourtActors[vai];
-        tempProjVec.set(
-          vbCourtPos.x + vAct.root.position.x,
-          vbCourtPos.y + vAct.root.position.y + 2.25,
-          vbCourtPos.z + vAct.root.position.z
-        );
-        tempProjVec.project(camera);
-        if (tempProjVec.z < 1) {
-          vAct.tagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-          vAct.tagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-          vAct.tagEl.style.opacity = '1';
-        } else {
-          vAct.tagEl.style.opacity = '0';
-        }
-      }
-
-      tempProjVec.set(penaltyPitchPos.x, penaltyPitchPos.y + 3.2, penaltyPitchPos.z);
-      tempProjVec.project(camera);
-      if (tempProjVec.z < 1) {
-        penaltyTagEl.style.setProperty('--tag-x', `${((tempProjVec.x * 0.5 + 0.5) * cachedVw).toFixed(1)}px`);
-        penaltyTagEl.style.setProperty('--tag-y', `${((-tempProjVec.y * 0.5 + 0.5) * cachedVh).toFixed(1)}px`);
-        penaltyTagEl.style.opacity = '1';
-      } else {
-        penaltyTagEl.style.opacity = '0';
-      }
+      const gameZoneWalkerId = walkingSpectatorIdRef.current;
+      const gameZoneWalkerMesh =
+        gameZoneWalkerId !== null
+          ? meshes.find((m) => m.id === gameZoneWalkerId && m.isSpectator)
+          : null;
+      gameZonesController.updateAll(
+        {
+          elapsed,
+          delta,
+          camera,
+          viewportWidth: cachedVw,
+          viewportHeight: cachedVh,
+        },
+        gameZoneWalkerMesh ? gameZoneWalkerMesh.rootGroup.position : null,
+        setGameZoneProximityRef.current
+      );
 
       tempProjVec.set(questBoardPos.x, questBoardPos.y + 3.85, questBoardPos.z);
       tempProjVec.project(camera);
@@ -6745,7 +5658,7 @@ export default function Arena3DPage() {
         // ignore
       }
       cancelAnimationFrame(frameId);
-      clearVbCourtActors();
+      gameZonesController.disposeAll();
       festivalSceneController?.dispose();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -9742,32 +8655,8 @@ export default function Arena3DPage() {
                         key={act.animType}
                         type="button"
                         onClick={() => {
-                          if (act.animType === 'volleyball') {
+                          if (games.handlePairActivityClick(act.animType, nearbySpectator.name)) {
                             setIsPairMenuOpen(false);
-                            setVbSession({
-                              roomCode: liveVbLobby?.roomCode || '7777',
-                              mode: liveVbLobby?.mode || '2v2',
-                              isHost: false,
-                              targetName: nearbySpectator.name,
-                            });
-                            return;
-                          }
-                          if (act.animType === 'play_cards') {
-                            setIsPairMenuOpen(false);
-                            setCardSession({
-                              roomCode: liveCardLobby?.roomCode || '9999',
-                              isHost: false,
-                              targetName: nearbySpectator.name,
-                            });
-                            return;
-                          }
-                          if (act.animType === 'picnic_shabu') {
-                            setIsPairMenuOpen(false);
-                            setShabuSession({
-                              roomCode: liveShabuLobby?.roomCode || '5555',
-                              isHost: false,
-                              targetName: nearbySpectator.name,
-                            });
                             return;
                           }
                           const walker = players.find((pl) => pl.id === walkingSpectatorId);
@@ -9810,15 +8699,7 @@ export default function Arena3DPage() {
                               : 'bg-[#FEF08A] hover:bg-[#FFE600] text-black'
                           }`}
                       >
-                        {act.animType === 'volleyball' && liveVbLobby?.status === 'started'
-                          ? `🔒 วอลเลย์กำลังแข่ง (${liveVbLobby.scoreLeft ?? 0}-${liveVbLobby.scoreRight ?? 0})`
-                          : act.animType === 'volleyball' && liveVbLobby && liveVbLobby.count < liveVbLobby.max
-                            ? `🏐 เข้าตี้บอล (${liveVbLobby.count}/${liveVbLobby.max})`
-                            : act.animType === 'picnic_shabu' && liveShabuLobby && liveShabuLobby.count < liveShabuLobby.max
-                              ? `🍲 เข้าตี้ชาบู (${liveShabuLobby.count}/${liveShabuLobby.max})`
-                              : act.animType === 'play_cards' && liveCardLobby && liveCardLobby.count < liveCardLobby.max
-                                ? `🃏 เข้าวงไพ่ (${liveCardLobby.count}/${liveCardLobby.max})`
-                                : act.label}
+                        {games.formatPairActivityLabel(act.animType, act.label)}
                       </button>
                     ))}
                   </div>
@@ -9842,53 +8723,21 @@ export default function Arena3DPage() {
               )}
 
               {!isPairMenuOpen && isNearGuard && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
-                    className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                  >
-                    😈 แกล้งพี่ยาม!
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCardSession({
-                        roomCode: liveCardLobby?.roomCode || '9999',
-                        isHost: false,
-                      })
-                    }
-                    className="neo-btn bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                  >
-                    🃏 วงไพ่พี่ยาม
-                    {liveCardLobby && liveCardLobby.count > 0 ? (
-                      <span> ({liveCardLobby.count}/{liveCardLobby.max})</span>
-                    ) : (
-                      <span className="hidden sm:inline"> (1–5 คน!)</span>
-                    )}
-                  </button>
-                </>
-              )}
-
-              {!isPairMenuOpen && isNearFoodStall && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setShabuSession({
-                      roomCode: liveShabuLobby?.roomCode || '5555',
-                      isHost: false,
-                    })
-                  }
-                  className="neo-btn bg-gradient-to-r from-orange-400 via-amber-300 to-rose-400 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
+                  onClick={() => openGuardPrankMenu(window.innerWidth / 2, window.innerHeight / 2)}
+                  className="neo-btn bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
                 >
-                  🍲 ตี้ชาบูบุฟเฟ่ต์
-                  {liveShabuLobby && liveShabuLobby.count > 0 ? (
-                    <span> ({liveShabuLobby.count}/{liveShabuLobby.max} คนรอ!)</span>
-                  ) : (
-                    <span className="hidden sm:inline"> (1–4 คน!)</span>
-                  )}
+                  😈 แกล้งพี่ยาม!
                 </button>
               )}
+
+              <GameProximityActions
+                games={games}
+                isPairMenuOpen={isPairMenuOpen}
+                isNearGuard={isNearGuard}
+                isNearFoodStall={isNearFoodStall}
+              />
 
               {!isPairMenuOpen && isNearCafe && (
                 <button
@@ -9897,82 +8746,6 @@ export default function Arena3DPage() {
                   className="neo-btn bg-gradient-to-r from-pink-400 via-amber-300 to-rose-400 text-stone-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
                 >
                   ☕🐾 คาเฟ่<span className="hidden sm:inline">สัตว์เลี้ยง (Pet Café)!</span>
-                </button>
-              )}
-
-              {!isPairMenuOpen && isNearSumo && (
-                <button
-                  type="button"
-                  onClick={() => setIsSumoOpen(true)}
-                  className="neo-btn bg-gradient-to-r from-purple-900 via-red-700 to-amber-500 text-amber-100 border-2 border-amber-200 font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap animate-bounce"
-                >
-                  🏯 ขึ้นสังเวียนซูโม่<span className="hidden sm:inline"> (ชนพุงดันตกเวที 1v1 / ไต่ยศโยโกซึนะ!)</span>
-                </button>
-              )}
-
-              {!isPairMenuOpen && isNearDojang && (
-                <button
-                  type="button"
-                  onClick={() => setIsTaekwondoOpen(true)}
-                  className="neo-btn bg-gradient-to-r from-red-600 via-amber-400 to-blue-600 text-white border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap"
-                >
-                  🥋 สำนักเทควันโด<span className="hidden sm:inline"> (เตะเป้าเลื่อนสาย &amp; ดวล PvP!)</span>
-                </button>
-              )}
-
-              {!isPairMenuOpen && isNearVbCourt && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setVbSession({
-                      roomCode: '7777',
-                      mode: liveVbLobby?.mode || '2v2',
-                      isHost: false,
-                    })
-                  }
-                  className={`neo-btn border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap ${
-                    liveVbLobby?.status === 'started'
-                      ? 'bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white'
-                      : 'bg-gradient-to-r from-amber-300 via-orange-400 to-rose-500 text-slate-950 animate-bounce'
-                  }`}
-                >
-                  {liveVbLobby?.status === 'started' ? (
-                    <>
-                      🔒 สนามกำลังแข่ง ({liveVbLobby.scoreLeft ?? 0}-{liveVbLobby.scoreRight ?? 0})
-                      <span className="hidden sm:inline"> • กดดูตัวละครที่กำลังเล่น</span>
-                    </>
-                  ) : liveVbLobby && liveVbLobby.count >= liveVbLobby.max ? (
-                    <>⏳ ห้องรอวอลเลย์เต็ม ({liveVbLobby.count}/{liveVbLobby.max}) • รอรอบถัดไป</>
-                  ) : (
-                    <>
-                      🏐 เข้าสนามวอลเลย์บอล
-                      {liveVbLobby && liveVbLobby.count > 0 ? (
-                        <span> ({liveVbLobby.count}/{liveVbLobby.max} คนรอในห้อง!)</span>
-                      ) : (
-                        <span className="hidden sm:inline"> (เข้าห้องรอตี้ 1v1 / 2v2!)</span>
-                      )}
-                    </>
-                  )}
-                </button>
-              )}
-
-              {!isPairMenuOpen && isNearPenaltyPitch && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPenaltySession({
-                      roomCode: livePenaltyLobby?.roomCode || '6666',
-                      isHost: false,
-                    })
-                  }
-                  className="neo-btn bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300 text-slate-950 border-2 border-white font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#000] whitespace-nowrap animate-bounce"
-                >
-                  ⚽ ดวลจุดโทษ 3D
-                  {livePenaltyLobby && livePenaltyLobby.count > 0 ? (
-                    <span> ({livePenaltyLobby.count}/{livePenaltyLobby.max} คนรอในห้อง!)</span>
-                  ) : (
-                    <span className="hidden sm:inline"> (1v1 ออนไลน์ / ซ้อม AI!)</span>
-                  )}
                 </button>
               )}
 
@@ -10259,200 +9032,20 @@ export default function Arena3DPage() {
         <div className="fixed inset-0 z-50 pointer-events-none bg-gradient-to-b from-amber-300/45 via-yellow-200/25 to-transparent animate-pulse" />
       )}
 
-      {/* Live Floating Banner for Volleyball Lobby OR Active Single-Round Match */}
-      {liveVbLobby && !vbSession && !isJoinOpen && (
-        <div className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]">
-          <div
-            className={`rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 ${
-              liveVbLobby.status === 'started' ? 'border-rose-400' : 'border-amber-300'
-            }`}
-          >
-            <span className="text-base animate-bounce">
-              {liveVbLobby.status === 'started' ? '🔒' : '🏐'}
-            </span>
-            <span className="text-xs font-extrabold text-amber-100 truncate">
-              {liveVbLobby.status === 'started'
-                ? `วอลเลย์กำลังแข่ง ${liveVbLobby.mode.toUpperCase()} (${liveVbLobby.scoreLeft ?? 0}-${liveVbLobby.scoreRight ?? 0}): ${(liveVbLobby.roster || [])
-                    .filter((r) => !r.isBot)
-                    .map((r) => `${r.emoji}${r.name}`)
-                    .join(', ') || `${liveVbLobby.hostEmoji}${liveVbLobby.hostName}`}`
-                : `${liveVbLobby.hostEmoji} ${liveVbLobby.hostName} ชวนตีวอลเลย์บอล ${liveVbLobby.mode} (${liveVbLobby.count}/${liveVbLobby.max})`}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setVbSession({
-                  roomCode: '7777',
-                  mode: liveVbLobby.mode,
-                  isHost: false,
-                  targetName: liveVbLobby.hostName,
-                });
-              }}
-              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
-            >
-              {liveVbLobby.status === 'started'
-                ? '👀 ดูผู้เล่น'
-                : liveVbLobby.count >= liveVbLobby.max
-                  ? 'เต็มแล้ว'
-                  : 'เข้าร่วมเลย!'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setLiveVbLobby(null)}
-              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
-              title="ซ่อนแจ้งเตือน"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
+      <GameFloatingBanners
+        games={games}
+        isJoinOpen={isJoinOpen}
+        currentPlayerName={players.find((pl) => pl.id === currentUserId)?.name ?? null}
+      />
 
-      {vbSession && (
-        <BeachVolleyballModal
-          isOpen={Boolean(vbSession)}
-          onClose={() => {
-            setLiveVbLobby((prev) =>
-              prev && prev.hostUserId === currentUserId && prev.status === 'waiting' ? null : prev
-            );
-            setVbSession(null);
-          }}
-          players={players}
-          currentUserId={currentUserId}
-          qualityMode={qualityMode}
-          initialRoomCode={vbSession.roomCode}
-          initialMode={vbSession.mode}
-          initialIsHost={vbSession.isHost}
-          invitedTargetName={vbSession.targetName}
-          externalLobbyInfo={liveVbLobby}
-          onLobbyBroadcast={(info) => {
-            if (info.status === 'waiting' || info.status === 'started') {
-              setLiveVbLobby({
-                roomCode: info.roomCode,
-                mode: info.mode,
-                hostUserId: info.hostUserId,
-                hostName: info.hostName,
-                hostEmoji: info.hostEmoji,
-                targetName: info.targetName,
-                count: info.count,
-                max: info.max,
-                status: info.status,
-                scoreLeft: info.scoreLeft ?? 0,
-                scoreRight: info.scoreRight ?? 0,
-                roster: info.roster || [],
-                updatedAt: Date.now(),
-              });
-            } else {
-              setLiveVbLobby(null);
-            }
-            broadcastRealtimeEvent('vb_lobby', { ...info });
-          }}
-          onRewardEarned={(earned, newPoints) => {
-            showToast(
-              '🏐',
-              `ชนะวอลเลย์บอลชายหาด! (+${earned} 💰)`,
-              `รับโบนัสผู้ชนะแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
-            );
-            void fetchArenaData({ force: true });
-          }}
-        />
-      )}
-
-      {/* Live Floating Invite Banner when a friend opens a Shabu Co-op Buffet Lobby */}
-      {liveShabuLobby && !shabuSession && !vbSession && !isJoinOpen && (
-        <div
-          className={`fixed ${liveVbLobby ? 'top-28 md:top-32' : 'top-16 md:top-20'} left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]`}
-        >
-          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-orange-300">
-            <span className="text-base animate-bounce">🍲</span>
-            <span className="text-xs font-extrabold text-amber-100 truncate">
-              {liveShabuLobby.hostEmoji} {liveShabuLobby.hostName} เปิดตี้ชาบูบุฟเฟ่ต์ ({liveShabuLobby.count}/{liveShabuLobby.max})
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setShabuSession({
-                  roomCode: liveShabuLobby.roomCode,
-                  isHost: false,
-                  targetName: liveShabuLobby.hostName,
-                });
-              }}
-              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
-            >
-              เข้าร่วมตี้เลย!
-            </button>
-            <button
-              type="button"
-              onClick={() => setLiveShabuLobby(null)}
-              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
-              title="ซ่อนแจ้งเตือน"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Live Floating Invite Banner when a friend opens a 3D Penalty Shootout Lobby */}
-      {livePenaltyLobby && !penaltySession && !vbSession && !shabuSession && !isJoinOpen && (
-        <div className="fixed top-16 md:top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]">
-          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-emerald-400">
-            <span className="text-base animate-bounce">⚽</span>
-            <span className="text-xs font-extrabold text-amber-100 truncate">
-              {livePenaltyLobby.hostEmoji} {livePenaltyLobby.hostName} ท้าดวลจุดโทษ 3D 1v1 ({livePenaltyLobby.count}/{livePenaltyLobby.max})
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setPenaltySession({
-                  roomCode: livePenaltyLobby.roomCode,
-                  isHost: false,
-                  targetName: livePenaltyLobby.hostName,
-                });
-              }}
-              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
-            >
-              รับคำท้าเลย!
-            </button>
-            <button
-              type="button"
-              onClick={() => setLivePenaltyLobby(null)}
-              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
-              title="ซ่อนแจ้งเตือน"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {penaltySession && (
-        <PenaltyShootoutModal
-          isOpen={Boolean(penaltySession)}
-          onClose={() => {
-            setLivePenaltyLobby((prev) =>
-              prev && prev.hostUserId === currentUserId ? null : prev
-            );
-            setPenaltySession(null);
-          }}
-          players={players}
-          currentUserId={currentUserId}
-          initialRoomCode={penaltySession.roomCode}
-          initialIsHost={penaltySession.isHost}
-          invitedTargetName={penaltySession.targetName}
-          onLobbyBroadcast={(info) => {
-            broadcastRealtimeEvent('penalty_lobby', { ...info });
-          }}
-          onRewardEarned={(earned, newPoints) => {
-            showToast(
-              '⚽',
-              `ชนะดวลจุดโทษ 3D! (+${earned} 💰)`,
-              `รับโบนัสผู้ชนะแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
-            );
-            void fetchArenaData({ force: true });
-          }}
-        />
-      )}
+      <GameModalHost
+        games={games}
+        players={players}
+        currentUserId={currentUserId}
+        qualityMode={qualityMode}
+        onShowRewardToast={showToast}
+        onRefreshArenaData={() => void fetchArenaData({ force: true })}
+      />
 
       {isPetCafeOpen && (
         <PetCafeModal
@@ -10460,32 +9053,6 @@ export default function Arena3DPage() {
           onClose={() => setIsPetCafeOpen(false)}
           qualityMode={qualityMode}
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
-        />
-      )}
-
-      {isTaekwondoOpen && (
-        <TaekwondoModal
-          isOpen={isTaekwondoOpen}
-          onClose={() => setIsTaekwondoOpen(false)}
-          players={players}
-          qualityMode={qualityMode}
-          currentUserId={currentUserId}
-          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
-          playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🥋'}
-          onPointsUpdated={() => void fetchArenaData({ force: true })}
-        />
-      )}
-
-      {isSumoOpen && (
-        <SumoArenaModal
-          isOpen={isSumoOpen}
-          onClose={() => setIsSumoOpen(false)}
-          players={players}
-          qualityMode={qualityMode}
-          currentUserId={currentUserId}
-          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'นักซูโม่'}
-          playerEmoji={players.find((pl) => pl.id === currentUserId)?.emoji || '🏯'}
-          onPointsUpdated={() => void fetchArenaData({ force: true })}
         />
       )}
 
@@ -10532,85 +9099,6 @@ export default function Arena3DPage() {
           initialQuestId={questBoardFocusId}
           onQuestsUpdated={handleQuestsUpdated}
           onShowToast={(icon, title, desc) => showToast(icon, title, desc || '')}
-        />
-      )}
-
-      {shabuSession && (
-        <ShabuCoopModal
-          isOpen={Boolean(shabuSession)}
-          onClose={() => setShabuSession(null)}
-          players={players}
-          currentUserId={currentUserId}
-          qualityMode={qualityMode}
-          initialRoomCode={shabuSession.roomCode}
-          initialIsHost={shabuSession.isHost}
-          invitedTargetName={shabuSession.targetName}
-          onLobbyBroadcast={(info) => {
-            broadcastRealtimeEvent('shabu_lobby', { ...info });
-          }}
-          onRewardEarned={(earned, newPoints) => {
-            showToast(
-              '🍲',
-              `ตั้งวงชาบูสำเร็จ! (+${earned} 💰)`,
-              `รับโบนัสจากแต้มตี้ชาบูแล้ว สะสมรวมเป็น ${newPoints} 💰 GP!`
-            );
-            void fetchArenaData({ force: true });
-          }}
-        />
-      )}
-
-      {/* Live Floating Invite Banner when a friend opens a Guard Casino Card Table */}
-      {liveCardLobby && !cardSession && !shabuSession && !vbSession && !isJoinOpen && (
-        <div
-          className={`fixed ${liveVbLobby || liveShabuLobby ? 'top-28 md:top-32' : 'top-16 md:top-20'} left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[92vw]`}
-        >
-          <div className="rpg-banner rounded-full px-3.5 py-1.5 flex items-center gap-2.5 shadow-2xl border-2 border-emerald-300">
-            <span className="text-base animate-bounce">🃏</span>
-            <span className="text-xs font-extrabold text-amber-100 truncate">
-              {liveCardLobby.hostEmoji} {liveCardLobby.hostName} เปิดวงไพ่คาสิโนพี่ยาม ({liveCardLobby.count}/{liveCardLobby.max})
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setCardSession({
-                  roomCode: liveCardLobby.roomCode,
-                  isHost: false,
-                  targetName: liveCardLobby.hostName,
-                });
-              }}
-              className="rpg-btn-gold px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer shrink-0"
-            >
-              เข้าวงเลย!
-            </button>
-            <button
-              type="button"
-              onClick={() => setLiveCardLobby(null)}
-              className="text-amber-200/80 hover:text-white text-xs font-bold px-1 cursor-pointer"
-              title="ซ่อนแจ้งเตือน"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {cardSession && (
-        <CasinoCardModal
-          isOpen={Boolean(cardSession)}
-          onClose={() => setCardSession(null)}
-          players={players}
-          currentUserId={currentUserId}
-          currentUserPoints={players.find((pl) => pl.id === currentUserId)?.points ?? 0}
-          qualityMode={qualityMode}
-          initialRoomCode={cardSession.roomCode}
-          initialIsHost={cardSession.isHost}
-          invitedTargetName={cardSession.targetName}
-          onLobbyBroadcast={(info) => {
-            broadcastRealtimeEvent('card_lobby', { ...info });
-          }}
-          onPointsUpdated={() => {
-            void fetchArenaData({ force: true });
-          }}
         />
       )}
 

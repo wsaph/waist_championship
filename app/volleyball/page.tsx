@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { PikachuVolleyballGame } from '@/components/PikachuCanvasVolleyball';
+import { PikachuVolleyballGame } from '@/games/volleyball/2d/PikachuCanvasVolleyball';
 
 export const metadata: Metadata = {
   title: 'Pikachu Chibi Volleyball 2D Online (1v1 & 2v2)',

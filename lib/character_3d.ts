@@ -3083,10 +3083,10 @@ export function buildCharacterMesh({
     powerMeta.form === 'kabigon'
       ? 0x1d5c73
       : powerMeta.form === 'majin_buu'
-      ? 0xf9a8d4
-      : isHeroChar
-      ? heroSkinNum
-      : colorHex;
+        ? 0xf9a8d4
+        : isHeroChar
+          ? heroSkinNum
+          : colorHex;
 
   const rootGroup = new THREE.Group();
   const bounceGroup = new THREE.Group();
@@ -3178,21 +3178,21 @@ export function buildCharacterMesh({
         (equipArmor === 'armor_gold_paladin'
           ? 0xfacc15
           : equipArmor === 'armor_silver_knight'
-          ? 0x64748b
-          : equipArmor === 'armor_ice_cape'
-          ? 0x38bdf8
-          : equipArmor === 'armor_vest'
-          ? 0x16a34a
-          : 0x3b82f6);
+            ? 0x64748b
+            : equipArmor === 'armor_ice_cape'
+              ? 0x38bdf8
+              : equipArmor === 'armor_vest'
+                ? 0x16a34a
+                : 0x3b82f6);
       const pantsColor =
         customPantsNum ??
         (equipArmor === 'armor_gold_paladin'
           ? 0x18181b
           : equipArmor === 'armor_silver_knight'
-          ? 0x1e3a8a
-          : equipArmor === 'armor_vest'
-          ? 0xb45309
-          : 0x334155);
+            ? 0x1e3a8a
+            : equipArmor === 'armor_vest'
+              ? 0xb45309
+              : 0x334155);
       const shirt = new THREE.Mesh(
         new THREE.CylinderGeometry(0.68, 0.75, 0.62, 20),
         new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.55 })
@@ -4436,12 +4436,12 @@ export function buildCharacterMesh({
     const noseX = isFoxLike
       ? 0.81
       : isDogLong
-      ? 0.72
-      : isBearLike
-      ? 0.74
-      : earStyle === 'seal'
-      ? 0.68
-      : 0.59 + faceXOffset;
+        ? 0.72
+        : isBearLike
+          ? 0.74
+          : earStyle === 'seal'
+            ? 0.68
+            : 0.59 + faceXOffset;
     const noseY = isFoxLike ? -0.04 : isDogLong || isBearLike ? -0.05 : -0.05;
     const nose = new THREE.Mesh(
       new THREE.SphereGeometry(noseRadius, 12, 12),
@@ -4541,8 +4541,8 @@ export function buildCharacterMesh({
         earStyle === 'fox'
           ? 0.66
           : earStyle === 'corgi' || earStyle === 'shiba' || earStyle === 'dog_floppy' || earStyle === 'bear' || earStyle === 'panda'
-          ? 0.68
-          : 0.58 + faceXOffset;
+            ? 0.68
+            : 0.58 + faceXOffset;
       [-0.034, 0.034].forEach((mz) => {
         const smileArc = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 8, 12, Math.PI), eyeMat);
         smileArc.position.set(smileX, -0.12, mz);
@@ -5491,10 +5491,10 @@ export function buildCharacterMesh({
       spectatorProp === 'pushup'
         ? 0x38bdf8
         : spectatorProp === 'situp'
-        ? 0xa3e635
-        : spectatorProp === 'phone_scroll'
-        ? 0xc084fc
-        : 0xfef08a;
+          ? 0xa3e635
+          : spectatorProp === 'phone_scroll'
+            ? 0xc084fc
+            : 0xfef08a;
     const mat = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 0.04, 1.5),
       new THREE.MeshStandardMaterial({ color: matColor, roughness: 0.7 })
@@ -7791,8 +7791,8 @@ export function buildPetMesh(petType: string, customHex?: string): PetMeshParts 
           customHex && /^#[0-9A-Fa-f]{6}$/.test(customHex)
             ? customHex
             : petType === 'pet_orange_tabby' || petType === 'pet_cat_crown'
-            ? '#FB923C'
-            : undefined;
+              ? '#FB923C'
+              : undefined;
         if (effectiveTint) {
           recolorGlbGroup(res.group, effectiveTint);
         }
@@ -9093,12 +9093,20 @@ export function buildFantasyArenaDecor(
     [-halfLen * 0.18, -edgeZ, -0.08, 0.15, 1.05],
     [halfLen * 0.22, -edgeZ, 0.08, 0.18, 1.16],
     [halfLen * 0.62, -edgeZ, -0.15, 0.2, 1.12],
+    [halfLen + 9.5, -edgeZ, 0.12, 0.18, 1.14],
+    [halfLen + 20.5, -edgeZ, -0.1, 0.2, 1.2],
+    [halfLen + 31.2, -edgeZ, -0.16, 0.16, 1.12],
     [rightEdgeX, -edgeZ + 0.8, -0.2, 0.15, 1.15],
+    [rightEdgeX, -edgeZ * 0.38, -0.18, 0.08, 1.08],
+    [rightEdgeX, edgeZ * 0.38, -0.18, -0.08, 1.12],
     [rightEdgeX, edgeZ - 0.8, -0.2, -0.15, 1.08],
     [-halfLen * 0.58, edgeZ, 0.12, -0.2, 1.08],
     [-halfLen * 0.12, edgeZ, -0.05, -0.18, 1.14],
     [halfLen * 0.35, edgeZ, -0.12, -0.18, 1.06],
     [halfLen * 0.68, edgeZ, -0.15, -0.2, 1.12],
+    [halfLen + 9.5, edgeZ, 0.1, -0.18, 1.1],
+    [halfLen + 20.5, edgeZ, -0.08, -0.2, 1.18],
+    [halfLen + 31.2, edgeZ, -0.16, -0.16, 1.1],
   ];
   pinePlacements.forEach(([px, pz, lx, lz, sc]) => {
     const pine = buildHokkaidoPineTree(lx, lz, sc);
@@ -9272,13 +9280,14 @@ export function buildFantasyArenaDecor(
   const crabRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 });
   const crabShell = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), crabRedMat);
   crabShell.scale.set(1.1, 0.55, 1.25);
-  crabShell.position.set(0.12, 1.42, 0.25);
+  crabShell.position.set(0.12, 1.4, 0.25);
   mainStall.add(crabTray, crabShell);
   [-1, 1].forEach((side) => {
-    [-0.18, 0.04, 0.26].forEach((lz) => {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 0.52, 6), crabRedMat);
-      leg.position.set(0.12 + side * 0.34, 1.38, 0.25 + lz);
-      leg.rotation.z = side * 1.18;
+    [-1, 0, 1].forEach((fanIdx) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.022, 0.36, 6), crabRedMat);
+      leg.rotation.z = Math.PI / 2 - side * 0.12;
+      leg.rotation.y = side * fanIdx * 0.36;
+      leg.position.set(0.12 + side * 0.26, 1.36, 0.25 + fanIdx * 0.13);
       mainStall.add(leg);
     });
   });
@@ -9391,8 +9400,8 @@ export function buildFantasyArenaDecor(
 
   // Hokkaido Start Line Signpost
   const signPost = new THREE.Group();
-  const sPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.2, 6), cedarDarkMat);
-  sPost.position.y = 1.1;
+  const sPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 6), cedarDarkMat);
+  sPost.position.y = 0.75;
   const signTex = makeArenaSignTexture('❄️ จุดสตาร์ท', 'Hokkaido Start', '#0369a1', '#bae6fd', '#ffffff');
   const sBoard = new THREE.Mesh(
     new THREE.BoxGeometry(0.12, 0.95, 2.35),
@@ -9421,7 +9430,7 @@ export function buildFantasyArenaDecor(
     const rockDarkMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.88 });
     const rockMidMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.84 });
 
-    // Milky-cyan glowing hot spring mineral water
+    // Milky-cyan glowing hot spring mineral water (scaled elliptically to match boulder ring rx=2.95, rz=2.55)
     const waterPool = new THREE.Mesh(
       new THREE.CylinderGeometry(2.85, 2.75, 0.24, 24),
       new THREE.MeshStandardMaterial({
@@ -9433,6 +9442,7 @@ export function buildFantasyArenaDecor(
         opacity: 0.9,
       })
     );
+    waterPool.scale.set(0.98, 1, 0.85);
     waterPool.position.y = 0.18;
     onsenGroup.add(waterPool);
 
@@ -9782,6 +9792,147 @@ export function buildFantasyArenaDecor(
   propDumbbellGroup.position.set(halfLen - 2.2, 0.95, trackWidth / 2 + 5.2);
   propDumbbellGroup.rotation.y = -0.42;
   decorGroup.add(propDumbbellGroup);
+
+  // 9. Sapporo Snow Festival Crystal Ice Sculpture Monument (แลนด์มาร์กใจกลางลานกีฬาฮอกไกโด 2×2)
+  {
+    const plazaCenterX = halfLen + 21.4;
+    const iceMonument = new THREE.Group();
+    iceMonument.position.set(plazaCenterX, 0.02, 0);
+
+    const crystalSculptMat = new THREE.MeshStandardMaterial({
+      color: 0xbae6fd,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.48,
+      roughness: 0.12,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const deepCrystalMat = new THREE.MeshStandardMaterial({
+      color: 0x7dd3fc,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.65,
+      roughness: 0.08,
+      transparent: true,
+      opacity: 0.92,
+    });
+
+    // Stepped Octagonal Snow & Frost-Ice Courtyard Dais
+    const outerDais = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.35, 3.7, 0.2, 8),
+      snowCapMat
+    );
+    outerDais.position.y = 0.1;
+    outerDais.receiveShadow = true;
+    const midIceDais = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.45, 2.75, 0.26, 8),
+      frostIceMat
+    );
+    midIceDais.position.y = 0.28;
+    midIceDais.receiveShadow = true;
+    const corePedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.25, 1.5, 0.78, 6),
+      crystalSculptMat
+    );
+    corePedestal.position.y = 0.76;
+    corePedestal.castShadow = true;
+    iceMonument.add(outerDais, midIceDais, corePedestal);
+
+    // 4 Faceted Sapporo Ice Castle Corner Spires around the pedestal
+    [
+      [-1.35, -1.35, 1.85],
+      [1.35, -1.35, 1.85],
+      [-1.35, 1.35, 1.85],
+      [1.35, 1.35, 1.85],
+    ].forEach(([sx, sz, sh]) => {
+      const spire = new THREE.Mesh(
+        new THREE.ConeGeometry(0.36, sh, 6),
+        crystalSculptMat
+      );
+      spire.position.set(sx, 0.4 + sh * 0.5, sz);
+      spire.castShadow = true;
+      iceMonument.add(spire);
+    });
+
+    // Central Sculpted Crystal Obelisk & Winged Swan Feathers
+    const mainSpire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 0.88, 2.35, 6),
+      deepCrystalMat
+    );
+    mainSpire.position.y = 2.25;
+    mainSpire.castShadow = true;
+    iceMonument.add(mainSpire);
+
+    [-1, 1].forEach((side) => {
+      for (let w = 0; w < 4; w++) {
+        const iceWing = new THREE.Mesh(
+          new THREE.ConeGeometry(0.24, 1.95 - w * 0.26, 6),
+          w % 2 === 0 ? crystalSculptMat : wingWhiteMat
+        );
+        iceWing.position.set(0, 2.05 + w * 0.34, side * (0.72 + w * 0.38));
+        iceWing.rotation.x = side * (0.48 + w * 0.14);
+        iceMonument.add(iceWing);
+      }
+    });
+
+    // Crowned 3D Six-Pointed Sapporo Snowflake Crystal Emblem
+    const snowflakeCrown = new THREE.Group();
+    snowflakeCrown.position.y = 3.95;
+    for (let r = 0; r < 3; r++) {
+      const ray = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 1.45, 0.18),
+        wingWhiteMat
+      );
+      ray.rotation.x = (r * Math.PI) / 3;
+      snowflakeCrown.add(ray);
+    }
+    const crownGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), crystalMat);
+    snowflakeCrown.add(crownGem);
+    iceMonument.add(snowflakeCrown);
+
+    const iceHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: sharedRadialGlowTex,
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.36,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    iceHalo.position.y = 3.45;
+    iceHalo.scale.set(4.6, 4.6, 1);
+    iceMonument.add(iceHalo);
+
+    // Carved Ice Park Plaque facing West toward the Finish Line & Main Camera
+    const parkSignTex = makeArenaSignTexture(
+      '❄️ ลานกีฬาฮอกไกโด',
+      'Sapporo Sports Park',
+      '#0c4a6e',
+      '#7dd3fc',
+      '#f0f9ff'
+    );
+    const parkPlaque = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.68, 2.35),
+      new THREE.MeshStandardMaterial({ map: parkSignTex, roughness: 0.35 })
+    );
+    parkPlaque.position.set(-1.55, 0.84, 0);
+    parkPlaque.rotation.z = 0.18;
+    iceMonument.add(parkPlaque);
+
+    decorGroup.add(iceMonument);
+
+    // 4 Otaru Vintage Gas Lamps & Snow-Candle Domes illuminating the 2×2 Sports Courtyard
+    [
+      [-3.7, -3.7],
+      [3.7, -3.7],
+      [-3.7, 3.7],
+      [3.7, 3.7],
+    ].forEach(([lx, lz]) => {
+      buildOtaruGasLamp(plazaCenterX + lx, lz, 0.92);
+      buildSnowCandleDome(plazaCenterX + lx * 0.72, lz * 0.92);
+    });
+  }
 
   return {
     decorGroup,

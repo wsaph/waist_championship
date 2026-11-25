@@ -1,5 +1,6 @@
 import { createClient, type Client } from '@libsql/client';
 import { ensureFestivalSchemas } from '@/festivals/schema';
+import { ensureGameSchemas } from '@/games/schema';
 
 const url = process.env.TURSO_DATABASE_URL || 'file:local.db';
 const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -91,27 +92,9 @@ async function ensureSchema() {
       await safeAlter(`ALTER TABLE users ADD COLUMN coin_pickups_count INTEGER NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_date TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN dividend_earned_today INTEGER NOT NULL DEFAULT 0`);
-      await safeAlter(`ALTER TABLE users ADD COLUMN volleyball_wins_date TEXT DEFAULT ''`);
-      await safeAlter(`ALTER TABLE users ADD COLUMN volleyball_wins_count INTEGER NOT NULL DEFAULT 0`);
-      await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_date TEXT DEFAULT ''`);
-      await safeAlter(`ALTER TABLE users ADD COLUMN shabu_gp_earned_today INTEGER NOT NULL DEFAULT 0`);
       await safeAlter(`ALTER TABLE users ADD COLUMN sync_key TEXT DEFAULT ''`);
       await safeAlter(`ALTER TABLE users ADD COLUMN active_session_token TEXT DEFAULT ''`);
       await safeAlter(`CREATE INDEX IF NOT EXISTS idx_users_sync_key ON users(sync_key)`);
-
-      await client.execute(`
-        CREATE TABLE IF NOT EXISTS casino_bank (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          guard_balance INTEGER NOT NULL DEFAULT 0,
-          guard_total_won INTEGER NOT NULL DEFAULT 0,
-          guard_rounds_played INTEGER NOT NULL DEFAULT 0,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      await client.execute(`
-        INSERT OR IGNORE INTO casino_bank (id, guard_balance, guard_total_won, guard_rounds_played)
-        VALUES (1, 0, 0, 0)
-      `);
 
       await client.execute(`
         CREATE TABLE IF NOT EXISTS seasons (
@@ -335,67 +318,7 @@ async function ensureSchema() {
       `);
 
       await ensureFestivalSchemas(client, safeAlter);
-
-      await client.execute(`
-        CREATE TABLE IF NOT EXISTS vb_match_history (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          match_uid TEXT NOT NULL UNIQUE,
-          room_code TEXT NOT NULL,
-          mode TEXT NOT NULL,
-          winning_team TEXT NOT NULL,
-          winners_json TEXT NOT NULL DEFAULT '[]',
-          losers_json TEXT NOT NULL DEFAULT '[]',
-          score_blue INTEGER NOT NULL DEFAULT 0,
-          score_red INTEGER NOT NULL DEFAULT 0,
-          duration_seconds INTEGER NOT NULL DEFAULT 0,
-          played_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      await client.execute(`
-        CREATE TABLE IF NOT EXISTS vb_player_stats (
-          player_name TEXT PRIMARY KEY,
-          skin TEXT NOT NULL DEFAULT 'pikamouse',
-          wins INTEGER NOT NULL DEFAULT 0,
-          losses INTEGER NOT NULL DEFAULT 0,
-          total_points INTEGER NOT NULL DEFAULT 0,
-          matches_played INTEGER NOT NULL DEFAULT 0,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      await safeAlter(`ALTER TABLE users ADD COLUMN penalty_wins_date TEXT DEFAULT ''`);
-      await safeAlter(`ALTER TABLE users ADD COLUMN penalty_wins_count INTEGER DEFAULT 0`);
-
-      await client.execute(`
-        CREATE TABLE IF NOT EXISTS penalty_matches (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          match_uid TEXT NOT NULL UNIQUE,
-          room_code TEXT NOT NULL,
-          winner_name TEXT NOT NULL,
-          loser_name TEXT NOT NULL,
-          winner_model TEXT NOT NULL DEFAULT 'fox_hero',
-          loser_model TEXT NOT NULL DEFAULT 'bunny_hero',
-          winner_score INTEGER NOT NULL DEFAULT 0,
-          loser_score INTEGER NOT NULL DEFAULT 0,
-          total_rounds INTEGER NOT NULL DEFAULT 5,
-          sudden_death INTEGER NOT NULL DEFAULT 0,
-          duration_seconds INTEGER NOT NULL DEFAULT 0,
-          played_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      await client.execute(`
-        CREATE TABLE IF NOT EXISTS penalty_player_stats (
-          player_name TEXT PRIMARY KEY,
-          model_id TEXT NOT NULL DEFAULT 'fox_hero',
-          wins INTEGER NOT NULL DEFAULT 0,
-          losses INTEGER NOT NULL DEFAULT 0,
-          goals_scored INTEGER NOT NULL DEFAULT 0,
-          matches_played INTEGER NOT NULL DEFAULT 0,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
+      await ensureGameSchemas(client, safeAlter);
 
       const seasonCheck = await client.execute(`SELECT id FROM seasons LIMIT 1`);
       if (seasonCheck.rows.length === 0) {
