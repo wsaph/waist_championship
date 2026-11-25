@@ -509,7 +509,21 @@ export default function Arena3DPage() {
     (reason: string, opts?: { preserveLocalStorage?: boolean }) => void
   >(() => {});
   const remoteSpectatorStateRef = useRef<
-    Record<number, { x: number; y: number; z: number; rotY: number; isWalking: boolean; updatedAt: number }>
+    Record<
+      number,
+      {
+        x: number;
+        y: number;
+        z: number;
+        prevX?: number;
+        prevZ?: number;
+        vx?: number;
+        vz?: number;
+        rotY: number;
+        isWalking: boolean;
+        updatedAt: number;
+      }
+    >
   >({});
   const remoteFishingStateRef = useRef<
     Record<number, { phase: 'idle' | 'waiting' | 'bite' | 'reeling'; dx: number; dz: number; updatedAt: number }>
@@ -1478,10 +1492,15 @@ export default function Arena3DPage() {
       if (event === 'move') {
         if (typeof payload.userId !== 'number') return;
         if (payload.userId === walkingSpectatorIdRef.current) return;
+        const prevEntry = remoteSpectatorStateRef.current[payload.userId];
         remoteSpectatorStateRef.current[payload.userId] = {
           x: payload.x,
           y: payload.y ?? 0.2,
           z: payload.z,
+          prevX: prevEntry ? prevEntry.x : payload.x,
+          prevZ: prevEntry ? prevEntry.z : payload.z,
+          vx: typeof payload.vx === 'number' ? payload.vx : 0,
+          vz: typeof payload.vz === 'number' ? payload.vz : 0,
           rotY: payload.rotY ?? 0,
           isWalking: Boolean(payload.isWalking),
           updatedAt: performance.now(),
@@ -1876,18 +1895,45 @@ export default function Arena3DPage() {
     document.addEventListener('visibilitychange', onVisibilityOrFocus);
 
     // 3. Supabase Realtime สำหรับซิงก์ข้ามเครื่องแบบเสี้ยววินาที
+    //    พร้อมระบบ Idle Hidden-Tab Auto-Sleep (พักสายอัตโนมัติหลังพับจอทิ้งไว้ 3 นาที เพื่อคืนโควตา 200 Connections ของ Supabase Free Tier)
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const IDLE_REALTIME_SLEEP_MS = 3 * 60 * 1000; // 3 minutes hidden -> sleep WebSocket
     let supabase: ReturnType<typeof createClient> | null = null;
     let channel: RealtimeChannel | null = null;
+    let idleSleepTimer: ReturnType<typeof setTimeout> | null = null;
+    let isRealtimeSleeping = false;
+    let effectDestroyed = false;
 
-    if (url && key) {
+    const sleepArenaRealtime = () => {
+      if (!supabase && !channel) return;
+      realtimeSubscribedRef.current = false;
+      realtimeChannelRef.current = null;
+      isRealtimeSleeping = true;
+      const oldSb = supabase;
+      const oldCh = channel;
+      supabase = null;
+      channel = null;
+      if (oldSb && oldCh) {
+        void oldSb.removeChannel(oldCh).finally(() => {
+          oldSb.realtime.disconnect();
+        });
+      } else if (oldSb) {
+        oldSb.realtime.disconnect();
+      }
+    };
+
+    const connectArenaRealtime = () => {
+      if (effectDestroyed || !url || !key || supabase || channel) return;
+      isRealtimeSleeping = false;
+
       supabase = createClient(url, key, {
-        realtime: { params: { eventsPerSecond: 20 } },
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { params: { eventsPerSecond: 40 } },
       });
 
       channel = supabase.channel('waist-arena-live', {
-        config: { broadcast: { self: false } },
+        config: { broadcast: { self: false, ack: false } },
       });
 
       channel
@@ -1987,14 +2033,16 @@ export default function Arena3DPage() {
         );
       }
 
-      channel.subscribe((status) => {
+      const activeChannel = channel;
+      activeChannel.subscribe((status) => {
+        if (effectDestroyed || channel !== activeChannel) return;
         realtimeSubscribedRef.current = status === 'SUBSCRIBED';
-        if (status === 'SUBSCRIBED' && channel) {
-          channel.send({ type: 'broadcast', event: 'hello', payload: {} });
+        if (status === 'SUBSCRIBED') {
+          activeChannel.send({ type: 'broadcast', event: 'hello', payload: {} });
           if (pendingSessionKickRef.current) {
             const pending = pendingSessionKickRef.current;
             pendingSessionKickRef.current = null;
-            channel.send({
+            activeChannel.send({
               type: 'broadcast',
               event: 'session_kick',
               payload: {
@@ -2007,22 +2055,59 @@ export default function Arena3DPage() {
         }
       });
 
-      realtimeChannelRef.current = channel;
-    }
+      realtimeChannelRef.current = activeChannel;
+    };
+
+    connectArenaRealtime();
+
+    const syncRealtimeIdleSleep = () => {
+      if (typeof document === 'undefined') return;
+      if (document.visibilityState === 'hidden') {
+        if (!idleSleepTimer) {
+          idleSleepTimer = setTimeout(() => {
+            idleSleepTimer = null;
+            if (!effectDestroyed && document.visibilityState === 'hidden') {
+              sleepArenaRealtime();
+            }
+          }, IDLE_REALTIME_SLEEP_MS);
+        }
+      } else {
+        if (idleSleepTimer) {
+          clearTimeout(idleSleepTimer);
+          idleSleepTimer = null;
+        }
+        if (isRealtimeSleeping) {
+          connectArenaRealtime();
+        }
+      }
+    };
+    window.addEventListener('focus', syncRealtimeIdleSleep);
+    document.addEventListener('visibilitychange', syncRealtimeIdleSleep);
 
     return () => {
+      effectDestroyed = true;
       realtimeSubscribedRef.current = false;
+      if (idleSleepTimer) {
+        clearTimeout(idleSleepTimer);
+        idleSleepTimer = null;
+      }
       clearInterval(pollInterval);
       window.removeEventListener('focus', onVisibilityOrFocus);
+      window.removeEventListener('focus', syncRealtimeIdleSleep);
       window.removeEventListener('storage', onStorageChange);
       document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', syncRealtimeIdleSleep);
       if (bc) {
         bc.close();
         localBroadcastRef.current = null;
       }
       if (supabase && channel) {
+        const oldSb = supabase;
+        const oldCh = channel;
         realtimeChannelRef.current = null;
-        supabase.removeChannel(channel);
+        void oldSb.removeChannel(oldCh).finally(() => {
+          oldSb.realtime.disconnect();
+        });
       }
     };
   }, [showToast]);
@@ -4444,13 +4529,15 @@ export default function Arena3DPage() {
           }
 
           if ((realtimeChannelRef.current || localBroadcastRef.current) && (isWalking || wasWalkingRef.current)) {
-            if (!isWalking || now - lastMoveBroadcastAtRef.current >= 85) {
+            if (!isWalking || now - lastMoveBroadcastAtRef.current >= 50) {
               lastMoveBroadcastAtRef.current = now;
               const movePayload = {
                 userId: c.id,
                 x: Number(c.rootGroup.position.x.toFixed(2)),
                 y: Number(c.rootGroup.position.y.toFixed(2)),
                 z: Number(c.rootGroup.position.z.toFixed(2)),
+                vx: isWalking ? Number((dx * (0.16 * 60)).toFixed(2)) : 0,
+                vz: isWalking ? Number((dz * (0.16 * 60)).toFixed(2)) : 0,
                 rotY: Number(c.rootGroup.rotation.y.toFixed(2)),
                 isWalking,
                 _senderInstance: clientInstanceIdRef.current,
@@ -4718,14 +4805,33 @@ export default function Arena3DPage() {
 
           const remoteState = c.isSpectator ? remoteSpectatorStateRef.current[c.id] : undefined;
           if (remoteState) {
-            c.targetPos.set(remoteState.x, remoteState.y, remoteState.z);
-            c.rootGroup.position.lerp(c.targetPos, 0.18);
+            const elapsedMoveMs = Math.max(0, now - remoteState.updatedAt);
+            const alpha = elapsedMoveMs / 50;
+            const prevX = remoteState.prevX ?? remoteState.x;
+            const prevZ = remoteState.prevZ ?? remoteState.z;
+            let interpX = remoteState.x;
+            let interpZ = remoteState.z;
+            if (alpha <= 1) {
+              interpX = prevX + (remoteState.x - prevX) * alpha;
+              interpZ = prevZ + (remoteState.z - prevZ) * alpha;
+            } else if (remoteState.isWalking) {
+              const extraSec = Math.min(0.06, (elapsedMoveMs - 50) / 1000);
+              interpX = remoteState.x + (remoteState.vx ?? 0) * extraSec;
+              interpZ = remoteState.z + (remoteState.vz ?? 0) * extraSec;
+            }
+            c.targetPos.set(interpX, remoteState.y, interpZ);
+            if (c.rootGroup.position.distanceTo(c.targetPos) > 12) {
+              c.rootGroup.position.copy(c.targetPos);
+            } else {
+              const smoothRate = 1 - Math.exp(-18 * Math.min(0.05, delta));
+              c.rootGroup.position.lerp(c.targetPos, smoothRate);
+            }
             let rotDiff = remoteState.rotY - c.rootGroup.rotation.y;
             while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
             while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-            c.rootGroup.rotation.y += rotDiff * 0.22;
+            c.rootGroup.rotation.y += rotDiff * (1 - Math.exp(-18 * Math.min(0.05, delta)));
           } else {
-            c.rootGroup.position.lerp(c.targetPos, 0.06);
+            c.rootGroup.position.lerp(c.targetPos, 1 - Math.exp(-6 * Math.min(0.05, delta)));
           }
           c.currentBellyScale += (c.targetBellyScale - c.currentBellyScale) * 0.08;
           const isRubbed = now < c.rubbedUntil;

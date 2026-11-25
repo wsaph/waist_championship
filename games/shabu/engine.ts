@@ -145,6 +145,60 @@ const DASH_COOLDOWN = 0.85;
 const TABLE_HALF_W = 1.65;
 const TABLE_HALF_D = 1.1;
 
+/**
+ * Steps ONLY a single local chef's 60 FPS locomotion & table collision for zero-latency Guest Client-Side Prediction.
+ */
+export function stepLocalShabuPlayer(
+  p: ShabuPlayerState,
+  inp: ShabuInputState,
+  dtRaw: number
+): boolean {
+  const dt = Math.min(0.033, Math.max(0.001, dtRaw));
+  let dashed = false;
+  if (p.dashCooldown > 0) p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+  if (p.dashTimer > 0) p.dashTimer = Math.max(0, p.dashTimer - dt);
+
+  let dx = inp.mx;
+  let dz = inp.mz;
+  const len = Math.hypot(dx, dz);
+  if (len > 1) {
+    dx /= len;
+    dz /= len;
+  }
+
+  if (inp.dash && p.dashCooldown <= 0 && len > 0.15) {
+    p.dashTimer = DASH_DURATION;
+    p.dashCooldown = DASH_COOLDOWN;
+    dashed = true;
+  }
+
+  const spd = p.dashTimer > 0 ? DASH_SPEED : WALK_SPEED;
+  p.vx = dx * spd;
+  p.vz = dz * spd;
+  p.x += p.vx * dt;
+  p.z += p.vz * dt;
+
+  if (len > 0.12) {
+    p.rotY = Math.atan2(-dz, dx);
+  }
+
+  p.x = Math.max(-SHABU_BOUNDS.halfW, Math.min(SHABU_BOUNDS.halfW, p.x));
+  p.z = Math.max(-SHABU_BOUNDS.halfD + 0.5, Math.min(SHABU_BOUNDS.halfD, p.z));
+
+  const relX = p.x - SHABU_POT_POS.x;
+  const relZ = p.z - SHABU_POT_POS.z;
+  if (Math.abs(relX) < TABLE_HALF_W && Math.abs(relZ) < TABLE_HALF_D) {
+    const penX = TABLE_HALF_W - Math.abs(relX);
+    const penZ = TABLE_HALF_D - Math.abs(relZ);
+    if (penX < penZ) {
+      p.x = SHABU_POT_POS.x + (relX >= 0 ? TABLE_HALF_W : -TABLE_HALF_W);
+    } else {
+      p.z = SHABU_POT_POS.z + (relZ >= 0 ? TABLE_HALF_D : -TABLE_HALF_D);
+    }
+  }
+  return dashed;
+}
+
 export function stepShabuGame(
   state: ShabuGameState,
   inputs: Record<ShabuSlotId, ShabuInputState>,

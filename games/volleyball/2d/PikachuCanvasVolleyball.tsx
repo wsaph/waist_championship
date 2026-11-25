@@ -33,9 +33,12 @@ import {
 } from './physics2d';
 import { CanvasFxState, renderVolleyballCanvas } from './canvasRenderer2d';
 import {
+  ACTION_GRACE_BUFFER_MS,
   ClientStateInterpolator,
+  GuestInputWatchdog,
   HOST_BROADCAST_INTERVAL_MS,
   VolleyballRoomController,
+  createBackgroundHostTicker,
   generateRoomCode,
   isSupabaseConfigured,
   packNetState,
@@ -403,6 +406,12 @@ export function PikachuVolleyballGame({
   const interpolatorRef = useRef<ClientStateInterpolator>(new ClientStateInterpolator());
   const localInputRef = useRef<PlayerInput>({ ...EMPTY_PLAYER_INPUT });
   const guestInputsBySlotRef = useRef<Partial<Record<PlayerSlot, PlayerInput>>>({});
+  const guestWatchdogRef = useRef<GuestInputWatchdog<PlayerSlot, PlayerInput>>(
+    new GuestInputWatchdog()
+  );
+  const guestGraceBufferRef = useRef<
+    Partial<Record<PlayerSlot, { jumpUntil: number; actionUntil: number }>>
+  >({});
   const activeMatchUidRef = useRef<string>('');
   const matchStartedAtRef = useRef<number>(0);
   const matchSavedRef = useRef<boolean>(false);
@@ -631,6 +640,8 @@ export function PikachuVolleyballGame({
     activeMatchUidRef.current = '';
     matchStateRef.current = null;
     guestInputsBySlotRef.current = {};
+    guestWatchdogRef.current.clear();
+    guestGraceBufferRef.current = {};
     localInputRef.current = { ...EMPTY_PLAYER_INPUT };
     roomCtrlRef.current?.resetSentInputState();
     interpolatorRef.current.reset();
@@ -716,6 +727,8 @@ export function PikachuVolleyballGame({
                   pl.name = `${leftMember.name} (AI แทน)`;
                 }
                 delete guestInputsBySlotRef.current[slotKey as PlayerSlot];
+                guestWatchdogRef.current.delete(slotKey as PlayerSlot);
+                delete guestGraceBufferRef.current[slotKey as PlayerSlot];
               }
             }
           }
@@ -724,6 +737,7 @@ export function PikachuVolleyballGame({
           const iAmNewHost = newHostClientId === clientIdRef.current;
           if (screenRef.current === 'playing') {
             interpolatorRef.current.reset();
+            guestWatchdogRef.current.clear();
             setAmIAuthoritativeHost(iAmNewHost);
             amIHostRef.current = iAmNewHost;
             for (const [slotKey, cid] of Object.entries(slotClientMapRef.current)) {
@@ -754,7 +768,21 @@ export function PikachuVolleyballGame({
           // Verify packet comes from the client assigned to that slot
           const expectedCid = slotClientMapRef.current[pkt.slot];
           if (!expectedCid || expectedCid === pkt.clientId) {
+            const nowPerf = performance.now();
             guestInputsBySlotRef.current[pkt.slot] = pkt.inp;
+            guestWatchdogRef.current.record(pkt.slot, pkt.inp, nowPerf);
+            if (pkt.inp.jump || pkt.inp.action) {
+              const prevBuf = guestGraceBufferRef.current[pkt.slot] || {
+                jumpUntil: 0,
+                actionUntil: 0,
+              };
+              guestGraceBufferRef.current[pkt.slot] = {
+                jumpUntil: pkt.inp.jump ? nowPerf + ACTION_GRACE_BUFFER_MS : prevBuf.jumpUntil,
+                actionUntil: pkt.inp.action
+                  ? nowPerf + ACTION_GRACE_BUFFER_MS
+                  : prevBuf.actionUntil,
+              };
+            }
           }
         },
         onStateSnapshot: (snap: NetStateSnapshot) => {
@@ -889,15 +917,20 @@ export function PikachuVolleyballGame({
     const releaseAll = () => {
       applyLocalInputPatch({ ...EMPTY_PLAYER_INPUT });
     };
+    const onVis = () => {
+      if (document.hidden) releaseAll();
+    };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', onVis);
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', releaseAll);
+      document.removeEventListener('visibilitychange', onVis);
       localInputRef.current = { ...EMPTY_PLAYER_INPUT };
     };
   }, [screen, applyLocalInputPatch]);
@@ -919,8 +952,7 @@ export function PikachuVolleyballGame({
     let elapsedSec = 0;
     let pendingBroadcastEvents: GameEvents = {};
 
-    const frame = (nowPerfMs: number) => {
-      rafId = requestAnimationFrame(frame);
+    const stepMatchTick = (nowPerfMs: number, skipCanvasRender = false) => {
       const rawDt = Math.min(0.05, Math.max(0.001, (nowPerfMs - lastPerfMs) / 1000));
       lastPerfMs = nowPerfMs;
       elapsedSec += rawDt;
@@ -941,7 +973,22 @@ export function PikachuVolleyballGame({
             } else if (p.isBot) {
               stepInputs[p.slot] = computeAiInput(st, p, aiDiffRef.current);
             } else {
-              stepInputs[p.slot] = guestInputsBySlotRef.current[p.slot] || EMPTY_PLAYER_INPUT;
+              const watched = guestWatchdogRef.current.read(
+                p.slot,
+                nowPerfMs,
+                EMPTY_PLAYER_INPUT
+              );
+              const buf = guestGraceBufferRef.current[p.slot];
+              const graceJump = Boolean(buf && nowPerfMs <= buf.jumpUntil);
+              const graceAction = Boolean(buf && nowPerfMs <= buf.actionUntil);
+              stepInputs[p.slot] =
+                graceJump || graceAction
+                  ? {
+                      ...watched,
+                      jump: watched.jump || graceJump,
+                      action: watched.action || graceAction,
+                    }
+                  : watched;
             }
           }
 
@@ -993,20 +1040,46 @@ export function PikachuVolleyballGame({
           pendingBroadcastEvents = {};
         }
       } else {
-        // Guest: Smooth 60 FPS Client-Side Linear Interpolation (Lerp)
-        interpolatorRef.current.applyInterpolated(st, nowPerfMs, rawDt);
+        // Guest: 60 FPS Client-Side Prediction for Local Player + Smooth Reconciliation & Lerp!
+        const dived = interpolatorRef.current.applyInterpolated(st, nowPerfMs, rawDt, {
+          slot: myActiveSlotRef.current,
+          input: localInputRef.current,
+        });
+        if (dived) {
+          playVolleyballSfx('dive', mutedRef.current);
+        }
       }
 
-      fx.update(st, rawDt);
-      renderVolleyballCanvas(ctx, canvas, st, fx, {
-        mySlot: myActiveSlotRef.current,
-        hostSlot: hostActiveSlot,
-        timeSec: elapsedSec,
-      });
+      if (!skipCanvasRender) {
+        fx.update(st, rawDt);
+        renderVolleyballCanvas(ctx, canvas, st, fx, {
+          mySlot: myActiveSlotRef.current,
+          hostSlot: hostActiveSlot,
+          timeSec: elapsedSec,
+        });
+      }
     };
 
+    const frame = (nowPerfMs: number) => {
+      rafId = requestAnimationFrame(frame);
+      if (typeof document !== 'undefined' && document.hidden) {
+        lastPerfMs = nowPerfMs;
+        return;
+      }
+      stepMatchTick(nowPerfMs, false);
+    };
+
+    const disposeBgTicker = createBackgroundHostTicker((bgNowMs) => {
+      if (amIHostRef.current && !isPracticeRef.current) {
+        stepMatchTick(bgNowMs, true);
+      }
+    }, HOST_BROADCAST_INTERVAL_MS);
+
     rafId = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      disposeBgTicker();
+    };
   }, [screen, hostActiveSlot, handleMatchFinished]);
 
   // --- User Actions ---

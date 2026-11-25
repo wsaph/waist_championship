@@ -62,6 +62,30 @@ function parseRosterPayload(rawRoster: unknown): GameRosterSlot[] {
     .filter((r) => Boolean(r.slotId));
 }
 
+export function serializeLobbySnapshot(info: GameLobbyBroadcastInput): string {
+  const rosterSig = (info.roster || [])
+    .map(
+      (r) =>
+        `${r.slotId}:${r.clientId || ''}:${r.playerId}:${r.name}:${r.emoji}:${r.team || ''}:${r.isBot ? 1 : 0}`
+    )
+    .join(',');
+  return [
+    info.status,
+    info.roomCode,
+    info.mode || '',
+    info.gameType || '',
+    info.hostUserId,
+    info.hostName,
+    info.hostEmoji,
+    info.targetName || '',
+    info.count,
+    info.max,
+    info.scoreLeft ?? '',
+    info.scoreRight ?? '',
+    rosterSig,
+  ].join('|');
+}
+
 export function useIslandGames({
   currentUserId,
   broadcastRealtimeEvent,
@@ -179,17 +203,34 @@ export function useIslandGames({
     });
   }, []);
 
+  const lastBroadcastSentRef = useRef<Partial<Record<GameId, { sig: string; sentAt: number }>>>({});
+
   const emitLobbyBroadcast = useCallback(
     (gameId: GameId, info: GameLobbyBroadcastInput) => {
       const mod = getGameModuleById(gameId);
       if (!mod) return;
+      const now = Date.now();
+      const nextSig = serializeLobbySnapshot(info);
+
       if (info.status === 'waiting' || info.status === 'started') {
         const nextEntry: GameLobbyBroadcastInfo = {
           ...info,
           gameId,
-          updatedAt: Date.now(),
+          updatedAt: now,
         };
-        setLiveLobbies((prev) => ({ ...prev, [gameId]: nextEntry }));
+        setLiveLobbies((prev) => {
+          const existing = prev[gameId];
+          // Prevent synchronous/rapid duplicate state updates from triggering parent-child render loops,
+          // while still refreshing `updatedAt` every >=2.5s for the 15s stale-lobby expiry heartbeat.
+          if (
+            existing &&
+            now - existing.updatedAt < 2500 &&
+            serializeLobbySnapshot(existing) === nextSig
+          ) {
+            return prev;
+          }
+          return { ...prev, [gameId]: nextEntry };
+        });
       } else {
         setLiveLobbies((prev) => {
           if (!prev[gameId]) return prev;
@@ -198,6 +239,12 @@ export function useIslandGames({
           return copy;
         });
       }
+
+      const prevSent = lastBroadcastSentRef.current[gameId];
+      if (prevSent && prevSent.sig === nextSig && now - prevSent.sentAt < 1200) {
+        return;
+      }
+      lastBroadcastSentRef.current[gameId] = { sig: nextSig, sentAt: now };
       broadcastRef.current(mod.definition.realtimeEvent, {
         ...info,
         gameId,

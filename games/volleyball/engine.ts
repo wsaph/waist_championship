@@ -219,6 +219,66 @@ const DIVE_DURATION = 0.28;
 const DIVE_COOLDOWN = 0.52;
 
 /**
+ * Steps ONLY a single local player's 60 FPS kinematics for zero-latency Guest Client-Side Prediction,
+ * using the exact same constants and half-court bounds as Host physics.
+ */
+export function stepLocalVolleyballPlayer(
+  p: VbPlayerPhysics,
+  inp: VbInputState,
+  court: VbCourtConfig,
+  dt: number
+): boolean {
+  let dived = false;
+  if (p.diveCooldown > 0) p.diveCooldown = Math.max(0, p.diveCooldown - dt);
+  if (p.spikeFlash > 0) p.spikeFlash = Math.max(0, p.spikeFlash - dt);
+  if (p.hitCooldown > 0) p.hitCooldown = Math.max(0, p.hitCooldown - dt);
+
+  if (p.diveTimer > 0) {
+    p.diveTimer = Math.max(0, p.diveTimer - dt);
+    p.vx = p.diveDir * DIVE_SPEED;
+  } else {
+    const moveDir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    p.vx = moveDir * PLAYER_SPEED;
+    if (moveDir !== 0) {
+      p.facing = moveDir > 0 ? 1 : -1;
+    }
+
+    if (inp.jump && p.y <= 0.001) {
+      p.vy = PLAYER_JUMP_VY;
+    } else if (inp.action && p.y <= 0.001 && p.diveCooldown <= 0) {
+      const diveDir: 1 | -1 = moveDir !== 0 ? (moveDir > 0 ? 1 : -1) : p.facing;
+      p.diveTimer = DIVE_DURATION;
+      p.diveCooldown = DIVE_COOLDOWN;
+      p.diveDir = diveDir;
+      p.facing = diveDir;
+      p.vy = 5.2;
+      dived = true;
+    }
+  }
+
+  p.vy -= GRAVITY_PLAYER * dt;
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+
+  if (p.y < 0) {
+    p.y = 0;
+    p.vy = 0;
+  }
+
+  const minX =
+    p.team === 'left'
+      ? -court.halfWidth + court.playerRadius
+      : court.netHalfThickness + court.playerRadius;
+  const maxX =
+    p.team === 'left'
+      ? -court.netHalfThickness - court.playerRadius
+      : court.halfWidth - court.playerRadius;
+  if (p.x < minX) p.x = minX;
+  if (p.x > maxX) p.x = maxX;
+  return dived;
+}
+
+/**
  * Predict where the ball will cross y = targetY (used by AI bots).
  */
 function predictBallLandingX(ball: VbBallPhysics, court: VbCourtConfig, targetY = 1.2): number {

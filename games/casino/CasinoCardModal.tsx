@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import confetti from 'canvas-confetti';
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
@@ -126,35 +126,35 @@ const GAME_CATALOG: Array<{
   playersText: string;
   desc: string;
 }> = [
-  {
-    id: 'pokdeng',
-    icon: '🃏',
-    title: 'ป๊อกเด้ง (Pok Deng)',
-    playersText: '1–5 คน',
-    desc: 'สู้เจ้ามือพี่ยาม • ป๊อก 8/9, ตอง ×5, สเตรทฟลัช, เด้งครบสูตร!',
-  },
-  {
-    id: 'blackjack',
-    icon: '🂡',
-    title: 'แบล็คแจ็ค 21',
-    playersText: '1–5 คน',
-    desc: 'จั่วให้ใกล้ 21 ที่สุดห้ามเกิน • แบล็คแจ็คจ่าย 1.5× • ดับเบิลได้!',
-  },
-  {
-    id: 'holdem',
-    icon: '🤠',
-    title: "Texas Hold'em",
-    playersText: '1–5 คน',
-    desc: 'ไพ่ในมือ 2 + ไพ่กลาง 5 ใบ • เช็ค/ตาม/เกทับ/หมอบ (1 คนดวลพี่ยาม!)',
-  },
-  {
-    id: 'oldmaid',
-    icon: '👵',
-    title: 'อีแก่กินน้ำ (52 ใบ)',
-    playersText: '2–5 คน',
-    desc: 'สำรับเต็ม 52 ใบ สุ่มคว่ำ 1 ใบปริศนากลางโต๊ะ • คนสุดท้ายถือใบไร้คู่จ่ายรอบวง!',
-  },
-];
+    {
+      id: 'pokdeng',
+      icon: '🃏',
+      title: 'ป๊อกเด้ง (Pok Deng)',
+      playersText: '1–5 คน',
+      desc: 'สู้เจ้ามือพี่ยาม • ป๊อก 8/9, ตอง ×5, สเตรทฟลัช, เด้งครบสูตร!',
+    },
+    {
+      id: 'blackjack',
+      icon: '🂡',
+      title: 'แบล็คแจ็ค 21',
+      playersText: '1–5 คน',
+      desc: 'จั่วให้ใกล้ 21 ที่สุดห้ามเกิน • แบล็คแจ็คจ่าย 1.5× • ดับเบิลได้!',
+    },
+    {
+      id: 'holdem',
+      icon: '🤠',
+      title: "Texas Hold'em",
+      playersText: '1–5 คน',
+      desc: 'ไพ่ในมือ 2 + ไพ่กลาง 5 ใบ • เช็ค/ตาม/เกทับ/หมอบ (1 คนดวลพี่ยาม!)',
+    },
+    {
+      id: 'oldmaid',
+      icon: '👵',
+      title: 'อีแก่กินน้ำ (52 ใบ)',
+      playersText: '2–5 คน',
+      desc: 'สำรับเต็ม 52 ใบ สุ่มคว่ำ 1 ใบปริศนากลางโต๊ะ • คนสุดท้ายถือใบไร้คู่จ่ายรอบวง!',
+    },
+  ];
 
 function PlayingCardView({
   card,
@@ -179,9 +179,8 @@ function PlayingCardView({
         type="button"
         disabled={!onClick}
         onClick={onClick}
-        className={`${sizeCls} relative bg-gradient-to-br from-blue-800 via-indigo-900 to-slate-950 border-2 border-amber-300 shadow-md flex items-center justify-center shrink-0 transition ${
-          onClick ? 'cursor-pointer hover:-translate-y-2 hover:ring-2 hover:ring-yellow-300' : 'cursor-default'
-        }`}
+        className={`${sizeCls} relative bg-gradient-to-br from-blue-800 via-indigo-900 to-slate-950 border-2 border-amber-300 shadow-md flex items-center justify-center shrink-0 transition ${onClick ? 'cursor-pointer hover:-translate-y-2 hover:ring-2 hover:ring-yellow-300' : 'cursor-default'
+          }`}
       >
         <div className="w-[80%] h-[82%] rounded border border-amber-400/60 bg-[repeating-linear-gradient(45deg,rgba(250,204,21,0.12)_0px,rgba(250,204,21,0.12)_3px,transparent_3px,transparent_7px)] flex items-center justify-center text-amber-300 text-base">
           ♠
@@ -196,13 +195,11 @@ function PlayingCardView({
 
   return (
     <div
-      className={`${sizeCls} relative bg-gradient-to-b from-white to-slate-100 border-2 ${
-        highlight
-          ? 'border-amber-400 ring-2 ring-yellow-300 shadow-[0_0_12px_rgba(250,204,21,0.7)]'
-          : 'border-slate-300 shadow-md'
-      } flex flex-col justify-between p-1 sm:p-1.5 select-none shrink-0 ${
-        isRed ? 'text-rose-600' : 'text-slate-900'
-      }`}
+      className={`${sizeCls} relative bg-gradient-to-b from-white to-slate-100 border-2 ${highlight
+        ? 'border-amber-400 ring-2 ring-yellow-300 shadow-[0_0_12px_rgba(250,204,21,0.7)]'
+        : 'border-slate-300 shadow-md'
+        } flex flex-col justify-between p-1 sm:p-1.5 select-none shrink-0 ${isRed ? 'text-rose-600' : 'text-slate-900'
+        }`}
     >
       <div className="font-black leading-none flex items-center gap-0.5">
         <span>{rTxt}</span>
@@ -231,9 +228,8 @@ function GuardDealerAvatar({ mood }: { mood: GuardMoodMeta }) {
         </div>
       )}
       <div
-        className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden border-3 ${mood.ringClass} bg-slate-900 transition-all duration-300 ${
-          isTroll ? 'scale-105' : isCry ? 'scale-95' : ''
-        }`}
+        className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden border-3 ${mood.ringClass} bg-slate-900 transition-all duration-300 ${isTroll ? 'scale-105' : isCry ? 'scale-95' : ''
+          }`}
       >
         <img
           src="/images/guard_face.jpg"
@@ -297,7 +293,25 @@ export function CasinoCardModal({
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const bcRef = useRef<BroadcastChannel | null>(null);
   const membersRef = useRef(members);
-  membersRef.current = members;
+  const effectiveMembers = useMemo<Partial<Record<SeatId, TableMember>>>(() => {
+    if (Object.keys(members).length > 0) return members;
+    const me =
+      currentUserId != null
+        ? players.find((p) => p.id === currentUserId)
+        : undefined;
+    return {
+      S1: {
+        clientId: myClientIdRef.current,
+        userId: me?.id ?? 0,
+        name: me?.name ?? `นักเล่น #${myClientIdRef.current.slice(-3)}`,
+        emoji: me?.emoji ?? '🃏',
+        points: currentUserPoints,
+        joinedAt: 0,
+        seatId: 'S1',
+      },
+    };
+  }, [members, currentUserId, players, currentUserPoints]);
+  membersRef.current = Object.keys(members).length > 0 ? members : effectiveMembers;
   const gameTypeRef = useRef(gameType);
   gameTypeRef.current = gameType;
   const roundRef = useRef(round);
@@ -326,7 +340,7 @@ export function CasinoCardModal({
   } | null>(null);
   const handlePlayerActionAsHostRef = useRef<
     (seatId: SeatId, action: string, value?: number) => void
-  >(() => {});
+  >(() => { });
 
   const fetchGuardBank = useCallback(async () => {
     try {
@@ -563,16 +577,15 @@ export function CasinoCardModal({
           cmp.outcome === 'win'
             ? s.bet * cmp.multiplier
             : cmp.outcome === 'lose'
-            ? -(s.bet * cmp.multiplier)
-            : 0;
+              ? -(s.bet * cmp.multiplier)
+              : 0;
         dealerNet -= delta;
         return {
           ...s,
           done: true,
           deltaGp: delta,
-          resultLabel: `${cmp.playerEval.label} • ${
-            cmp.outcome === 'win' ? `ชนะ +${delta}💰` : cmp.outcome === 'lose' ? `เสีย ${delta}💰` : 'เสมอ'
-          }`,
+          resultLabel: `${cmp.playerEval.label} • ${cmp.outcome === 'win' ? `ชนะ +${delta}💰` : cmp.outcome === 'lose' ? `เสีย ${delta}💰` : 'เสมอ'
+            }`,
         };
       });
 
@@ -613,16 +626,15 @@ export function CasinoCardModal({
           cmp.outcome === 'win'
             ? Math.round(s.bet * cmp.payoutRatio)
             : cmp.outcome === 'lose'
-            ? -s.bet
-            : 0;
+              ? -s.bet
+              : 0;
         dealerNet -= delta;
         return {
           ...s,
           done: true,
           deltaGp: delta,
-          resultLabel: `${pEval.label} • ${
-            cmp.outcome === 'win' ? `ชนะ +${delta}💰` : cmp.outcome === 'lose' ? `เสีย ${delta}💰` : 'เสมอ'
-          }`,
+          resultLabel: `${pEval.label} • ${cmp.outcome === 'win' ? `ชนะ +${delta}💰` : cmp.outcome === 'lose' ? `เสีย ${delta}💰` : 'เสมอ'
+            }`,
         };
       });
 
@@ -1289,19 +1301,24 @@ export function CasinoCardModal({
     roundRef.current = null;
     setGuardMood(resolveGuardMood(0));
 
-    const me = playersRef.current.find((p) => p.id === currentUserId) || playersRef.current[0];
+    const me =
+      currentUserId != null
+        ? playersRef.current.find((p) => p.id === currentUserId)
+        : undefined;
     const now = Date.now();
     const myPresence = {
       clientId: myClientIdRef.current,
       userId: me?.id ?? 0,
-      name: me?.name ?? 'ผู้กล้า',
-      emoji: me?.emoji ?? '🐰',
+      name: me?.name ?? `นักเล่น #${myClientIdRef.current.slice(-3)}`,
+      emoji: me?.emoji ?? '🃏',
       points: currentUserPoints,
       joinedAt: now,
     };
     myPresenceRef.current = myPresence;
 
     let destroyed = false;
+    let isSub = false;
+    const bcastPeers = new Map<string, typeof myPresence>();
     let prevHostClientId: string | null = null;
     const localPeers = new Map<string, { member: typeof myPresence; seenAt: number }>();
     localPeers.set(myPresence.clientId, { member: myPresence, seenAt: now });
@@ -1438,34 +1455,73 @@ export function CasinoCardModal({
       const syncPresence = () => {
         if (destroyed) return;
         const raw = ch.presenceState<typeof myPresence>();
-        const list: Array<typeof myPresence> = [];
-        const seen = new Set<string>();
+        const merged = new Map<string, typeof myPresence>();
+        for (const [cid, bp] of bcastPeers.entries()) {
+          merged.set(cid, bp);
+        }
         for (const arr of Object.values(raw)) {
           if (Array.isArray(arr) && arr.length > 0) {
             const latest = arr[arr.length - 1];
-            if (latest?.clientId && !seen.has(latest.clientId)) {
-              seen.add(latest.clientId);
-              list.push(latest);
+            if (latest?.clientId) {
+              merged.set(latest.clientId, latest);
+              bcastPeers.set(latest.clientId, latest);
             }
           }
         }
-        if (!seen.has(myPresence.clientId)) list.push(myPresence);
-        const { hostCid } = rebuildMembersFromPresence(list);
+        merged.set(myPresence.clientId, myPresenceRef.current || myPresence);
+        const { hostCid } = rebuildMembersFromPresence(Array.from(merged.values()));
         if (hostCid === myClientIdRef.current && screenRef.current === 'lobby') {
           ch.send({ type: 'broadcast', event: 'lobby_sync', payload: { gameType: gameTypeRef.current } });
         }
       };
 
       ch.on('presence', { event: 'sync' }, syncPresence)
+        .on('presence', { event: 'join' }, syncPresence)
         .on('presence', { event: 'leave' }, ({ leftPresences }) => {
           if (destroyed) return;
           const prevMemSnap = { ...membersRef.current };
+          const leftArr = (leftPresences || []) as unknown as Array<typeof myPresence>;
+          for (const lp of leftArr) {
+            if (lp?.clientId) bcastPeers.delete(lp.clientId);
+          }
           syncPresence();
-          for (const left of (leftPresences || []) as unknown as Array<typeof myPresence>) {
+          for (const left of leftArr) {
             if (!left?.clientId || left.clientId === myClientIdRef.current) continue;
             showTableToast(`⚠️ ${left.emoji} ${left.name} ออกจากวงไพ่`);
             const oldSeat = (Object.keys(prevMemSnap) as SeatId[]).find(
               (sid) => prevMemSnap[sid]?.clientId === left.clientId
+            );
+            if (oldSeat && screenRef.current === 'table') {
+              handleDisconnectedSeatRef.current(oldSeat);
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_hello' }, ({ payload }) => {
+          if (destroyed || !payload) return;
+          const p = payload as { member?: typeof myPresence; requestReply?: boolean };
+          if (p.member?.clientId && p.member.clientId !== myClientIdRef.current) {
+            bcastPeers.set(p.member.clientId, p.member);
+            syncPresence();
+            if (p.requestReply) {
+              ch.send({
+                type: 'broadcast',
+                event: 'peer_hello',
+                payload: { member: myPresenceRef.current || myPresence, requestReply: false },
+              });
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_bye' }, ({ payload }) => {
+          if (destroyed || !payload) return;
+          const cid = String((payload as { clientId?: string }).clientId || '');
+          if (cid && cid !== myClientIdRef.current) {
+            const prevMemSnap = { ...membersRef.current };
+            const gone = bcastPeers.get(cid);
+            bcastPeers.delete(cid);
+            syncPresence();
+            if (gone) showTableToast(`⚠️ ${gone.emoji} ${gone.name} ออกจากวงไพ่`);
+            const oldSeat = (Object.keys(prevMemSnap) as SeatId[]).find(
+              (sid) => prevMemSnap[sid]?.clientId === cid
             );
             if (oldSeat && screenRef.current === 'table') {
               handleDisconnectedSeatRef.current(oldSeat);
@@ -1479,7 +1535,21 @@ export function CasinoCardModal({
         .on('broadcast', { event: 'round_sync' }, ({ payload }) => handleRoomEvent('round_sync', payload))
         .subscribe(async (status) => {
           if (!destroyed && status === 'SUBSCRIBED') {
-            await ch.track(myPresence);
+            isSub = true;
+            const curMe = myPresenceRef.current || myPresence;
+            ch.send({
+              type: 'broadcast',
+              event: 'peer_hello',
+              payload: { member: curMe, requestReply: true },
+            });
+            const res = await ch.track(curMe);
+            if (res !== 'ok' && !destroyed) {
+              setTimeout(() => {
+                if (!destroyed && isSub) {
+                  void ch.track(myPresenceRef.current || myPresence);
+                }
+              }, 750);
+            }
           }
         });
 
@@ -1553,9 +1623,16 @@ export function CasinoCardModal({
       supabaseRef.current = null;
       channelRef.current = null;
       if (ch && sb) {
+        if (isSub) {
+          ch.send({
+            type: 'broadcast',
+            event: 'peer_bye',
+            payload: { clientId: myClientIdRef.current },
+          });
+        }
         void ch
           .untrack()
-          .catch(() => {})
+          .catch(() => { })
           .finally(() => {
             void sb.removeChannel(ch).finally(() => {
               sb.realtime.disconnect();
@@ -2056,8 +2133,8 @@ export function CasinoCardModal({
 
   if (!isOpen) return null;
 
-  const joinedCount = Object.keys(members).length;
-  const playableCount = Object.values(members).filter((m) => (m?.points ?? 0) >= 5).length;
+  const joinedCount = Object.keys(effectiveMembers).length;
+  const playableCount = Object.values(effectiveMembers).filter((m) => (m?.points ?? 0) >= 5).length;
   const minPlayersNeeded = gameType === 'oldmaid' ? 2 : 1;
   const mySeatState = round?.seats.find((s) => s.seatId === mySeat) || null;
   const activeGameMeta = GAME_CATALOG.find((g) => g.id === gameType) || GAME_CATALOG[0];
@@ -2101,84 +2178,48 @@ export function CasinoCardModal({
             <div className="flex flex-wrap items-center gap-3 pr-10">
               <GuardDealerAvatar mood={guardMood} />
               <div className="flex-1 min-w-[200px]">
-                <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-2xl font-extrabold text-amber-300 leading-tight">
-                  🃏 วงไพ่คาสิโนเจ้ามือพี่ยาม
+                <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-xl font-extrabold text-amber-300 leading-tight">
+                  🃏 วงไพ่เจ้ามือพี่ยาม ({joinedCount}/5 คน)
                 </h2>
-                <div className="mt-1 inline-flex flex-wrap items-center gap-1.5 bg-emerald-950/90 border border-amber-400/70 rounded-xl px-2.5 py-1 text-[11px] font-extrabold text-amber-200">
-                  <span>🏦 คลังเจ้ามือพี่ยาม:</span>
-                  <span className="text-yellow-300 text-xs">{guardBank.guardBalance.toLocaleString()} 💰 GP</span>
-                  <span className="text-emerald-300/85">
-                    (กินรวม {guardBank.guardTotalWon.toLocaleString()} • {guardBank.guardRoundsPlayed} รอบ)
-                  </span>
+                <div className="mt-1 inline-flex flex-wrap items-center gap-1.5 bg-emerald-950/90 border border-amber-400/70 rounded-xl px-2.5 py-0.5 text-[11px] font-extrabold text-amber-200">
+                  <span>🏦 คลังพี่ยาม:</span>
+                  <span className="text-yellow-300">{guardBank.guardBalance.toLocaleString()} 💰 GP</span>
                 </div>
               </div>
             </div>
 
-            {/* Table Switcher (#9999 / #9998) */}
-            <div className="flex items-center justify-between bg-slate-900/90 border border-amber-500/40 rounded-xl p-2">
-              <div className="flex items-center gap-1.5">
-                {(
-                  [
-                    { code: '9999', label: '🃏 โต๊ะพี่ยาม 1 (#9999)' },
-                    { code: '9998', label: '🎲 โต๊ะพี่ยาม 2 (#9998)' },
-                  ] as const
-                ).map((tb) => (
-                  <button
-                    key={tb.code}
-                    type="button"
-                    onClick={() => setRoomCode(tb.code)}
-                    className={`px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition ${
-                      roomCode === tb.code
-                        ? 'rpg-btn-gold'
-                        : 'bg-slate-950 text-amber-100/80 hover:text-white'
-                    }`}
-                  >
-                    {tb.label}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[11px] font-bold text-emerald-300">🟢 Presence Live</span>
-            </div>
-
             {/* Game Selector Cards (4 Playable Games!) */}
-            <div className="space-y-1.5">
-              <div className="text-xs font-extrabold text-amber-200">
-                เลือกเกมไพ่ที่จะเล่น {amIHost ? '(หัวโต๊ะเลือกได้เลย)' : '(หัวโต๊ะกำลังเลือก)'}:
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {GAME_CATALOG.map((g) => {
-                  const sel = gameType === g.id;
-                  return (
-                    <button
-                      key={g.id}
-                      type="button"
-                      disabled={!amIHost}
-                      onClick={() => {
-                        if (!amIHost) return;
-                        setGameType(g.id);
-                        gameTypeRef.current = g.id;
-                        sendRoomMsg('lobby_sync', { gameType: g.id, members: membersRef.current });
-                        broadcastArenaLobby('waiting', g.id, membersRef.current);
-                      }}
-                      className={`text-left p-2.5 rounded-xl border-2 transition cursor-pointer disabled:cursor-default ${
-                        sel
-                          ? 'bg-emerald-900/80 border-yellow-300 shadow-[0_0_14px_rgba(250,204,21,0.45)]'
-                          : 'bg-slate-900/85 border-slate-700 hover:border-amber-400/70'
+            <div className="grid grid-cols-2 gap-2">
+              {GAME_CATALOG.map((g) => {
+                const sel = gameType === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    disabled={!amIHost}
+                    onClick={() => {
+                      if (!amIHost) return;
+                      setGameType(g.id);
+                      gameTypeRef.current = g.id;
+                      sendRoomMsg('lobby_sync', { gameType: g.id, members: membersRef.current });
+                      broadcastArenaLobby('waiting', g.id, membersRef.current);
+                    }}
+                    className={`text-left p-2.5 rounded-xl border-2 transition cursor-pointer disabled:cursor-default ${sel
+                      ? 'bg-emerald-900/80 border-yellow-300 shadow-[0_0_12px_rgba(250,204,21,0.4)]'
+                      : 'bg-slate-900/85 border-slate-700 hover:border-amber-400/70'
                       }`}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-[family-name:var(--font-kanit)] font-extrabold text-sm text-amber-200">
-                          {g.icon} {g.title}
-                        </span>
-                        <span className="text-[10px] font-extrabold bg-black/50 text-emerald-300 px-1.5 py-0.5 rounded-full border border-emerald-500/40">
-                          {g.playersText}
-                        </span>
-                      </div>
-                      <p className="text-[10.5px] text-amber-100/75 font-semibold mt-0.5">{g.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm text-amber-200 truncate">
+                        {g.icon} {g.title}
+                      </span>
+                      <span className="text-[9.5px] font-extrabold bg-black/50 text-emerald-300 px-1.5 py-0.5 rounded-full shrink-0">
+                        {g.playersText}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Seated Players (1-5) */}
@@ -2189,23 +2230,21 @@ export function CasinoCardModal({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {SEAT_ORDER.map((sid, idx) => {
-                  const m = members[sid];
+                  const m = effectiveMembers[sid];
                   const isBroke = Boolean(m) && (m!.points ?? 0) < 5;
                   return (
                     <div
                       key={sid}
-                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-extrabold ${
-                        isBroke
-                          ? 'bg-slate-900/90 border-rose-400/60 text-rose-200'
-                          : m
+                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-extrabold ${isBroke
+                        ? 'bg-slate-900/90 border-rose-400/60 text-rose-200'
+                        : m
                           ? 'bg-emerald-950/90 border-amber-300 text-amber-100'
                           : 'bg-slate-950/70 border-dashed border-slate-700 text-slate-500'
-                      }`}
+                        }`}
                     >
                       {m
-                        ? `${m.emoji} ${m.name}${sid === mySeat ? ' (คุณ)' : ''}${
-                            isBroke ? ' 👀 นั่งดู (GP หมด)' : ''
-                          }`
+                        ? `${m.emoji} ${m.name}${sid === mySeat ? ' (คุณ)' : ''}${isBroke ? ' 👀 นั่งดู (GP หมด)' : ''
+                        }`
                         : `ที่นั่ง ${idx + 1} (ว่าง)`}
                     </div>
                   );
@@ -2421,15 +2460,13 @@ export function CasinoCardModal({
                   return (
                     <div
                       key={seat.seatId}
-                      className={`shrink-0 ${
-                        isMe ? 'min-w-[155px] sm:min-w-[185px]' : 'min-w-[125px] sm:min-w-[148px]'
-                      } rounded-xl px-2 py-1.5 border-2 backdrop-blur-xs transition ${
-                        isTurn
+                      className={`shrink-0 ${isMe ? 'min-w-[155px] sm:min-w-[185px]' : 'min-w-[125px] sm:min-w-[148px]'
+                        } rounded-xl px-2 py-1.5 border-2 backdrop-blur-xs transition ${isTurn
                           ? 'bg-amber-500/30 border-yellow-300 shadow-[0_0_16px_rgba(250,204,21,0.7)]'
                           : isMe
-                          ? 'bg-slate-950/75 border-amber-400'
-                          : 'bg-slate-950/55 border-emerald-400/40'
-                      }`}
+                            ? 'bg-slate-950/75 border-amber-400'
+                            : 'bg-slate-950/55 border-emerald-400/40'
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-1">
                         <div className="text-[11px] font-extrabold text-amber-100 truncate">
@@ -2452,8 +2489,8 @@ export function CasinoCardModal({
                                 ? '✅ พร้อมแล้ว'
                                 : 'เลือกชิป...'
                               : seat.safe
-                              ? '🎉 รอดแล้ว!'
-                              : 'รอแจก...'}
+                                ? '🎉 รอดแล้ว!'
+                                : 'รอแจก...'}
                           </span>
                         ) : (
                           seat.cards.map((c) => (
@@ -2475,13 +2512,12 @@ export function CasinoCardModal({
                       <div className="mt-1.5 text-center min-h-[16px]">
                         {seat.resultLabel ? (
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black ${
-                              (seat.deltaGp ?? 0) > 0
-                                ? 'bg-emerald-500 text-black'
-                                : (seat.deltaGp ?? 0) < 0
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-black ${(seat.deltaGp ?? 0) > 0
+                              ? 'bg-emerald-500 text-black'
+                              : (seat.deltaGp ?? 0) < 0
                                 ? 'bg-rose-600 text-white'
                                 : 'bg-slate-700 text-amber-100'
-                            }`}
+                              }`}
                           >
                             {seat.resultLabel}
                           </span>
@@ -2505,215 +2541,214 @@ export function CasinoCardModal({
               </div>
             )}
 
-          {/* BOTTOM ACTION BAR (Context-aware for all 4 games + Spectator Lock when GP < 5!) */}
-          {round && (
-            <div className="z-10 max-w-2xl w-full mx-auto rpg-panel rounded-2xl p-2.5 sm:p-3 flex flex-wrap items-center justify-center gap-2 shadow-2xl">
-              {/* SPECTATOR BANNER when current user has < 5 GP */}
-              {!mySeatState && round.phase !== 'settled' && (
-                <div className="text-xs font-extrabold text-rose-200 text-center py-0.5">
-                  👀 โหมดผู้ชม (GP ของคุณมี {currentUserPoints} GP น้อยกว่าขั้นต่ำ 5 GP — นั่งดูเพื่อนเล่นได้อย่างเดียวนะ!)
-                </div>
-              )}
+            {/* BOTTOM ACTION BAR (Context-aware for all 4 games + Spectator Lock when GP < 5!) */}
+            {round && (
+              <div className="z-10 max-w-2xl w-full mx-auto rpg-panel rounded-2xl p-2.5 sm:p-3 flex flex-wrap items-center justify-center gap-2 shadow-2xl">
+                {/* SPECTATOR BANNER when current user has < 5 GP */}
+                {!mySeatState && round.phase !== 'settled' && (
+                  <div className="text-xs font-extrabold text-rose-200 text-center py-0.5">
+                    👀 โหมดผู้ชม (GP ของคุณมี {currentUserPoints} GP น้อยกว่าขั้นต่ำ 5 GP — นั่งดูเพื่อนเล่นได้อย่างเดียวนะ!)
+                  </div>
+                )}
 
-              {/* PHASE 1: BETTING */}
-              {round.phase === 'betting' && mySeatState && (
-                <>
-                  {round.gameType === 'holdem' ? (
-                    <span className="text-xs font-extrabold text-amber-200">
-                      🤠 ค่าต๋งเริ่มต้น (Ante): 5 💰 GP
-                    </span>
-                  ) : (
-                    <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                {/* PHASE 1: BETTING */}
+                {round.phase === 'betting' && mySeatState && (
+                  <>
+                    {round.gameType === 'holdem' ? (
                       <span className="text-xs font-extrabold text-amber-200">
-                        {round.gameType === 'oldmaid' ? 'เดิมพันคนละ:' : 'เลือกชิป:'}
+                        🤠 ค่าต๋งเริ่มต้น (Ante): 5 💰 GP
                       </span>
-                      {CHIP_OPTIONS.map((chip) => {
-                        const activeVal =
-                          round.gameType === 'oldmaid' ? round.oldMaidStake : mySeatState.bet;
-                        const canAfford = chip <= currentUserPoints;
-                        const canPick =
-                          (round.gameType === 'oldmaid' ? amIHost : !mySeatState.ready) && canAfford;
-                        return (
-                          <button
-                            key={chip}
-                            type="button"
-                            disabled={!canPick}
-                            onClick={() => dispatchAction('set_bet', chip)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-black border-2 cursor-pointer transition disabled:opacity-35 disabled:cursor-not-allowed ${
-                              activeVal === chip
+                    ) : (
+                      <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                        <span className="text-xs font-extrabold text-amber-200">
+                          {round.gameType === 'oldmaid' ? 'เดิมพันคนละ:' : 'เลือกชิป:'}
+                        </span>
+                        {CHIP_OPTIONS.map((chip) => {
+                          const activeVal =
+                            round.gameType === 'oldmaid' ? round.oldMaidStake : mySeatState.bet;
+                          const canAfford = chip <= currentUserPoints;
+                          const canPick =
+                            (round.gameType === 'oldmaid' ? amIHost : !mySeatState.ready) && canAfford;
+                          return (
+                            <button
+                              key={chip}
+                              type="button"
+                              disabled={!canPick}
+                              onClick={() => dispatchAction('set_bet', chip)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-black border-2 cursor-pointer transition disabled:opacity-35 disabled:cursor-not-allowed ${activeVal === chip
                                 ? 'bg-amber-400 text-black border-white scale-105'
                                 : 'bg-slate-900 text-amber-200 border-amber-600/70'
-                            }`}
-                          >
-                            {chip}💰
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                                }`}
+                            >
+                              {chip}💰
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
 
-                  <button
-                    type="button"
-                    disabled={mySeatState.ready || currentUserPoints < 5 || mySeatState.bet > currentUserPoints}
-                    onClick={() => dispatchAction('ready_bet')}
-                    className="rpg-btn-gold px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-50"
-                  >
-                    {mySeatState.ready ? '⏳ รอเพื่อนกดพร้อม...' : '✅ ลงชิป & พร้อมแจกไพ่!'}
-                  </button>
-                </>
-              )}
-
-              {/* PHASE 2: PLAYING */}
-              {round.phase === 'playing' && mySeatState && (
-                <>
-                  {round.gameType === 'pokdeng' &&
-                    (!mySeatState.done ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('draw')}
-                          className="rpg-btn-gold px-5 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
-                        >
-                          🃏 จั่วใบที่ 3
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('stand')}
-                          className="rpg-btn-blue px-5 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
-                        >
-                          ✋ อยู่ (ไม่จั่ว)
-                        </button>
-                      </>
-                    ) : (
-                      <span className="text-xs font-extrabold text-amber-200">
-                        ⏳ รอเพื่อนและเจ้ามือพี่ยามเปิดไพ่...
-                      </span>
-                    ))}
-
-                  {round.gameType === 'blackjack' &&
-                    (!mySeatState.done ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('hit')}
-                          className="rpg-btn-gold px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
-                        >
-                          🃏 จั่ว (Hit)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('stand')}
-                          className="rpg-btn-blue px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
-                        >
-                          ✋ อยู่ (Stand)
-                        </button>
-                        {mySeatState.cards.length === 2 && mySeatState.bet * 2 <= currentUserPoints && (
-                          <button
-                            type="button"
-                            onClick={() => dispatchAction('double')}
-                            className="rpg-btn-green px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
-                          >
-                            ×2 ดับเบิล
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-xs font-extrabold text-amber-200">
-                        ⏳ รอเจ้ามือพี่ยามจั่วไพ่...
-                      </span>
-                    ))}
-
-                  {round.gameType === 'holdem' &&
-                    (round.seats[round.turnIndex ?? 0]?.seatId === mySeat && !mySeatState.folded ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('call')}
-                          className="rpg-btn-green px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer"
-                        >
-                          {(round.currentBet || 0) > (mySeatState.roundBet || 0)
-                            ? `✅ ตาม (+${(round.currentBet || 0) - (mySeatState.roundBet || 0)}💰)`
-                            : '✅ เช็ค (Check)'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={mySeatState.bet + 10 > currentUserPoints}
-                          onClick={() => dispatchAction('raise', 10)}
-                          className="rpg-btn-gold px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-40"
-                        >
-                          ⬆️ เกทับ +10💰
-                        </button>
-                        <button
-                          type="button"
-                          disabled={mySeatState.bet + 20 > currentUserPoints}
-                          onClick={() => dispatchAction('raise', 20)}
-                          className="rpg-btn-blue px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-40"
-                        >
-                          🔥 เกทับ +20💰
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('fold')}
-                          className="bg-rose-700 hover:bg-rose-600 text-white border-2 border-amber-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer"
-                        >
-                          🏳️ หมอบ
-                        </button>
-                      </>
-                    ) : (
-                      <span className="text-xs font-extrabold text-amber-200">
-                        ⏳ รอตาของ {round.seats[round.turnIndex ?? 0]?.name || 'เพื่อน'}...
-                      </span>
-                    ))}
-
-                  {round.gameType === 'oldmaid' && (
-                    <div className="flex items-center gap-2">
-                      {!mySeatState.safe && mySeatState.cards.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => dispatchAction('shuffle_hand')}
-                          className="rpg-btn-blue px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer"
-                        >
-                          🔀 สลับไพ่ในมือหลอกเพื่อน
-                        </button>
-                      )}
-                      <span className="text-xs font-extrabold text-amber-200">
-                        {round.seats[round.turnIndex ?? 0]?.seatId === mySeat
-                          ? '👆 แตะดึงไพ่จากมือเพื่อนด้านบน!'
-                          : `⏳ รอ ${round.seats[round.turnIndex ?? 0]?.name || 'เพื่อน'} ดึงไพ่...`}
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* PHASE 3: SETTLED */}
-              {round.phase === 'settled' && (
-                <>
-                  {amIHost ? (
                     <button
                       type="button"
-                      disabled={settling}
-                      onClick={() => {
-                        const fresh = createFreshBettingRound(gameType, membersRef.current);
-                        if (fresh.seats.length < (gameType === 'oldmaid' ? 2 : 1)) {
-                          returnToLobbyAsHost();
-                          return;
-                        }
-                        pushRoundSync(fresh);
-                      }}
-                      className="rpg-btn-gold px-6 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer disabled:opacity-50"
+                      disabled={mySeatState.ready || currentUserPoints < 5 || mySeatState.bet > currentUserPoints}
+                      onClick={() => dispatchAction('ready_bet')}
+                      className="rpg-btn-gold px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-50"
                     >
-                      {settling ? 'กำลังคิดเงิน...' : '🃏 เล่นรอบต่อไป!'}
+                      {mySeatState.ready ? '⏳ รอเพื่อนกดพร้อม...' : '✅ ลงชิป & พร้อมแจกไพ่!'}
                     </button>
-                  ) : (
-                    <span className="text-xs font-extrabold text-amber-200">
-                      ⏳ รอหัวตี้กดแจกไพ่รอบต่อไป...
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+                  </>
+                )}
+
+                {/* PHASE 2: PLAYING */}
+                {round.phase === 'playing' && mySeatState && (
+                  <>
+                    {round.gameType === 'pokdeng' &&
+                      (!mySeatState.done ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('draw')}
+                            className="rpg-btn-gold px-5 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
+                          >
+                            🃏 จั่วใบที่ 3
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('stand')}
+                            className="rpg-btn-blue px-5 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
+                          >
+                            ✋ อยู่ (ไม่จั่ว)
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs font-extrabold text-amber-200">
+                          ⏳ รอเพื่อนและเจ้ามือพี่ยามเปิดไพ่...
+                        </span>
+                      ))}
+
+                    {round.gameType === 'blackjack' &&
+                      (!mySeatState.done ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('hit')}
+                            className="rpg-btn-gold px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
+                          >
+                            🃏 จั่ว (Hit)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('stand')}
+                            className="rpg-btn-blue px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
+                          >
+                            ✋ อยู่ (Stand)
+                          </button>
+                          {mySeatState.cards.length === 2 && mySeatState.bet * 2 <= currentUserPoints && (
+                            <button
+                              type="button"
+                              onClick={() => dispatchAction('double')}
+                              className="rpg-btn-green px-4 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer"
+                            >
+                              ×2 ดับเบิล
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs font-extrabold text-amber-200">
+                          ⏳ รอเจ้ามือพี่ยามจั่วไพ่...
+                        </span>
+                      ))}
+
+                    {round.gameType === 'holdem' &&
+                      (round.seats[round.turnIndex ?? 0]?.seatId === mySeat && !mySeatState.folded ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('call')}
+                            className="rpg-btn-green px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer"
+                          >
+                            {(round.currentBet || 0) > (mySeatState.roundBet || 0)
+                              ? `✅ ตาม (+${(round.currentBet || 0) - (mySeatState.roundBet || 0)}💰)`
+                              : '✅ เช็ค (Check)'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={mySeatState.bet + 10 > currentUserPoints}
+                            onClick={() => dispatchAction('raise', 10)}
+                            className="rpg-btn-gold px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-40"
+                          >
+                            ⬆️ เกทับ +10💰
+                          </button>
+                          <button
+                            type="button"
+                            disabled={mySeatState.bet + 20 > currentUserPoints}
+                            onClick={() => dispatchAction('raise', 20)}
+                            className="rpg-btn-blue px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer disabled:opacity-40"
+                          >
+                            🔥 เกทับ +20💰
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('fold')}
+                            className="bg-rose-700 hover:bg-rose-600 text-white border-2 border-amber-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold cursor-pointer"
+                          >
+                            🏳️ หมอบ
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs font-extrabold text-amber-200">
+                          ⏳ รอตาของ {round.seats[round.turnIndex ?? 0]?.name || 'เพื่อน'}...
+                        </span>
+                      ))}
+
+                    {round.gameType === 'oldmaid' && (
+                      <div className="flex items-center gap-2">
+                        {!mySeatState.safe && mySeatState.cards.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => dispatchAction('shuffle_hand')}
+                            className="rpg-btn-blue px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer"
+                          >
+                            🔀 สลับไพ่ในมือหลอกเพื่อน
+                          </button>
+                        )}
+                        <span className="text-xs font-extrabold text-amber-200">
+                          {round.seats[round.turnIndex ?? 0]?.seatId === mySeat
+                            ? '👆 แตะดึงไพ่จากมือเพื่อนด้านบน!'
+                            : `⏳ รอ ${round.seats[round.turnIndex ?? 0]?.name || 'เพื่อน'} ดึงไพ่...`}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* PHASE 3: SETTLED */}
+                {round.phase === 'settled' && (
+                  <>
+                    {amIHost ? (
+                      <button
+                        type="button"
+                        disabled={settling}
+                        onClick={() => {
+                          const fresh = createFreshBettingRound(gameType, membersRef.current);
+                          if (fresh.seats.length < (gameType === 'oldmaid' ? 2 : 1)) {
+                            returnToLobbyAsHost();
+                            return;
+                          }
+                          pushRoundSync(fresh);
+                        }}
+                        className="rpg-btn-gold px-6 py-2.5 rounded-xl text-sm font-extrabold cursor-pointer disabled:opacity-50"
+                      >
+                        {settling ? 'กำลังคิดเงิน...' : '🃏 เล่นรอบต่อไป!'}
+                      </button>
+                    ) : (
+                      <span className="text-xs font-extrabold text-amber-200">
+                        ⏳ รอหัวตี้กดแจกไพ่รอบต่อไป...
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

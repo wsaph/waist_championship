@@ -6,8 +6,12 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import {
   COURT_WIDTH,
   GROUND_Y,
+  NET_X,
+  NET_HALF_WIDTH,
+  PLAYER_RADIUS,
   getActiveSlots,
   getTeamForSlot,
+  stepLocal2dPlayer,
   type ChibiSkinId,
   type GameEvents,
   type GameMode,
@@ -20,6 +24,82 @@ import {
 
 export const HOST_BROADCAST_HZ = 20;
 export const HOST_BROADCAST_INTERVAL_MS = 1000 / HOST_BROADCAST_HZ; // 50 ms
+export const STALE_GUEST_INPUT_MS = 2800;
+export const GUEST_IDLE_ECHO_DELAY_MS = 150;
+export const GUEST_HELD_KEEPALIVE_MS = 1200;
+export const ACTION_GRACE_BUFFER_MS = 120;
+export const HOST_YIELD_DELAY_MS = 1500;
+
+/**
+ * Runs a 20 Hz (50ms) fallback ticker ONLY while `document.hidden` is true,
+ * preventing `requestAnimationFrame` throttling from freezing Host physics when switching tabs/apps.
+ */
+export function createBackgroundHostTicker(
+  onBackgroundTick: (nowPerfMs: number) => void,
+  intervalMs = HOST_BROADCAST_INTERVAL_MS
+): () => void {
+  if (typeof document === 'undefined') return () => {};
+  let bgIv: ReturnType<typeof setInterval> | null = null;
+
+  const syncVisibility = () => {
+    if (document.hidden) {
+      if (!bgIv) {
+        bgIv = setInterval(() => {
+          onBackgroundTick(performance.now());
+        }, intervalMs);
+      }
+    } else if (bgIv) {
+      clearInterval(bgIv);
+      bgIv = null;
+    }
+  };
+
+  document.addEventListener('visibilitychange', syncVisibility);
+  syncVisibility();
+
+  return () => {
+    document.removeEventListener('visibilitychange', syncVisibility);
+    if (bgIv) {
+      clearInterval(bgIv);
+      bgIv = null;
+    }
+  };
+}
+
+/**
+ * Host-side Watchdog that automatically decays stale Guest held inputs to neutral
+ * if no packet/keepalive arrives within `STALE_GUEST_INPUT_MS` (2.8s).
+ */
+export class GuestInputWatchdog<TSlot extends string, TInput> {
+  private entries = new Map<TSlot, { input: TInput; updatedAt: number }>();
+  private readonly timeoutMs: number;
+
+  constructor(timeoutMs = STALE_GUEST_INPUT_MS) {
+    this.timeoutMs = timeoutMs;
+  }
+
+  record(slot: TSlot, input: TInput, nowPerfMs: number): void {
+    this.entries.set(slot, { input, updatedAt: nowPerfMs });
+  }
+
+  read(slot: TSlot, nowPerfMs: number, neutralFallback: TInput): TInput {
+    const entry = this.entries.get(slot);
+    if (!entry) return neutralFallback;
+    if (nowPerfMs - entry.updatedAt > this.timeoutMs) {
+      this.entries.delete(slot);
+      return neutralFallback;
+    }
+    return entry.input;
+  }
+
+  delete(slot: TSlot): void {
+    this.entries.delete(slot);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+}
 
 export interface PresencePlayer {
   clientId: string;
@@ -32,6 +112,7 @@ export interface PresencePlayer {
   ready: boolean;
   joinedAt: number;
   isCreator: boolean;
+  isHidden?: boolean;
 }
 
 export interface ResolvedLobbyState {
@@ -120,7 +201,8 @@ export function getRealtimeSupabaseClient(): SupabaseClient | null {
   if (!url || !key) return null;
   if (!singletonSupabase) {
     singletonSupabase = createClient(url, key, {
-      auth: { persistSession: false },
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      realtime: { params: { eventsPerSecond: 40 } },
     });
   }
   return singletonSupabase;
@@ -162,8 +244,9 @@ export function resolveLobbyPresence(
   members: PresencePlayer[],
   mode: GameMode
 ): ResolvedLobbyState {
-  // Sort deterministically for Host election: original room creator first, then earliest joinedAt
+  // Sort deterministically for Host election: visible (foreground) tabs first, then room creator, then earliest joinedAt
   const byHostOrder = [...members].sort((a, b) => {
+    if (Boolean(a.isHidden) !== Boolean(b.isHidden)) return a.isHidden ? 1 : -1;
     if (a.isCreator !== b.isCreator) return a.isCreator ? -1 : 1;
     if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
     return a.clientId.localeCompare(b.clientId);
@@ -174,10 +257,11 @@ export function resolveLobbyPresence(
   const assigned: Partial<Record<PlayerSlot, PresencePlayer>> = {};
   const overflow: PresencePlayer[] = [];
 
-  // Sort for slot claim priority: earliest claim on that slot wins cleanly
-  const bySlotClaim = [...byHostOrder].sort((a, b) => {
+  // Sort for slot claim priority: earliest claim on that slot wins cleanly (never shifts slots on tab hide)
+  const bySlotClaim = [...members].sort((a, b) => {
     if (a.slotUpdatedAt !== b.slotUpdatedAt) return a.slotUpdatedAt - b.slotUpdatedAt;
-    return a.joinedAt - b.joinedAt;
+    if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
+    return a.clientId.localeCompare(b.clientId);
   });
 
   for (const m of bySlotClaim) {
@@ -314,11 +398,31 @@ export class ClientStateInterpolator {
   }
 
   /**
-   * Writes 60 FPS interpolated coordinates into `target` MatchState.
+   * Writes 60 FPS interpolated coordinates into `target` MatchState,
+   * while running immediate Client-Side Prediction + Smooth Reconciliation on `localPrediction.slot`.
    */
-  applyInterpolated(target: MatchState, nowPerfMs: number, dt: number): void {
+  applyInterpolated(
+    target: MatchState,
+    nowPerfMs: number,
+    dt: number,
+    localPrediction?: { slot: PlayerSlot; input: PlayerInput }
+  ): boolean {
+    let localDived = false;
+    if (
+      localPrediction &&
+      target.phase !== 'finished' &&
+      target.phase !== 'point_pause'
+    ) {
+      const mePl = target.players.find(
+        (p) => p.slot === localPrediction.slot && !p.isBot
+      );
+      if (mePl) {
+        localDived = stepLocal2dPlayer(mePl, localPrediction.input, dt);
+      }
+    }
+
     const curr = this.currSnap;
-    if (!curr) return;
+    if (!curr) return localDived;
     const prev = this.prevSnap || curr;
 
     if (target.screenShake > 0) {
@@ -368,6 +472,36 @@ export class ClientStateInterpolator {
     for (const np of curr.pl) {
       const lp = target.players.find((p) => p.slot === np.s);
       if (!lp) continue;
+      lp.isBot = np.bot === 1;
+      lp.spikeTimer = np.sp;
+
+      if (localPrediction && lp.slot === localPrediction.slot && !lp.isBot) {
+        // Reconcile local predicted player smoothly against Host snapshot
+        const extraHostSec = Math.min(0.05, elapsedMs / 1000);
+        const minX =
+          lp.team === 'blue' ? PLAYER_RADIUS : NET_X + NET_HALF_WIDTH + PLAYER_RADIUS;
+        const maxX =
+          lp.team === 'blue'
+            ? NET_X - NET_HALF_WIDTH - PLAYER_RADIUS
+            : COURT_WIDTH - PLAYER_RADIUS;
+        const authX = Math.max(minX, Math.min(maxX, np.x + np.vx * extraHostSec));
+        const authY = Math.min(GROUND_Y, np.y + np.vy * extraHostSec);
+        const errPx = Math.hypot(authX - lp.x, authY - lp.y);
+        const isRallyReset = curr.ph === 'serve_wait' && prev.ph !== 'serve_wait';
+
+        if (isRallyReset || errPx > 160) {
+          lp.x = np.x;
+          lp.y = np.y;
+          lp.vx = np.vx;
+          lp.vy = np.vy;
+        } else if (errPx > 8) {
+          const corr = 1 - Math.exp(-12 * dt);
+          lp.x += (authX - lp.x) * corr;
+          lp.y = Math.min(GROUND_Y, lp.y + (authY - lp.y) * corr);
+        }
+        continue;
+      }
+
       const pp = prev.pl.find((p) => p.s === np.s) || np;
       const jumpedFar = Math.hypot(np.x - pp.x, np.y - pp.y) > 240;
 
@@ -388,14 +522,13 @@ export class ClientStateInterpolator {
       lp.facing = np.f;
       lp.diveTimer = np.dt;
       lp.diveDir = np.dd;
-      lp.spikeTimer = np.sp;
-      lp.isBot = np.bot === 1;
       if (Math.abs(np.vx) > 20) {
         lp.animPhase += dt * 15;
       } else {
         lp.animPhase += dt * 3.5;
       }
     }
+    return localDived;
   }
 }
 
@@ -422,6 +555,8 @@ export class VolleyballRoomController {
   private callbacks: RoomCallbacks;
   private sb: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
+  private channelSubscribed = false;
+  private broadcastPeers = new Map<string, PresencePlayer>();
   private localBc: BroadcastChannel | null = null;
   private localPeers = new Map<string, { member: PresencePlayer; seenAt: number }>();
   private localHeartbeatIv: ReturnType<typeof setInterval> | null = null;
@@ -434,6 +569,11 @@ export class VolleyballRoomController {
     down: false,
     action: false,
   };
+  private lastInputSlot: PlayerSlot = 'P1';
+  private idleEchoTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveIv: ReturnType<typeof setInterval> | null = null;
+  private hideYieldTimer: ReturnType<typeof setTimeout> | null = null;
+  private cleanupVisListener: (() => void) | null = null;
   private inputSeq = 0;
   private destroyed = false;
 
@@ -474,11 +614,47 @@ export class VolleyballRoomController {
         if (this.destroyed) return;
         this.reconcileSupabasePresence(ch);
       })
+        .on('presence', { event: 'join' }, () => {
+          if (this.destroyed) return;
+          this.reconcileSupabasePresence(ch);
+        })
         .on('presence', { event: 'leave' }, ({ leftPresences }) => {
           if (this.destroyed) return;
-          this.handlePresenceLeaves(leftPresences as unknown as PresencePlayer[], () => {
+          const leftArr = (leftPresences || []) as unknown as PresencePlayer[];
+          for (const lp of leftArr) {
+            if (lp?.clientId) this.broadcastPeers.delete(lp.clientId);
+          }
+          this.handlePresenceLeaves(leftArr, () => {
             this.reconcileSupabasePresence(ch);
           });
+        })
+        .on('broadcast', { event: 'peer_hello' }, ({ payload }) => {
+          if (this.destroyed || !payload) return;
+          const p = payload as { member?: PresencePlayer; requestReply?: boolean };
+          if (p.member?.clientId && p.member.clientId !== this.clientId) {
+            this.broadcastPeers.set(p.member.clientId, p.member);
+            this.reconcileSupabasePresence(ch);
+            if (p.requestReply) {
+              this.sendBroadcast('peer_hello', { member: this.me, requestReply: false });
+              if (this.currentHostId === this.clientId) {
+                this.sendBroadcast('room_cfg', {
+                  mode: this.mode,
+                  hostClientId: this.clientId,
+                } satisfies RoomConfigPacket);
+              }
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_bye' }, ({ payload }) => {
+          if (this.destroyed || !payload) return;
+          const cid = (payload as { clientId?: string }).clientId;
+          if (cid && cid !== this.clientId) {
+            const departed = this.knownOnline.get(cid) || this.broadcastPeers.get(cid);
+            this.broadcastPeers.delete(cid);
+            if (departed) {
+              this.handlePresenceLeaves([departed], () => this.reconcileSupabasePresence(ch));
+            }
+          }
         })
         .on('broadcast', { event: 'room_cfg' }, ({ payload }) => {
           if (this.destroyed || !payload) return;
@@ -486,6 +662,17 @@ export class VolleyballRoomController {
           if (cfg.mode === '1v1' || cfg.mode === '2v2') {
             this.mode = cfg.mode;
             this.emitLobby();
+          }
+        })
+        .on('broadcast', { event: 'host_yield' }, ({ payload }) => {
+          if (this.destroyed || !payload) return;
+          const p = payload as { clientId?: string; isHidden?: boolean };
+          if (p.clientId && p.clientId !== this.clientId) {
+            const target = this.broadcastPeers.get(p.clientId) || this.knownOnline.get(p.clientId);
+            if (target) {
+              this.broadcastPeers.set(p.clientId, { ...target, isHidden: Boolean(p.isHidden) });
+              this.reconcileSupabasePresence(ch);
+            }
           }
         })
         .on('broadcast', { event: 'start_match' }, ({ payload }) => {
@@ -509,14 +696,18 @@ export class VolleyballRoomController {
         .subscribe(async (status) => {
           if (this.destroyed) return;
           if (status === 'SUBSCRIBED') {
+            this.channelSubscribed = true;
             this.callbacks.onConnectionStatus?.(true, 'supabase');
-            await ch.track(this.me);
+            this.sendBroadcast('peer_hello', { member: this.me, requestReply: true });
+            await this.trackVbPresenceWithRetry(ch);
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            this.channelSubscribed = false;
             this.callbacks.onConnectionStatus?.(false, 'supabase');
           }
         });
 
       this.channel = ch;
+      this.emitLobby();
     } else if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       // Fallback when NEXT_PUBLIC_SUPABASE_* are not set yet: multi-tab local Presence simulation!
       const bc = new BroadcastChannel(`vb_local_room_${this.roomCode}`);
@@ -551,6 +742,16 @@ export class VolleyballRoomController {
           if (cfg.mode === '1v1' || cfg.mode === '2v2') {
             this.mode = cfg.mode;
             this.emitLobby();
+          }
+        } else if (event === 'host_yield') {
+          const p = payload as { clientId?: string; isHidden?: boolean };
+          if (p?.clientId && p.clientId !== this.clientId && this.localPeers.has(p.clientId)) {
+            const cur = this.localPeers.get(p.clientId)!;
+            this.localPeers.set(p.clientId, {
+              ...cur,
+              member: { ...cur.member, isHidden: Boolean(p.isHidden) },
+            });
+            this.syncLocalPeers();
           }
         } else if (event === 'start_match') {
           const pkt = payload as StartMatchPacket;
@@ -589,24 +790,94 @@ export class VolleyballRoomController {
     } else {
       this.emitLobby();
     }
+
+    if (typeof document !== 'undefined') {
+      const onVisChange = () => {
+        if (this.destroyed) return;
+        if (document.hidden) {
+          if (!this.hideYieldTimer) {
+            this.hideYieldTimer = setTimeout(() => {
+              this.hideYieldTimer = null;
+              if (this.destroyed || !document.hidden) return;
+              if (this.knownOnline.size > 1 && !this.me.isHidden) {
+                this.setLocalHiddenFlag(true);
+              }
+            }, HOST_YIELD_DELAY_MS);
+          }
+        } else {
+          if (this.hideYieldTimer) {
+            clearTimeout(this.hideYieldTimer);
+            this.hideYieldTimer = null;
+          }
+          if (this.me.isHidden) {
+            this.setLocalHiddenFlag(false);
+          }
+        }
+      };
+      document.addEventListener('visibilitychange', onVisChange);
+      this.cleanupVisListener = () => {
+        document.removeEventListener('visibilitychange', onVisChange);
+      };
+    }
+  }
+
+  private setLocalHiddenFlag(hidden: boolean): void {
+    this.me = { ...this.me, isHidden: hidden };
+    const prevHost = this.currentHostId;
+    this.knownOnline.set(this.clientId, this.me);
+    const resolved = this.emitLobby();
+    this.sendBroadcast('host_yield', { clientId: this.clientId, isHidden: hidden });
+    if (this.localBc) {
+      this.localPeers.set(this.clientId, { member: this.me, seenAt: Date.now() });
+      this.localBc.postMessage({ event: 'presence_ping', payload: this.me });
+    }
+    if (prevHost && resolved.hostClientId && prevHost !== resolved.hostClientId) {
+      const newHost = this.knownOnline.get(resolved.hostClientId);
+      if (newHost) {
+        this.callbacks.onHostMigrated(newHost.clientId, newHost.name);
+      }
+    }
+  }
+
+  private async trackVbPresenceWithRetry(ch: RealtimeChannel): Promise<void> {
+    if (this.destroyed || !this.channelSubscribed) return;
+    try {
+      const res = await ch.track(this.me);
+      if (res !== 'ok' && !this.destroyed) {
+        setTimeout(() => {
+          if (!this.destroyed && this.channelSubscribed) {
+            void ch.track(this.me);
+          }
+        }, 750);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   private reconcileSupabasePresence(ch: RealtimeChannel): void {
     const rawState = ch.presenceState<PresencePlayer>();
     const nextMap = new Map<string, PresencePlayer>();
 
+    for (const [cid, bPeer] of this.broadcastPeers.entries()) {
+      nextMap.set(cid, bPeer);
+    }
+
     for (const presences of Object.values(rawState)) {
       if (Array.isArray(presences) && presences.length > 0) {
         const latest = presences[presences.length - 1];
         if (latest?.clientId) {
-          nextMap.set(latest.clientId, latest);
+          const cached = this.broadcastPeers.get(latest.clientId);
+          const merged: PresencePlayer = cached
+            ? { ...latest, isHidden: cached.isHidden }
+            : latest;
+          nextMap.set(latest.clientId, merged);
+          this.broadcastPeers.set(latest.clientId, merged);
         }
       }
     }
 
-    if (!nextMap.has(this.clientId)) {
-      nextMap.set(this.clientId, this.me);
-    }
+    nextMap.set(this.clientId, this.me);
 
     const prevHost = this.currentHostId;
     this.knownOnline = nextMap;
@@ -616,7 +887,7 @@ export class VolleyballRoomController {
       prevHost &&
       resolved.hostClientId &&
       prevHost !== resolved.hostClientId &&
-      !nextMap.has(prevHost)
+      (!nextMap.has(prevHost) || Boolean(nextMap.get(prevHost)?.isHidden))
     ) {
       const newHost = nextMap.get(resolved.hostClientId);
       if (newHost) {
@@ -646,7 +917,7 @@ export class VolleyballRoomController {
       prevHost &&
       resolved.hostClientId &&
       prevHost !== resolved.hostClientId &&
-      !nextMap.has(prevHost)
+      (!nextMap.has(prevHost) || Boolean(nextMap.get(prevHost)?.isHidden))
     ) {
       const newHost = nextMap.get(resolved.hostClientId);
       if (newHost) {
@@ -716,7 +987,10 @@ export class VolleyballRoomController {
     this.emitLobby();
 
     if (this.channel) {
-      await this.channel.track(this.me);
+      this.sendBroadcast('peer_hello', { member: this.me, requestReply: false });
+      if (this.channelSubscribed) {
+        await this.trackVbPresenceWithRetry(this.channel);
+      }
     } else if (this.localBc) {
       this.localPeers.set(this.clientId, { member: this.me, seenAt: Date.now() });
       this.localBc.postMessage({ event: 'presence_ping', payload: this.me });
@@ -750,23 +1024,71 @@ export class VolleyballRoomController {
   }
 
   /**
-   * Event-Driven Guest Input: Sends ONLY when a key/button transitions (keydown / keyup).
-   * NEVER call this in a frame loop; duplicate states are filtered out automatically!
+   * Event-Driven Guest Input: Sends ONLY when a key/button transitions (keydown / keyup),
+   * plus a single 150ms Idle Echo Pulse on full release and 1.2s Keepalive while held!
    */
   sendGuestInputOnChange(slot: PlayerSlot, nextInput: PlayerInput): void {
     if (inputsEqual(this.lastSentInput, nextInput)) return;
     this.lastSentInput = { ...nextInput };
+    this.lastInputSlot = slot;
+    this.emitGuestInputPacket(slot, nextInput);
+
+    const isNeutral =
+      !nextInput.left &&
+      !nextInput.right &&
+      !nextInput.jump &&
+      !nextInput.down &&
+      !nextInput.action;
+
+    if (this.idleEchoTimer) {
+      clearTimeout(this.idleEchoTimer);
+      this.idleEchoTimer = null;
+    }
+
+    if (isNeutral) {
+      if (this.keepaliveIv) {
+        clearInterval(this.keepaliveIv);
+        this.keepaliveIv = null;
+      }
+      this.idleEchoTimer = setTimeout(() => {
+        this.idleEchoTimer = null;
+        if (this.destroyed) return;
+        const cur = this.lastSentInput;
+        if (!cur.left && !cur.right && !cur.jump && !cur.down && !cur.action) {
+          this.emitGuestInputPacket(this.lastInputSlot, cur);
+        }
+      }, GUEST_IDLE_ECHO_DELAY_MS);
+    } else if (!this.keepaliveIv) {
+      this.keepaliveIv = setInterval(() => {
+        if (this.destroyed) return;
+        const cur = this.lastSentInput;
+        if (cur.left || cur.right || cur.jump || cur.down || cur.action) {
+          this.emitGuestInputPacket(this.lastInputSlot, cur);
+        }
+      }, GUEST_HELD_KEEPALIVE_MS);
+    }
+  }
+
+  private emitGuestInputPacket(slot: PlayerSlot, inp: PlayerInput): void {
     this.inputSeq += 1;
     const pkt: GuestInputPacket = {
       clientId: this.clientId,
       slot,
       seq: this.inputSeq,
-      inp: { ...nextInput },
+      inp: { ...inp },
     };
     this.sendBroadcast('guest_input', pkt);
   }
 
   resetSentInputState(): void {
+    if (this.idleEchoTimer) {
+      clearTimeout(this.idleEchoTimer);
+      this.idleEchoTimer = null;
+    }
+    if (this.keepaliveIv) {
+      clearInterval(this.keepaliveIv);
+      this.keepaliveIv = null;
+    }
     this.lastSentInput = {
       left: false,
       right: false,
@@ -779,6 +1101,15 @@ export class VolleyballRoomController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.resetSentInputState();
+    if (this.hideYieldTimer) {
+      clearTimeout(this.hideYieldTimer);
+      this.hideYieldTimer = null;
+    }
+    if (this.cleanupVisListener) {
+      this.cleanupVisListener();
+      this.cleanupVisListener = null;
+    }
     if (this.localHeartbeatIv) {
       clearInterval(this.localHeartbeatIv);
       this.localHeartbeatIv = null;
@@ -798,9 +1129,14 @@ export class VolleyballRoomController {
     if (this.channel || this.sb) {
       const sb = this.sb;
       const ch = this.channel;
+      const wasSub = this.channelSubscribed;
       this.channel = null;
       this.sb = null;
+      this.channelSubscribed = false;
       if (ch && sb) {
+        if (wasSub) {
+          ch.send({ type: 'broadcast', event: 'peer_bye', payload: { clientId: this.clientId } });
+        }
         void ch
           .untrack()
           .catch(() => { })
@@ -834,6 +1170,8 @@ import {
   ALL_FOOTBALL_SLOTS,
   BLUE_SLOTS,
   RED_SLOTS,
+  PITCH_HALF_W,
+  PITCH_HALF_D,
   type FootballFrameEvents,
   type FootballMatchPhase,
   type FootballMatchState,
@@ -845,8 +1183,8 @@ import type { RenderPitchSnapshot, RenderPlayerFrame } from '@/games/soccer/matc
 
 export type FootballLobbyMode = 'penalty' | 'match_3v3';
 
-/** ~18.2 Hz (55ms) keeps 6-player Football + 4-player Volleyball + Main Island well under Supabase Free Tier limits! */
-export const FOOTBALL_BROADCAST_INTERVAL_MS = 55;
+/** Exact 20 Hz (50ms) Host broadcast tick rate! */
+export const FOOTBALL_BROADCAST_INTERVAL_MS = 50;
 
 const BALANCED_SLOT_CASCADE: readonly FootballSlotId[] = [
   'B1',
@@ -868,6 +1206,7 @@ export interface PenaltyPresenceMember {
   ready: boolean;
   joinedAt: number;
   isCreator: boolean;
+  isHidden?: boolean;
 }
 
 export interface PenaltyResolvedLobby {
@@ -988,15 +1327,27 @@ function lerpYawAngle(a: number, b: number, t: number): number {
 }
 
 /**
- * 60 FPS Client-side Linear Interpolation (Lerp) for 6-Player Street Football Guests
- * between ~18 Hz (55 ms) Host snapshots.
+ * 60 FPS Client-side Linear Interpolation (Lerp) + Guest Local Client-Side Prediction & Reconciliation
+ * for 6-Player Street Football Guests between exact 20 Hz (50 ms) Host snapshots.
  */
 export class FootballStateInterpolator {
   private prev: FootballNetSnapshot | null = null;
   private curr: FootballNetSnapshot | null = null;
   private recvPerfMs = 0;
+  private expectedIntervalMs = FOOTBALL_BROADCAST_INTERVAL_MS;
   private lastSeq = 0;
   private lastHostId: string | null = null;
+  private predictedMe: {
+    slot: FootballSlotId;
+    x: number;
+    z: number;
+    vx: number;
+    vz: number;
+    yaw: number;
+    stamina: number;
+    shootCharge: number;
+    slideTimer: number;
+  } | null = null;
 
   pushSnapshot(snap: FootballNetSnapshot, nowPerfMs: number): boolean {
     const hostChanged = Boolean(snap.hid && this.lastHostId && snap.hid !== this.lastHostId);
@@ -1008,39 +1359,169 @@ export class FootballStateInterpolator {
     if (snap.hid) {
       this.lastHostId = snap.hid;
     }
+    if (this.curr) {
+      const gap = nowPerfMs - this.recvPerfMs;
+      if (gap >= 25 && gap <= 130) {
+        this.expectedIntervalMs = this.expectedIntervalMs * 0.75 + gap * 0.25;
+      }
+      this.prev = this.curr;
+    } else {
+      this.prev = snap;
+    }
     this.lastSeq = snap.seq;
-    this.prev = this.curr || snap;
     this.curr = snap;
     this.recvPerfMs = nowPerfMs;
     return true;
   }
 
-  sample(nowPerfMs: number): RenderPitchSnapshot | null {
+  sample(
+    nowPerfMs: number,
+    localPrediction?: { slot: FootballSlotId; input: TeamControlInput; dt: number }
+  ): RenderPitchSnapshot | null {
     if (!this.curr) return null;
     const a = this.prev || this.curr;
     const b = this.curr;
-    const alpha = Math.max(
-      0,
-      Math.min(1.18, (nowPerfMs - this.recvPerfMs) / FOOTBALL_BROADCAST_INTERVAL_MS)
-    );
-    const t = Math.min(1, alpha);
+    const windowMs = Math.max(42, Math.min(85, this.expectedIntervalMs));
+    const elapsedMs = Math.max(0, nowPerfMs - this.recvPerfMs);
+    const rawAlpha = elapsedMs / windowMs;
+    const t = Math.min(1, rawAlpha);
 
     // Jump directly without lerping across large kickoff teleports
-    const ballJump = Math.hypot(b.bx - a.bx, b.bz - a.bz) > 8.5;
-    const bt = ballJump ? 1 : t;
+    const ballJump =
+      Math.hypot(b.bx - a.bx, b.bz - a.bz) > 8.5 ||
+      (b.ph === 'goal_celebration' && a.ph !== 'goal_celebration');
+
+    let ballX: number;
+    let ballY: number;
+    let ballZ: number;
+    if (ballJump) {
+      ballX = b.bx;
+      ballY = b.by;
+      ballZ = b.bz;
+    } else if (rawAlpha <= 1.0) {
+      ballX = a.bx + (b.bx - a.bx) * t;
+      ballY = a.by + (b.by - a.by) * t;
+      ballZ = a.bz + (b.bz - a.bz) * t;
+    } else {
+      // Bounded velocity dead-reckoning bridge up to 50ms when Wi-Fi packet is slightly delayed
+      const extraSec = Math.min(0.05, (elapsedMs - windowMs) / 1000);
+      ballX = Math.max(-PITCH_HALF_W, Math.min(PITCH_HALF_W, b.bx + b.bvx * extraSec));
+      ballY = b.by;
+      ballZ = Math.max(-PITCH_HALF_D, Math.min(PITCH_HALF_D, b.bz + b.bvz * extraSec));
+    }
 
     const players: RenderPlayerFrame[] = b.pl.map((bp) => {
+      if (
+        localPrediction &&
+        bp.id === localPrediction.slot &&
+        bp.b !== 1 &&
+        b.ph === 'playing'
+      ) {
+        const dt = Math.min(0.05, Math.max(0.001, localPrediction.dt));
+        const inp = localPrediction.input;
+        if (!this.predictedMe || this.predictedMe.slot !== bp.id) {
+          this.predictedMe = {
+            slot: bp.id,
+            x: bp.x,
+            z: bp.z,
+            vx: bp.vx,
+            vz: bp.vz,
+            yaw: bp.y,
+            stamina: bp.st,
+            shootCharge: bp.ch,
+            slideTimer: bp.sl,
+          };
+        }
+        const pm = this.predictedMe;
+
+        // 1) Step local movement immediately (0ms delay!)
+        const moveLen = Math.hypot(inp.moveX, inp.moveZ);
+        if (bp.sl > 0.02) {
+          pm.vx = bp.vx;
+          pm.vz = bp.vz;
+        } else if (moveLen > 0.08) {
+          const nx = inp.moveX / Math.max(1, moveLen);
+          const nz = inp.moveZ / Math.max(1, moveLen);
+          const canSprint = inp.sprint && pm.stamina > 6;
+          const speed = canSprint ? 7.05 * 1.38 : 7.05;
+          pm.vx = nx * speed;
+          pm.vz = nz * speed;
+          pm.yaw = Math.atan2(nz, nx);
+          pm.stamina = canSprint
+            ? Math.max(0, pm.stamina - dt * 26)
+            : Math.min(100, pm.stamina + dt * 14);
+        } else {
+          pm.vx *= 0.72;
+          pm.vz *= 0.72;
+          pm.stamina = Math.min(100, pm.stamina + dt * 20);
+        }
+        pm.x = Math.max(-PITCH_HALF_W + 0.45, Math.min(PITCH_HALF_W - 0.45, pm.x + pm.vx * dt));
+        pm.z = Math.max(-PITCH_HALF_D + 0.45, Math.min(PITCH_HALF_D - 0.45, pm.z + pm.vz * dt));
+        pm.shootCharge = inp.shootCharging
+          ? Math.min(100, pm.shootCharge + dt * 118)
+          : bp.ch;
+
+        // 2) Smooth Reconciliation against Host authoritative position
+        const extraHostSec = Math.min(0.05, elapsedMs / 1000);
+        const authX = Math.max(
+          -PITCH_HALF_W + 0.45,
+          Math.min(PITCH_HALF_W - 0.45, bp.x + bp.vx * extraHostSec)
+        );
+        const authZ = Math.max(
+          -PITCH_HALF_D + 0.45,
+          Math.min(PITCH_HALF_D - 0.45, bp.z + bp.vz * extraHostSec)
+        );
+        const errDist = Math.hypot(authX - pm.x, authZ - pm.z);
+        if (errDist > 3.2) {
+          pm.x = bp.x;
+          pm.z = bp.z;
+          pm.vx = bp.vx;
+          pm.vz = bp.vz;
+        } else if (errDist > 0.14) {
+          const corr = 1 - Math.exp(-11 * dt);
+          pm.x += (authX - pm.x) * corr;
+          pm.z += (authZ - pm.z) * corr;
+        }
+        pm.stamina += (bp.st - pm.stamina) * 0.18;
+
+        return {
+          id: bp.id,
+          isBot: false,
+          x: pm.x,
+          z: pm.z,
+          vx: pm.vx,
+          vz: pm.vz,
+          yaw: pm.yaw,
+          stamina: Math.round(pm.stamina),
+          shootCharge: Math.round(pm.shootCharge),
+          slideTimer: bp.sl,
+          callForPass: bp.cp === 1,
+        };
+      }
+
       const ap = a.pl.find((x) => x.id === bp.id) || bp;
       const pJump = Math.hypot(bp.x - ap.x, bp.z - ap.z) > 6.5;
-      const pt = pJump ? 1 : t;
+      let px: number;
+      let pz: number;
+      if (pJump) {
+        px = bp.x;
+        pz = bp.z;
+      } else if (rawAlpha <= 1.0) {
+        px = ap.x + (bp.x - ap.x) * t;
+        pz = ap.z + (bp.z - ap.z) * t;
+      } else {
+        const extraSec = Math.min(0.045, (elapsedMs - windowMs) / 1000);
+        px = Math.max(-PITCH_HALF_W + 0.45, Math.min(PITCH_HALF_W - 0.45, bp.x + bp.vx * extraSec));
+        pz = Math.max(-PITCH_HALF_D + 0.45, Math.min(PITCH_HALF_D - 0.45, bp.z + bp.vz * extraSec));
+      }
       return {
         id: bp.id,
         isBot: bp.b === 1,
-        x: ap.x + (bp.x - ap.x) * pt,
-        z: ap.z + (bp.z - ap.z) * pt,
+        x: px,
+        z: pz,
         vx: bp.vx,
         vz: bp.vz,
-        yaw: lerpYawAngle(ap.y, bp.y, pt),
+        yaw: lerpYawAngle(ap.y, bp.y, pJump ? 1 : t),
         stamina: bp.st,
         shootCharge: bp.ch,
         slideTimer: bp.sl,
@@ -1049,9 +1530,9 @@ export class FootballStateInterpolator {
     });
 
     return {
-      ballX: a.bx + (b.bx - a.bx) * bt,
-      ballY: a.by + (b.by - a.by) * bt,
-      ballZ: a.bz + (b.bz - a.bz) * bt,
+      ballX,
+      ballY,
+      ballZ,
       ballVx: b.bvx,
       ballVz: b.bvz,
       isPowerShot: b.pw === 1,
@@ -1064,6 +1545,7 @@ export class FootballStateInterpolator {
     this.curr = null;
     this.lastSeq = 0;
     this.lastHostId = null;
+    this.predictedMe = null;
   }
 }
 
@@ -1111,13 +1593,20 @@ export function resolvePenaltyLobbyPresence(
   }
 
   const sorted = [...members].sort((a, b) => {
+    if (Boolean(a.isHidden) !== Boolean(b.isHidden)) return a.isHidden ? 1 : -1;
     if (a.isCreator !== b.isCreator) return a.isCreator ? -1 : 1;
     if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
     return a.clientId.localeCompare(b.clientId);
   });
 
   const hostClientId = sorted[0]?.clientId ?? null;
-  const activeMembers = sorted.slice(0, maxPlayers);
+  const activeMembers = [...members]
+    .sort((a, b) => {
+      if (a.isCreator !== b.isCreator) return a.isCreator ? -1 : 1;
+      if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
+      return a.clientId.localeCompare(b.clientId);
+    })
+    .slice(0, maxPlayers);
   const allowedSlots: readonly FootballSlotId[] =
     matchMode === 'match_3v3' ? ALL_FOOTBALL_SLOTS : (['B1', 'R1'] as const);
   const cascadeOrder: readonly FootballSlotId[] =
@@ -1190,6 +1679,7 @@ export function resolvePenaltyLobbyPresence(
 export interface PenaltyRoomCallbacks {
   onLobbyChange: (lobby: PenaltyResolvedLobby) => void;
   onOpponentLeft: (leftMember: PenaltyPresenceMember, newHostId: string | null) => void;
+  onHostMigrated?: (newHostClientId: string, newHostName: string) => void;
   onMatchStart: (pkt: PenaltyStartPacket) => void;
   onShooterLockedNotice: (turnIndex: number) => void;
   onKeeperLockedNotice: (turnIndex: number) => void;
@@ -1228,10 +1718,13 @@ export class PenaltyRoomController {
   private callbacks: PenaltyRoomCallbacks;
   private sb: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
+  private channelSubscribed = false;
+  private broadcastPeers = new Map<string, PenaltyPresenceMember>();
   private localBc: BroadcastChannel | null = null;
   private localHeartbeatIv: ReturnType<typeof setInterval> | null = null;
   private localPeers = new Map<string, { member: PenaltyPresenceMember; seenAt: number }>();
   private knownOnline = new Map<string, PenaltyPresenceMember>();
+  private currentHostId: string | null = null;
   private lastSentFbInput: TeamControlInput = {
     moveX: 0,
     moveZ: 0,
@@ -1241,6 +1734,11 @@ export class PenaltyRoomController {
     sprint: false,
     tackleSeq: 0,
   };
+  private lastFbSlot: FootballSlotId = 'B1';
+  private fbIdleEchoTimer: ReturnType<typeof setTimeout> | null = null;
+  private fbKeepaliveIv: ReturnType<typeof setInterval> | null = null;
+  private hideYieldTimer: ReturnType<typeof setTimeout> | null = null;
+  private cleanupVisListener: (() => void) | null = null;
   private fbInputSeq = 0;
   private destroyed = false;
 
@@ -1278,37 +1776,91 @@ export class PenaltyRoomController {
         if (this.destroyed) return;
         const raw = ch.presenceState<PenaltyPresenceMember>();
         const nextMap = new Map<string, PenaltyPresenceMember>();
+        for (const [cid, bPeer] of this.broadcastPeers.entries()) {
+          nextMap.set(cid, bPeer);
+        }
         for (const arr of Object.values(raw)) {
           if (Array.isArray(arr) && arr.length > 0) {
             const latest = arr[arr.length - 1];
             if (latest?.clientId) {
-              nextMap.set(latest.clientId, latest);
+              const cached = this.broadcastPeers.get(latest.clientId);
+              const base =
+                cached && (cached.slotUpdatedAt || 0) > (latest.slotUpdatedAt || 0)
+                  ? cached
+                  : latest;
+              const newer: PenaltyPresenceMember = cached
+                ? { ...base, isHidden: cached.isHidden }
+                : base;
+              nextMap.set(latest.clientId, newer);
+              this.broadcastPeers.set(latest.clientId, newer);
             }
           }
         }
-        if (!nextMap.has(this.clientId)) {
-          nextMap.set(this.clientId, this.me);
-        }
+        nextMap.set(this.clientId, this.me);
+        const prevHost = this.currentHostId;
         this.knownOnline = nextMap;
         const resolved = this.emitLobby();
+        if (
+          prevHost &&
+          resolved.hostClientId &&
+          prevHost !== resolved.hostClientId &&
+          nextMap.has(prevHost) &&
+          Boolean(nextMap.get(prevHost)?.isHidden)
+        ) {
+          const newHost = nextMap.get(resolved.hostClientId);
+          if (newHost) {
+            this.callbacks.onHostMigrated?.(newHost.clientId, newHost.name);
+          }
+        }
         if (resolved.hostClientId === this.clientId) {
           this.sendBroadcast('room_mode', { matchMode: this.matchMode });
         }
       };
 
       ch.on('presence', { event: 'sync' }, syncPresence)
+        .on('presence', { event: 'join' }, syncPresence)
         .on('presence', { event: 'leave' }, ({ leftPresences }) => {
           if (this.destroyed) return;
+          const leftList = (leftPresences || []) as unknown as PenaltyPresenceMember[];
+          for (const lp of leftList) {
+            if (lp?.clientId) this.broadcastPeers.delete(lp.clientId);
+          }
           syncPresence();
           const resolved = resolvePenaltyLobbyPresence(
             Array.from(this.knownOnline.values()),
             this.matchMode
           );
-          const leftList = (leftPresences || []) as unknown as PenaltyPresenceMember[];
           for (const left of leftList) {
             if (!left?.clientId || left.clientId === this.clientId) continue;
             if (!this.knownOnline.has(left.clientId)) {
               this.callbacks.onOpponentLeft(left, resolved.hostClientId);
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_hello' }, ({ payload }) => {
+          if (this.destroyed || !payload) return;
+          const p = payload as { member?: PenaltyPresenceMember; requestReply?: boolean };
+          if (p.member?.clientId && p.member.clientId !== this.clientId) {
+            this.broadcastPeers.set(p.member.clientId, p.member);
+            syncPresence();
+            if (p.requestReply) {
+              this.sendBroadcast('peer_hello', { member: this.me, requestReply: false });
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_bye' }, ({ payload }) => {
+          if (this.destroyed || !payload) return;
+          const cid = (payload as { clientId?: string }).clientId;
+          if (cid && cid !== this.clientId) {
+            const departed = this.knownOnline.get(cid) || this.broadcastPeers.get(cid);
+            this.broadcastPeers.delete(cid);
+            syncPresence();
+            if (departed && !this.knownOnline.has(cid)) {
+              const resolved = resolvePenaltyLobbyPresence(
+                Array.from(this.knownOnline.values()),
+                this.matchMode
+              );
+              this.callbacks.onOpponentLeft(departed, resolved.hostClientId);
             }
           }
         })
@@ -1318,6 +1870,18 @@ export class PenaltyRoomController {
             if (m === 'penalty' || m === 'match_3v3') {
               this.matchMode = m;
               this.emitLobby();
+            }
+          }
+        })
+        .on('broadcast', { event: 'host_yield' }, ({ payload }) => {
+          if (!this.destroyed && payload) {
+            const p = payload as { clientId?: string; isHidden?: boolean };
+            if (p.clientId && p.clientId !== this.clientId) {
+              const target = this.broadcastPeers.get(p.clientId) || this.knownOnline.get(p.clientId);
+              if (target) {
+                this.broadcastPeers.set(p.clientId, { ...target, isHidden: Boolean(p.isHidden) });
+                syncPresence();
+              }
             }
           }
         })
@@ -1380,14 +1944,18 @@ export class PenaltyRoomController {
         .subscribe(async (status) => {
           if (this.destroyed) return;
           if (status === 'SUBSCRIBED') {
+            this.channelSubscribed = true;
             this.callbacks.onConnectionStatus?.(true, 'supabase');
-            await ch.track(this.me);
+            this.sendBroadcast('peer_hello', { member: this.me, requestReply: true });
+            await this.trackPenaltyPresenceWithRetry(ch);
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            this.channelSubscribed = false;
             this.callbacks.onConnectionStatus?.(false, 'supabase');
           }
         });
 
       this.channel = ch;
+      this.emitLobby();
     } else if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       const bc = new BroadcastChannel(`penalty_local_room_${this.roomCode}`);
       this.localPeers.set(this.clientId, { member: this.me, seenAt: Date.now() });
@@ -1419,6 +1987,23 @@ export class PenaltyRoomController {
           if (m === 'penalty' || m === 'match_3v3') {
             this.matchMode = m;
             this.emitLobby();
+          }
+        } else if (event === 'host_yield') {
+          const p = payload as { clientId?: string; isHidden?: boolean };
+          if (p?.clientId && p.clientId !== this.clientId && this.localPeers.has(p.clientId)) {
+            const cur = this.localPeers.get(p.clientId)!;
+            this.localPeers.set(p.clientId, {
+              ...cur,
+              member: { ...cur.member, isHidden: Boolean(p.isHidden) },
+            });
+            const prevHost = this.currentHostId;
+            const resolved = this.syncLocalPeers();
+            if (prevHost && resolved.hostClientId && prevHost !== resolved.hostClientId) {
+              const newHost = this.knownOnline.get(resolved.hostClientId);
+              if (newHost) {
+                this.callbacks.onHostMigrated?.(newHost.clientId, newHost.name);
+              }
+            }
           }
         } else if (event === 'penalty_start') {
           const pkt = payload as PenaltyStartPacket;
@@ -1469,6 +2054,53 @@ export class PenaltyRoomController {
     } else {
       this.emitLobby();
     }
+
+    if (typeof document !== 'undefined') {
+      const onVisChange = () => {
+        if (this.destroyed) return;
+        if (document.hidden) {
+          if (!this.hideYieldTimer) {
+            this.hideYieldTimer = setTimeout(() => {
+              this.hideYieldTimer = null;
+              if (this.destroyed || !document.hidden) return;
+              if (this.knownOnline.size > 1 && !this.me.isHidden) {
+                this.setLocalHiddenFlag(true);
+              }
+            }, HOST_YIELD_DELAY_MS);
+          }
+        } else {
+          if (this.hideYieldTimer) {
+            clearTimeout(this.hideYieldTimer);
+            this.hideYieldTimer = null;
+          }
+          if (this.me.isHidden) {
+            this.setLocalHiddenFlag(false);
+          }
+        }
+      };
+      document.addEventListener('visibilitychange', onVisChange);
+      this.cleanupVisListener = () => {
+        document.removeEventListener('visibilitychange', onVisChange);
+      };
+    }
+  }
+
+  private setLocalHiddenFlag(hidden: boolean): void {
+    this.me = { ...this.me, isHidden: hidden };
+    const prevHost = this.currentHostId;
+    this.knownOnline.set(this.clientId, this.me);
+    const resolved = this.emitLobby();
+    this.sendBroadcast('host_yield', { clientId: this.clientId, isHidden: hidden });
+    if (this.localBc) {
+      this.localPeers.set(this.clientId, { member: this.me, seenAt: Date.now() });
+      this.localBc.postMessage({ event: 'presence_ping', payload: this.me });
+    }
+    if (prevHost && resolved.hostClientId && prevHost !== resolved.hostClientId) {
+      const newHost = this.knownOnline.get(resolved.hostClientId);
+      if (newHost) {
+        this.callbacks.onHostMigrated?.(newHost.clientId, newHost.name);
+      }
+    }
   }
 
   private syncLocalPeers(): PenaltyResolvedLobby {
@@ -1485,6 +2117,7 @@ export class PenaltyRoomController {
       Array.from(this.knownOnline.values()),
       this.matchMode
     );
+    this.currentHostId = resolved.hostClientId;
     this.callbacks.onLobbyChange(resolved);
     return resolved;
   }
@@ -1498,6 +2131,22 @@ export class PenaltyRoomController {
     }
   }
 
+  private async trackPenaltyPresenceWithRetry(ch: RealtimeChannel): Promise<void> {
+    if (this.destroyed || !this.channelSubscribed) return;
+    try {
+      const res = await ch.track(this.me);
+      if (res !== 'ok' && !this.destroyed) {
+        setTimeout(() => {
+          if (!this.destroyed && this.channelSubscribed) {
+            void ch.track(this.me);
+          }
+        }, 750);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   async updateMyPresence(
     patch: Partial<
       Pick<
@@ -1507,11 +2156,18 @@ export class PenaltyRoomController {
     >
   ): Promise<void> {
     if (this.destroyed) return;
-    this.me = { ...this.me, ...patch };
+    this.me = {
+      ...this.me,
+      ...patch,
+      slotUpdatedAt: patch.slotUpdatedAt ?? Date.now(),
+    };
     this.knownOnline.set(this.clientId, this.me);
     this.emitLobby();
     if (this.channel) {
-      await this.channel.track(this.me);
+      if (this.channelSubscribed) {
+        this.sendBroadcast('peer_hello', { member: this.me, requestReply: false });
+        await this.trackPenaltyPresenceWithRetry(this.channel);
+      }
     } else if (this.localBc) {
       this.localPeers.set(this.clientId, { member: this.me, seenAt: Date.now() });
       this.localBc.postMessage({ event: 'presence_ping', payload: this.me });
@@ -1538,7 +2194,8 @@ export class PenaltyRoomController {
 
   /**
    * Event-Driven Guest Input for 6-Player Street Football:
-   * Transmits ONLY when quantized movement or button states change for `mySlot`!
+   * Transmits ONLY when quantized movement or button states change for `mySlot`,
+   * plus a 150ms Idle Echo Pulse on full release and 1.2s Keepalive while held!
    */
   sendFootballGuestInputOnChange(mySlot: FootballSlotId, rawInput: TeamControlInput): void {
     const quantized: TeamControlInput = {
@@ -1548,17 +2205,64 @@ export class PenaltyRoomController {
     };
     if (teamInputsEqual(this.lastSentFbInput, quantized)) return;
     this.lastSentFbInput = { ...quantized };
+    this.lastFbSlot = mySlot;
+    this.emitFootballInputPacket(mySlot, quantized);
+
+    const isNeutral =
+      quantized.moveX === 0 &&
+      quantized.moveZ === 0 &&
+      !quantized.shootCharging &&
+      !quantized.sprint;
+
+    if (this.fbIdleEchoTimer) {
+      clearTimeout(this.fbIdleEchoTimer);
+      this.fbIdleEchoTimer = null;
+    }
+
+    if (isNeutral) {
+      if (this.fbKeepaliveIv) {
+        clearInterval(this.fbKeepaliveIv);
+        this.fbKeepaliveIv = null;
+      }
+      this.fbIdleEchoTimer = setTimeout(() => {
+        this.fbIdleEchoTimer = null;
+        if (this.destroyed) return;
+        const cur = this.lastSentFbInput;
+        if (cur.moveX === 0 && cur.moveZ === 0 && !cur.shootCharging && !cur.sprint) {
+          this.emitFootballInputPacket(this.lastFbSlot, cur);
+        }
+      }, GUEST_IDLE_ECHO_DELAY_MS);
+    } else if (!this.fbKeepaliveIv) {
+      this.fbKeepaliveIv = setInterval(() => {
+        if (this.destroyed) return;
+        const cur = this.lastSentFbInput;
+        if (cur.moveX !== 0 || cur.moveZ !== 0 || cur.shootCharging || cur.sprint) {
+          this.emitFootballInputPacket(this.lastFbSlot, cur);
+        }
+      }, GUEST_HELD_KEEPALIVE_MS);
+    }
+  }
+
+  private emitFootballInputPacket(slot: FootballSlotId, inp: TeamControlInput): void {
     this.fbInputSeq += 1;
     const pkt: FootballGuestInputPacket = {
       clientId: this.clientId,
-      slot: mySlot,
+      slot,
       seq: this.fbInputSeq,
-      inp: quantized,
+      inp: { ...inp },
     };
     this.sendBroadcast('fb_input', pkt);
   }
 
   resetFootballInputCache(): void {
+    if (this.fbIdleEchoTimer) {
+      clearTimeout(this.fbIdleEchoTimer);
+      this.fbIdleEchoTimer = null;
+    }
+    if (this.fbKeepaliveIv) {
+      clearInterval(this.fbKeepaliveIv);
+      this.fbKeepaliveIv = null;
+    }
     this.lastSentFbInput = {
       moveX: 0,
       moveZ: 0,
@@ -1603,6 +2307,15 @@ export class PenaltyRoomController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.resetFootballInputCache();
+    if (this.hideYieldTimer) {
+      clearTimeout(this.hideYieldTimer);
+      this.hideYieldTimer = null;
+    }
+    if (this.cleanupVisListener) {
+      this.cleanupVisListener();
+      this.cleanupVisListener = null;
+    }
     if (this.localHeartbeatIv) {
       clearInterval(this.localHeartbeatIv);
       this.localHeartbeatIv = null;
@@ -1619,9 +2332,14 @@ export class PenaltyRoomController {
     if (this.channel || this.sb) {
       const sb = this.sb;
       const ch = this.channel;
+      const wasSub = this.channelSubscribed;
       this.channel = null;
       this.sb = null;
+      this.channelSubscribed = false;
       if (ch && sb) {
+        if (wasSub) {
+          ch.send({ type: 'broadcast', event: 'peer_bye', payload: { clientId: this.clientId } });
+        }
         void ch
           .untrack()
           .catch(() => { })

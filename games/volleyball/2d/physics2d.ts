@@ -428,6 +428,61 @@ export function checkMatchWinner(scoreBlue: number, scoreRed: number, winScore: 
  * Steps 1 physics tick (FIXED_DT = 1/60s) on the authoritative Host (or local Practice match).
  * NOTE: Strictly NO 3-touch rule per game design — teams may touch/volley freely on their side!
  */
+/**
+ * Steps ONLY the local player's 2D kinematics for immediate 60 FPS Client-side Prediction on Guest.
+ */
+export function stepLocal2dPlayer(p: PlayerState, inp: PlayerInput, dt: number): boolean {
+  let dived = false;
+  if (p.diveCooldown > 0) p.diveCooldown = Math.max(0, p.diveCooldown - dt);
+  if (p.spikeTimer > 0) p.spikeTimer = Math.max(0, p.spikeTimer - dt);
+  if (p.hitCooldown > 0) p.hitCooldown = Math.max(0, p.hitCooldown - dt);
+
+  const onGround = p.y >= GROUND_Y - 0.5;
+  if (p.diveTimer > 0) {
+    p.diveTimer = Math.max(0, p.diveTimer - dt);
+    p.vx = p.diveDir * DIVE_SPEED;
+  } else {
+    const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    p.vx = dir * PLAYER_MOVE_SPEED;
+    if (dir !== 0) {
+      p.facing = dir > 0 ? 1 : -1;
+      p.animPhase += dt * 15;
+    } else {
+      p.animPhase += dt * 3.5;
+    }
+
+    if (inp.jump && onGround) {
+      p.vy = PLAYER_JUMP_VY;
+    } else if (inp.action && onGround && p.diveCooldown <= 0) {
+      const diveDir: 1 | -1 = dir !== 0 ? (dir > 0 ? 1 : -1) : p.facing;
+      p.diveTimer = DIVE_DURATION;
+      p.diveCooldown = DIVE_COOLDOWN;
+      p.diveDir = diveDir;
+      p.facing = diveDir;
+      p.vy = -255;
+      dived = true;
+    }
+  }
+
+  p.vy += GRAVITY_PLAYER * dt;
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+
+  if (p.y >= GROUND_Y) {
+    p.y = GROUND_Y;
+    p.vy = 0;
+  }
+
+  const minX = p.team === 'blue' ? PLAYER_RADIUS : NET_X + NET_HALF_WIDTH + PLAYER_RADIUS;
+  const maxX =
+    p.team === 'blue'
+      ? NET_X - NET_HALF_WIDTH - PLAYER_RADIUS
+      : COURT_WIDTH - PLAYER_RADIUS;
+  if (p.x < minX) p.x = minX;
+  if (p.x > maxX) p.x = maxX;
+  return dived;
+}
+
 export function stepGamePhysics(
   state: MatchState,
   inputs: Partial<Record<PlayerSlot, PlayerInput>>,

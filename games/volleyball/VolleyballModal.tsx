@@ -20,6 +20,7 @@ import {
   createInitialMatchState,
   resetRallyPositions,
   stepVolleyballMatch,
+  stepLocalVolleyballPlayer,
   computeBotInput,
   playVbSound,
   VB_WIN_SCORE,
@@ -366,6 +367,7 @@ export function BeachVolleyballModal({
   const prevNetSnapRef = useRef<CompactNetState | null>(null);
   const currNetSnapRef = useRef<CompactNetState | null>(null);
   const currSnapRecvMsRef = useRef<number>(0);
+  const expectedSnapGapMsRef = useRef<number>(HOST_BROADCAST_INTERVAL_MS);
   const lastRecvSeqRef = useRef<number>(0);
   const lastRecvHostIdRef = useRef<string | null>(null);
 
@@ -402,6 +404,8 @@ export function BeachVolleyballModal({
   onRewardEarnedRef.current = onRewardEarned;
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const channelSubscribedRef = useRef<boolean>(false);
+  const broadcastPeersRef = useRef<Map<string, PresenceSlotMember>>(new Map());
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const bcRef = useRef<BroadcastChannel | null>(null);
   const mePresenceRef = useRef<PresenceSlotMember | null>(null);
@@ -414,9 +418,32 @@ export function BeachVolleyballModal({
     }, 4200);
   }, []);
 
+  const effectivePresenceMembers = useMemo<PresenceSlotMember[]>(() => {
+    if (isPractice || presenceMembers.some((m) => m.clientId === myClientIdRef.current)) {
+      return presenceMembers;
+    }
+    const me =
+      currentUserId != null
+        ? players.find((p) => p.id === currentUserId)
+        : undefined;
+    return [
+      {
+        clientId: myClientIdRef.current,
+        playerId: me?.id ?? 0,
+        name: me?.name ?? `ผู้เล่น #${myClientIdRef.current.slice(-3)}`,
+        emoji: me?.emoji ?? '🏐',
+        desiredSlot: 'L1',
+        slotUpdatedAt: 0,
+        ready: false,
+        joinedAt: 0,
+      },
+      ...presenceMembers,
+    ];
+  }, [presenceMembers, isPractice, currentUserId, players]);
+
   const lobbyResolved = useMemo(
-    () => resolvePresenceSlots(presenceMembers, mode),
-    [presenceMembers, mode]
+    () => resolvePresenceSlots(effectivePresenceMembers, mode),
+    [effectivePresenceMembers, mode]
   );
   currentHostIdRef.current = lobbyResolved.hostClientId;
 
@@ -430,8 +457,8 @@ export function BeachVolleyballModal({
   }, [lobbyResolved.slots]);
 
   const myPresenceEntry = useMemo(
-    () => presenceMembers.find((m) => m.clientId === myClientIdRef.current),
-    [presenceMembers]
+    () => effectivePresenceMembers.find((m) => m.clientId === myClientIdRef.current),
+    [effectivePresenceMembers]
   );
 
   const buildMatchRosterSnapshot = useCallback(
@@ -503,10 +530,11 @@ export function BeachVolleyballModal({
 
   const amIAssignedInConnectedLobby = useMemo(() => {
     if (!channelRef.current && !bcRef.current) return false;
+    if (!presenceMembers.some((m) => m.clientId === myClientIdRef.current)) return false;
     return Object.values(lobbyResolved.slots).some(
       (m) => m?.clientId === myClientIdRef.current
     );
-  }, [lobbyResolved.slots]);
+  }, [presenceMembers, lobbyResolved.slots]);
 
   const externalLockedMatch = useMemo<VbLobbyBroadcastInfo | null>(() => {
     if (screen === 'playing') return null;
@@ -928,16 +956,6 @@ export function BeachVolleyballModal({
       const sl = st ? st.scoreLeft : scoreLeft;
       const sr = st ? st.scoreRight : scoreRight;
       broadcastActiveMatchToIslandRef.current(sl, sr, 'started');
-      if (!isPracticeRef.current && amIMatchHostRef.current) {
-        const roster = buildMatchRosterSnapshot(activeMatchSlotsRef.current, modeRef.current, st);
-        void updateMyPresenceRef.current({
-          inMatch: true,
-          matchMode: modeRef.current,
-          scoreLeft: sl,
-          scoreRight: sr,
-          matchRoster: roster,
-        });
-      }
     };
     emitLiveMatch();
     const hb = setInterval(emitLiveMatch, 4500);
@@ -963,19 +981,24 @@ export function BeachVolleyballModal({
   useEffect(() => {
     if (!isOpen || !roomCode || skipRoomConnection) return;
 
-    const me = playersRef.current.find((p) => p.id === currentUserId) || playersRef.current[0];
+    const me =
+      currentUserId != null
+        ? playersRef.current.find((p) => p.id === currentUserId)
+        : undefined;
     const now = Date.now();
     const myPresence: PresenceSlotMember = {
       clientId: myClientIdRef.current,
       playerId: me?.id ?? 0,
-      name: me?.name ?? 'ผู้กล้า',
-      emoji: me?.emoji ?? '🐰',
+      name: me?.name ?? `ผู้เล่น #${myClientIdRef.current.slice(-3)}`,
+      emoji: me?.emoji ?? '🏐',
       desiredSlot: 'L1',
       slotUpdatedAt: now,
       ready: false,
       joinedAt: now,
     };
     mePresenceRef.current = myPresence;
+    broadcastPeersRef.current.clear();
+    channelSubscribedRef.current = false;
     setPresenceMembers([myPresence]);
 
     let destroyed = false;
@@ -1033,9 +1056,18 @@ export function BeachVolleyballModal({
         lastRecvSeqRef.current = snap.seq;
         if (snap.hid) lastRecvHostIdRef.current = snap.hid;
 
-        prevNetSnapRef.current = currNetSnapRef.current || snap;
+        const nowPerf = performance.now();
+        if (currNetSnapRef.current) {
+          const gap = nowPerf - currSnapRecvMsRef.current;
+          if (gap >= 25 && gap <= 130) {
+            expectedSnapGapMsRef.current = expectedSnapGapMsRef.current * 0.75 + gap * 0.25;
+          }
+          prevNetSnapRef.current = currNetSnapRef.current;
+        } else {
+          prevNetSnapRef.current = snap;
+        }
         currNetSnapRef.current = snap;
-        currSnapRecvMsRef.current = performance.now();
+        currSnapRecvMsRef.current = nowPerf;
 
         setScoreLeft((prev) => (prev !== snap.sl ? snap.sl : prev));
         setScoreRight((prev) => (prev !== snap.sr ? snap.sr : prev));
@@ -1124,20 +1156,26 @@ export function BeachVolleyballModal({
       const syncFromPresence = () => {
         if (destroyed) return;
         const state = ch.presenceState<PresenceSlotMember>();
-        const list: PresenceSlotMember[] = [];
-        const seen = new Set<string>();
+        const mergedMap = new Map<string, PresenceSlotMember>();
+        for (const [cid, bPeer] of broadcastPeersRef.current.entries()) {
+          mergedMap.set(cid, bPeer);
+        }
         for (const arr of Object.values(state)) {
           if (Array.isArray(arr) && arr.length > 0) {
             const latest = arr[arr.length - 1];
-            if (latest?.clientId && !seen.has(latest.clientId)) {
-              seen.add(latest.clientId);
-              list.push(latest);
+            if (latest?.clientId) {
+              const cached = broadcastPeersRef.current.get(latest.clientId);
+              const newer =
+                cached && cached.slotUpdatedAt > latest.slotUpdatedAt ? cached : latest;
+              mergedMap.set(latest.clientId, newer);
+              broadcastPeersRef.current.set(latest.clientId, newer);
             }
           }
         }
-        if (!seen.has(myPresence.clientId) && mePresenceRef.current) {
-          list.push(mePresenceRef.current);
+        if (mePresenceRef.current) {
+          mergedMap.set(myPresence.clientId, mePresenceRef.current);
         }
+        const list = Array.from(mergedMap.values());
 
         const nextResolved = applyMemberListAndMigrate(list);
         if (nextResolved.hostClientId === myClientIdRef.current) {
@@ -1146,15 +1184,46 @@ export function BeachVolleyballModal({
       };
 
       ch.on('presence', { event: 'sync' }, syncFromPresence)
+        .on('presence', { event: 'join' }, syncFromPresence)
         .on('presence', { event: 'leave' }, ({ leftPresences }) => {
           if (destroyed) return;
-          syncFromPresence();
           const leftArr = (leftPresences || []) as unknown as PresenceSlotMember[];
+          for (const lp of leftArr) {
+            if (lp?.clientId) broadcastPeersRef.current.delete(lp.clientId);
+          }
+          syncFromPresence();
           for (const left of leftArr) {
             if (!left?.clientId || left.clientId === myClientIdRef.current) continue;
             showRoomToast(`⚠️ ${left.emoji} ${left.name} ออกจากห้อง`);
-            // If mid-match, let smart AI bot take over the disconnected slot so 2v2 never freezes!
             markPeerBotMidMatch(left.clientId);
+          }
+        })
+        .on('broadcast', { event: 'peer_hello' }, ({ payload }) => {
+          if (destroyed || !payload) return;
+          const p = payload as { member?: PresenceSlotMember; requestReply?: boolean };
+          if (p.member?.clientId && p.member.clientId !== myClientIdRef.current) {
+            broadcastPeersRef.current.set(p.member.clientId, p.member);
+            syncFromPresence();
+            if (p.requestReply && mePresenceRef.current) {
+              ch.send({
+                type: 'broadcast',
+                event: 'peer_hello',
+                payload: { member: mePresenceRef.current, requestReply: false },
+              });
+            }
+          }
+        })
+        .on('broadcast', { event: 'peer_bye' }, ({ payload }) => {
+          if (destroyed || !payload) return;
+          const cid = String((payload as { clientId?: string }).clientId || '');
+          if (cid && cid !== myClientIdRef.current) {
+            const departed = broadcastPeersRef.current.get(cid);
+            broadcastPeersRef.current.delete(cid);
+            syncFromPresence();
+            if (departed) {
+              showRoomToast(`⚠️ ${departed.emoji} ${departed.name} ออกจากห้อง`);
+              markPeerBotMidMatch(cid);
+            }
           }
         })
         .on('broadcast', { event: 'room_mode' }, ({ payload }) => handleBroadcastEvent('room_mode', payload))
@@ -1164,8 +1233,24 @@ export function BeachVolleyballModal({
         .on('broadcast', { event: 'vb_input' }, ({ payload }) => handleBroadcastEvent('vb_input', payload))
         .on('broadcast', { event: 'vb_state' }, ({ payload }) => handleBroadcastEvent('vb_state', payload))
         .subscribe(async (status) => {
-          if (!destroyed && status === 'SUBSCRIBED' && mePresenceRef.current) {
-            await ch.track(mePresenceRef.current);
+          if (destroyed) return;
+          if (status === 'SUBSCRIBED' && mePresenceRef.current) {
+            channelSubscribedRef.current = true;
+            ch.send({
+              type: 'broadcast',
+              event: 'peer_hello',
+              payload: { member: mePresenceRef.current, requestReply: true },
+            });
+            const res = await ch.track(mePresenceRef.current);
+            if (res !== 'ok' && !destroyed) {
+              setTimeout(() => {
+                if (!destroyed && channelSubscribedRef.current && mePresenceRef.current) {
+                  void ch.track(mePresenceRef.current);
+                }
+              }, 750);
+            }
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            channelSubscribedRef.current = false;
           }
         });
 
@@ -1258,9 +1343,18 @@ export function BeachVolleyballModal({
       }
       const sb = supabaseRef.current;
       const ch = channelRef.current;
+      const wasSub = channelSubscribedRef.current;
       supabaseRef.current = null;
       channelRef.current = null;
+      channelSubscribedRef.current = false;
       if (ch && sb) {
+        if (wasSub) {
+          ch.send({
+            type: 'broadcast',
+            event: 'peer_bye',
+            payload: { clientId: myClientIdRef.current },
+          });
+        }
         void ch
           .untrack()
           .catch(() => { })
@@ -1295,7 +1389,12 @@ export function BeachVolleyballModal({
       setPresenceMembers((prev) =>
         prev.map((m) => (m.clientId === updated.clientId ? updated : m))
       );
-      if (channelRef.current) {
+      if (channelRef.current && channelSubscribedRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'peer_hello',
+          payload: { member: updated, requestReply: false },
+        });
         await channelRef.current.track(updated);
       }
       if (bcRef.current) {
@@ -1305,6 +1404,26 @@ export function BeachVolleyballModal({
     []
   );
   updateMyPresenceRef.current = updateMyPresence;
+
+  // Keep waiting-room identity synced if `players` loads slightly after modal opens
+  const myHydratedPlayer =
+    currentUserId != null ? players.find((p) => p.id === currentUserId) : undefined;
+  useEffect(() => {
+    if (!isOpen || !myHydratedPlayer || !mePresenceRef.current) return;
+    if (
+      mePresenceRef.current.playerId !== myHydratedPlayer.id ||
+      mePresenceRef.current.name !== myHydratedPlayer.name ||
+      mePresenceRef.current.emoji !== myHydratedPlayer.emoji
+    ) {
+      mePresenceRef.current = {
+        ...mePresenceRef.current,
+        playerId: myHydratedPlayer.id,
+        name: myHydratedPlayer.name,
+        emoji: myHydratedPlayer.emoji,
+      };
+      void updateMyPresenceRef.current({});
+    }
+  }, [isOpen, myHydratedPlayer?.id, myHydratedPlayer?.name, myHydratedPlayer?.emoji]);
 
   // Event-Driven Local Input Updater: Guests transmit ONLY on keydown/keyup transitions!
   const applyInputChange = useCallback(
@@ -1837,8 +1956,30 @@ export function BeachVolleyballModal({
           pendingEv = undefined;
         }
       } else {
-        // Guest: Smooth 60 FPS Client-Side Linear Interpolation (Lerp) between 20Hz Host Snapshots!
+        // Guest:
+        // 1) Immediate 60 FPS Client-Side Prediction for Local Player (0ms input delay!)
+        // 2) Smooth Reconciliation with Host snapshot (lerp on small drift, snap only on rally reset)
+        // 3) 60 FPS Linear Interpolation (Lerp) + velocity bridge for Ball & Remote Players!
         const curr = currNetSnapRef.current;
+        const myLocalPl = st.players.find((p) => p.slotId === activeMySlot && !p.isBot);
+        if (myLocalPl && st.phase !== 'finished' && st.phase !== 'point_pause') {
+          physAccum += delta;
+          while (physAccum >= FIXED_DT) {
+            physAccum -= FIXED_DT;
+            const dived = stepLocalVolleyballPlayer(
+              myLocalPl,
+              localInputRef.current,
+              st.court,
+              FIXED_DT
+            );
+            if (dived) {
+              playVbSound('dive', mutedRef.current);
+            }
+          }
+        } else {
+          physAccum = 0;
+        }
+
         if (curr) {
           const prev = prevNetSnapRef.current || curr;
           st.phase = curr.ph;
@@ -1850,8 +1991,9 @@ export function BeachVolleyballModal({
           st.winner = curr.w;
           st.ball.isSpiked = curr.bsp;
 
+          const windowMs = Math.max(42, Math.min(85, expectedSnapGapMsRef.current));
           const elapsedSnapMs = Math.max(0, nowMs - currSnapRecvMsRef.current);
-          const alpha = elapsedSnapMs / 55;
+          const alpha = elapsedSnapMs / windowMs;
           const teleported =
             Math.hypot(curr.bx - prev.bx, curr.by - prev.by) > 4.2 ||
             (curr.ph === 'serve_wait' && prev.ph !== 'serve_wait');
@@ -1863,7 +2005,7 @@ export function BeachVolleyballModal({
             st.ball.x = prev.bx + (curr.bx - prev.bx) * alpha;
             st.ball.y = prev.by + (curr.by - prev.by) * alpha;
           } else {
-            const extraSec = Math.min(0.055, (elapsedSnapMs - 55) / 1000);
+            const extraSec = Math.min(0.055, (elapsedSnapMs - windowMs) / 1000);
             st.ball.x = Math.max(
               -court.halfWidth + court.ballRadius,
               Math.min(court.halfWidth - court.ballRadius, curr.bx + curr.bvx * extraSec)
@@ -1877,6 +2019,40 @@ export function BeachVolleyballModal({
           for (const np of curr.pl) {
             const lp = st.players.find((p) => p.slotId === np.s);
             if (!lp) continue;
+            lp.isBot = np.bot === 1;
+            lp.spikeFlash = np.sf;
+
+            if (lp.slotId === activeMySlot && !lp.isBot) {
+              // Reconcile predicted local player smoothly against authoritative Host position
+              const extraHostSec = Math.min(0.05, elapsedSnapMs / 1000);
+              const authX = Math.max(
+                lp.team === 'left'
+                  ? -court.halfWidth + court.playerRadius
+                  : court.netHalfThickness + court.playerRadius,
+                Math.min(
+                  lp.team === 'left'
+                    ? -court.netHalfThickness - court.playerRadius
+                    : court.halfWidth - court.playerRadius,
+                  np.x + np.vx * extraHostSec
+                )
+              );
+              const authY = Math.max(0, np.y + np.vy * extraHostSec);
+              const errDist = Math.hypot(authX - lp.x, authY - lp.y);
+              const isRallyReset = curr.ph === 'serve_wait' && prev.ph !== 'serve_wait';
+
+              if (isRallyReset || errDist > 1.85) {
+                lp.x = np.x;
+                lp.y = Math.max(0, np.y);
+                lp.vx = np.vx;
+                lp.vy = np.vy;
+              } else if (errDist > 0.12) {
+                const corr = 1 - Math.exp(-12 * delta);
+                lp.x += (authX - lp.x) * corr;
+                lp.y = Math.max(0, lp.y + (authY - lp.y) * corr);
+              }
+              continue;
+            }
+
             const pp = prev.pl.find((p) => p.s === np.s) || np;
             const pTeleported =
               Math.hypot(np.x - pp.x, np.y - pp.y) > 3.5 ||
@@ -1889,7 +2065,7 @@ export function BeachVolleyballModal({
               lp.x = pp.x + (np.x - pp.x) * alpha;
               lp.y = Math.max(0, pp.y + (np.y - pp.y) * alpha);
             } else {
-              const extraSec = Math.min(0.05, (elapsedSnapMs - 55) / 1000);
+              const extraSec = Math.min(0.05, (elapsedSnapMs - windowMs) / 1000);
               lp.x = np.x + np.vx * extraSec;
               lp.y = Math.max(0, np.y + np.vy * extraSec);
             }
@@ -1898,8 +2074,6 @@ export function BeachVolleyballModal({
             lp.facing = np.f;
             lp.diveTimer = np.dt;
             lp.diveDir = np.dd;
-            lp.spikeFlash = np.sf;
-            lp.isBot = np.bot === 1;
           }
         }
       }
@@ -2234,47 +2408,38 @@ export function BeachVolleyballModal({
         </div>
       ) : screen === 'waiting' ? (
         <div className="w-full h-dvh overflow-y-auto flex items-center justify-center p-3 sm:p-5 pt-safe pb-safe">
-          <div className="rpg-stone-frame rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-3.5 relative my-auto">
-            <button
-              type="button"
-              onClick={handleCloseToIsland}
-              className="absolute top-3 right-3 w-9 h-9 bg-rose-600 hover:bg-rose-500 text-white border-2 border-amber-300 rounded-xl font-extrabold cursor-pointer"
-            >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-2.5 pr-10">
-              <div className="w-11 h-11 rounded-xl bg-amber-400 border-2 border-white flex items-center justify-center text-2xl shadow">
-                🏐
-              </div>
-              <div>
-                <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-2xl font-extrabold text-amber-300 leading-tight">
-                  ตี้วอลเลย์บอลชายหาด 3D
-                </h2>
-                <p className="text-[11px] sm:text-xs text-amber-100/80 font-semibold">
-                  ใช้ตัวละคร 3D ของคุณลงสนาม • แข่ง {VB_WIN_SCORE} แต้ม Win-by-2 (ชนะรับ +5 💰)
-                </p>
-              </div>
-            </div>
-
-            {/* Single Shared Island Court Notice + Leaderboard */}
-            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-amber-500/40 rounded-xl px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-lg bg-amber-400 text-slate-950 text-xs font-black">
-                  🏝️ สนามเดียวของเกาะ
-                </span>
-                <span className="text-[11px] font-bold text-amber-100/90">
-                  เล่นได้ทีละ 1 รอบ (เผื่อโควตาให้กิจกรรมอื่น)
-                </span>
+          <div className="rpg-stone-frame rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-3 relative my-auto">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-400 border-2 border-white flex items-center justify-center text-xl shadow shrink-0">
+                  🏐
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-xl font-extrabold text-amber-300 leading-tight truncate">
+                    วอลเลย์บอลชายหาด 3D
+                  </h2>
+                  <p className="text-[11px] text-emerald-300 font-bold">
+                    ออนไลน์ {joinedCount}/{maxPlayers} คน • {VB_WIN_SCORE} แต้ม • ชนะ +5 💰
+                  </p>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setScreen('leaderboard')}
-                className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/60 text-[11px] font-extrabold text-amber-200 hover:bg-amber-400 hover:text-black cursor-pointer"
-              >
-                🏆 อันดับ
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setScreen('leaderboard')}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400/60 text-xs font-extrabold text-amber-200 hover:bg-amber-400 hover:text-black cursor-pointer"
+                >
+                  🏆 อันดับ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseToIsland}
+                  className="w-9 h-9 bg-rose-600 hover:bg-rose-500 text-white border-2 border-amber-300 rounded-xl font-extrabold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Host Mode Switcher (1v1 / 2v2) */}
@@ -2296,30 +2461,13 @@ export function BeachVolleyballModal({
                     sendBroadcast('room_mode', { mode: opt.id });
                   }}
                   className={`flex-1 py-2 rounded-lg text-xs font-extrabold cursor-pointer transition disabled:cursor-default ${mode === opt.id
-                      ? 'rpg-btn-gold'
-                      : 'text-amber-100/75 hover:bg-slate-800 disabled:hover:bg-transparent'
+                    ? 'rpg-btn-gold'
+                    : 'text-amber-100/75 hover:bg-slate-800 disabled:hover:bg-transparent'
                     }`}
                 >
                   {opt.label}
                 </button>
               ))}
-            </div>
-
-            {/* Live Presence Waiting Status */}
-            <div
-              className={`border-2 rounded-xl p-2.5 text-center space-y-0.5 ${lobbyResolved.allReady
-                  ? 'bg-emerald-950/75 border-emerald-400/80'
-                  : 'bg-sky-950/75 border-sky-400/70'
-                }`}
-            >
-              <div className="font-[family-name:var(--font-kanit)] text-sm sm:text-base font-extrabold text-amber-300">
-                {lobbyResolved.allReady
-                  ? `✅ ทุกคนพร้อมแล้ว! (${joinedCount}/${maxPlayers} คน)`
-                  : `🟢 ออนไลน์ในห้องรอ (${joinedCount}/${maxPlayers} คน) • เลือกฝั่งแล้วกด Ready!`}
-              </div>
-              <div className="text-[11px] text-sky-200 font-semibold">
-                เพื่อนเดินเข้าสนามวอลเลย์บอลบนเกาะแล้วกดเข้าห้อง จะมาโผล่ในห้องรอนี้อัตโนมัติ!
-              </div>
             </div>
 
             {/* Team Slots Display & Picker: Blue Left (L1, L2) vs Red Right (R1, R2) */}
@@ -2336,10 +2484,10 @@ export function BeachVolleyballModal({
                     <div
                       key={sid}
                       className={`rounded-xl p-2.5 border text-center space-y-1 ${m
-                          ? isMe
-                            ? 'bg-sky-500/25 border-amber-300 text-sky-100'
-                            : 'bg-sky-500/15 border-sky-400/70 text-sky-100'
-                          : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
+                        ? isMe
+                          ? 'bg-sky-500/25 border-amber-300 text-sky-100'
+                          : 'bg-sky-500/15 border-sky-400/70 text-sky-100'
+                        : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
                         }`}
                     >
                       {m ? (
@@ -2384,10 +2532,10 @@ export function BeachVolleyballModal({
                     <div
                       key={sid}
                       className={`rounded-xl p-2.5 border text-center space-y-1 ${m
-                          ? isMe
-                            ? 'bg-rose-500/25 border-amber-300 text-rose-100'
-                            : 'bg-rose-500/15 border-rose-400/70 text-rose-100'
-                          : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
+                        ? isMe
+                          ? 'bg-rose-500/25 border-amber-300 text-rose-100'
+                          : 'bg-rose-500/15 border-rose-400/70 text-rose-100'
+                        : 'bg-slate-950/70 border-dashed border-slate-600 text-slate-400'
                         }`}
                     >
                       {m ? (
@@ -2458,8 +2606,8 @@ export function BeachVolleyballModal({
                   void updateMyPresence({ ready: !myPresenceEntry?.ready })
                 }
                 className={`w-full font-[family-name:var(--font-kanit)] py-3 rounded-xl text-sm sm:text-base font-extrabold cursor-pointer transition ${myPresenceEntry?.ready
-                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-2 border-white'
-                    : 'rpg-btn-gold'
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-2 border-white'
+                  : 'rpg-btn-gold'
                   }`}
               >
                 {myPresenceEntry?.ready
@@ -2485,8 +2633,8 @@ export function BeachVolleyballModal({
                       type="button"
                       onClick={() => setBotDifficulty(d.id)}
                       className={`px-2 py-0.5 rounded text-[11px] font-extrabold cursor-pointer ${botDifficulty === d.id
-                          ? 'bg-emerald-400 text-slate-950'
-                          : 'bg-slate-800 text-slate-300'
+                        ? 'bg-emerald-400 text-slate-950'
+                        : 'bg-slate-800 text-slate-300'
                         }`}
                     >
                       {d.label}

@@ -13,6 +13,12 @@ import {
 } from '@/lib/device_perf';
 import { sessionFetch } from '@/lib/client_session';
 import {
+  GUEST_HELD_KEEPALIVE_MS,
+  GUEST_IDLE_ECHO_DELAY_MS,
+  GuestInputWatchdog,
+  createBackgroundHostTicker,
+} from '@/games/shared/realtimeSync';
+import {
   DOHYO_RING_RADIUS,
   resolveSumoRank,
   stepSumoRingPhysics,
@@ -337,6 +343,43 @@ export function SumoArenaModal({
     right: boolean;
     brace: boolean;
   }>({ up: false, down: false, left: false, right: false, brace: false });
+  const lastSentInputSigRef = useRef<string>('0,0,0,0,0');
+  const remoteGuestInputRef = useRef<{
+    up: boolean;
+    down: boolean;
+    left: boolean;
+    right: boolean;
+    brace: boolean;
+  }>({ up: false, down: false, left: false, right: false, brace: false });
+  const sumoWatchdogRef = useRef<
+    GuestInputWatchdog<
+      'p2',
+      { up: boolean; down: boolean; left: boolean; right: boolean; brace: boolean }
+    >
+  >(new GuestInputWatchdog());
+  const sumoIdleEchoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sumoKeepaliveIvRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  interface SumoNetSnap {
+    seq: number;
+    p1x: number;
+    p1z: number;
+    p1vx: number;
+    p1vz: number;
+    p1r: number;
+    p1b: boolean;
+    p2x: number;
+    p2z: number;
+    p2vx: number;
+    p2vz: number;
+    p2r: number;
+    p2b: boolean;
+  }
+  const prevSumoSnapRef = useRef<SumoNetSnap | null>(null);
+  const currSumoSnapRef = useRef<SumoNetSnap | null>(null);
+  const currSumoSnapRecvMsRef = useRef<number>(0);
+  const sumoSnapSeqRef = useRef<number>(0);
+  const lastRecvSumoSeqRef = useRef<number>(0);
 
   const bodiesRef = useRef<{
     p1: SumoFighterBody & { attackPose: SumoMoveId | null; poseUntil: number; ringOutFall: number };
@@ -563,11 +606,21 @@ export function SumoArenaModal({
     }
   }, [isOpen, fetchSumoProgress]);
 
+  // Only tick cooldown state when at least one skill is actually cooling down (avoids 11Hz idle React re-renders!)
   useEffect(() => {
     if (modeState !== 'fighting') return;
-    const iv = setInterval(() => setNowTick(Date.now()), 90);
+    const maxCd = Math.max(cdTsuppariUntil, cdYorikiriUntil, cdShikoUntil);
+    if (maxCd <= Date.now()) return;
+    setNowTick(Date.now());
+    const iv = setInterval(() => {
+      const now = Date.now();
+      setNowTick(now);
+      if (now >= maxCd) {
+        clearInterval(iv);
+      }
+    }, 100);
     return () => clearInterval(iv);
-  }, [modeState]);
+  }, [modeState, cdTsuppariUntil, cdYorikiriUntil, cdShikoUntil]);
 
   const buildMyFighterProfile = useCallback((): SumoFighterProfile => {
     const me = players.find((p) => p.id === currentUserId);
@@ -661,6 +714,11 @@ export function SumoArenaModal({
       updatedAt: performance.now(),
     };
     inputRef.current = { up: false, down: false, left: false, right: false, brace: false };
+    remoteGuestInputRef.current = { up: false, down: false, left: false, right: false, brace: false };
+    lastSentInputSigRef.current = '0,0,0,0,0';
+    prevSumoSnapRef.current = null;
+    currSumoSnapRef.current = null;
+    lastRecvSumoSeqRef.current = 0;
     setCdTsuppariUntil(0);
     setCdYorikiriUntil(0);
     setCdShikoUntil(0);
@@ -675,6 +733,53 @@ export function SumoArenaModal({
       // ignore
     }
   }, []);
+
+  // Event-driven Guest input sender: transmits ONLY on keydown/keyup or touch button press/release,
+  // plus 150ms Idle Echo Pulse on full release & 1.2s Keepalive while held!
+  const setLocalSumoInputField = useCallback(
+    (field: 'up' | 'down' | 'left' | 'right' | 'brace', val: boolean) => {
+      if (inputRef.current[field] === val) return;
+      inputRef.current[field] = val;
+      if (isBotMatchRef.current || mySideRef.current === 'p1' || modeStateRef.current !== 'fighting') {
+        return;
+      }
+      const inp = inputRef.current;
+      const sig = `${inp.up ? 1 : 0},${inp.down ? 1 : 0},${inp.left ? 1 : 0},${inp.right ? 1 : 0},${inp.brace ? 1 : 0}`;
+      if (sig === lastSentInputSigRef.current) return;
+      lastSentInputSigRef.current = sig;
+      broadcastPvpPacket('sumo_input', { ...inp });
+
+      const isNeutral = !inp.up && !inp.down && !inp.left && !inp.right && !inp.brace;
+      if (sumoIdleEchoRef.current) {
+        clearTimeout(sumoIdleEchoRef.current);
+        sumoIdleEchoRef.current = null;
+      }
+      if (isNeutral) {
+        if (sumoKeepaliveIvRef.current) {
+          clearInterval(sumoKeepaliveIvRef.current);
+          sumoKeepaliveIvRef.current = null;
+        }
+        sumoIdleEchoRef.current = setTimeout(() => {
+          sumoIdleEchoRef.current = null;
+          const cur = inputRef.current;
+          if (!cur.up && !cur.down && !cur.left && !cur.right && !cur.brace) {
+            broadcastPvpPacket('sumo_input', { ...cur });
+          }
+        }, GUEST_IDLE_ECHO_DELAY_MS);
+      } else if (!sumoKeepaliveIvRef.current) {
+        sumoKeepaliveIvRef.current = setInterval(() => {
+          if (isBotMatchRef.current || mySideRef.current === 'p1' || modeStateRef.current !== 'fighting') {
+            return;
+          }
+          const cur = inputRef.current;
+          if (cur.up || cur.down || cur.left || cur.right || cur.brace) {
+            broadcastPvpPacket('sumo_input', { ...cur });
+          }
+        }, GUEST_HELD_KEEPALIVE_MS);
+      }
+    },
+    [broadcastPvpPacket]
+  );
 
   const submitMatchResult = useCallback(
     async (didWin: boolean, xpAmount: number) => {
@@ -964,6 +1069,38 @@ export function SumoArenaModal({
             roundFrozenRef.current = false;
             setBanner(null);
           }, 900);
+        } else if (event === 'sumo_input' && mySideRef.current === 'p1') {
+          const nextG = {
+            up: Boolean(payload.up),
+            down: Boolean(payload.down),
+            left: Boolean(payload.left),
+            right: Boolean(payload.right),
+            brace: Boolean(payload.brace),
+          };
+          remoteGuestInputRef.current = nextG;
+          sumoWatchdogRef.current.record('p2', nextG, performance.now());
+        } else if (event === 'sumo_state' && mySideRef.current === 'p2') {
+          const seq = Number(payload.seq || 0);
+          if (seq <= lastRecvSumoSeqRef.current) return;
+          lastRecvSumoSeqRef.current = seq;
+          const snap: SumoNetSnap = {
+            seq,
+            p1x: Number(payload.p1x ?? -1.42),
+            p1z: Number(payload.p1z ?? 0),
+            p1vx: Number(payload.p1vx ?? 0),
+            p1vz: Number(payload.p1vz ?? 0),
+            p1r: Number(payload.p1r ?? 0),
+            p1b: Boolean(payload.p1b),
+            p2x: Number(payload.p2x ?? 1.42),
+            p2z: Number(payload.p2z ?? 0),
+            p2vx: Number(payload.p2vx ?? 0),
+            p2vz: Number(payload.p2vz ?? 0),
+            p2r: Number(payload.p2r ?? Math.PI),
+            p2b: Boolean(payload.p2b),
+          };
+          prevSumoSnapRef.current = currSumoSnapRef.current || snap;
+          currSumoSnapRef.current = snap;
+          currSumoSnapRecvMsRef.current = performance.now();
         } else if (event === 'pos_sync') {
           remoteTargetRef.current = {
             x: Number(payload.x ?? 0),
@@ -1002,31 +1139,41 @@ export function SumoArenaModal({
       const sbKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       if (sbUrl && sbKey) {
         const sb = createClient(sbUrl, sbKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          realtime: { params: { eventsPerSecond: 40 } },
         });
         sbRef.current = sb;
         const ch = sb.channel(`waist-sumo-pvp-${clean}`, {
-          config: { presence: { key: meProf.clientId } },
+          config: {
+            presence: { key: meProf.clientId },
+            broadcast: { self: false, ack: false },
+          },
         });
         channelRef.current = ch;
 
         ch.on('presence', { event: 'sync' }, () => {
           const state = ch.presenceState();
-          const activeIds = new Set<string>([meProf.clientId]);
           Object.values(state).forEach((entries) => {
             const entry = entries[0] as unknown as
               | (SumoFighterProfile & { joinedAt: number })
               | undefined;
             if (entry?.clientId) {
-              activeIds.add(entry.clientId);
               peerMap.set(entry.clientId, entry);
             }
           });
-          for (const cid of Array.from(peerMap.keys())) {
-            if (!activeIds.has(cid)) {
-              handlePeerDeparture(cid);
+          syncLobbyPeers();
+        });
+
+        ch.on('presence', { event: 'join' }, () => {
+          const state = ch.presenceState();
+          Object.values(state).forEach((entries) => {
+            const entry = entries[0] as unknown as
+              | (SumoFighterProfile & { joinedAt: number })
+              | undefined;
+            if (entry?.clientId) {
+              peerMap.set(entry.clientId, entry);
             }
-          }
+          });
           syncLobbyPeers();
         });
 
@@ -1042,6 +1189,8 @@ export function SumoArenaModal({
           'hello_peer',
           'bye_peer',
           'start_pvp_match',
+          'sumo_input',
+          'sumo_state',
           'pos_sync',
           'sumo_move',
           'ring_out',
@@ -1113,16 +1262,28 @@ export function SumoArenaModal({
     }, 900);
   }, [broadcastPvpPacket, p1Profile, p2Profile, playSumoSfx, resetRoundPositions]);
 
-  // Keyboard Controls during fighting
+  // Keyboard Controls during fighting (Event-driven keydown/keyup!)
   useEffect(() => {
     if (!isOpen || modeState !== 'fighting') return;
     const onKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (k === 'w' || e.key === 'ArrowUp') inputRef.current.up = true;
-      if (k === 's' || e.key === 'ArrowDown') inputRef.current.down = true;
-      if (k === 'a' || e.key === 'ArrowLeft') inputRef.current.left = true;
-      if (k === 'd' || e.key === 'ArrowRight') inputRef.current.right = true;
-      if (e.key === 'Shift') inputRef.current.brace = true;
+      if (k === 'w' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setLocalSumoInputField('up', true);
+      }
+      if (k === 's' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setLocalSumoInputField('down', true);
+      }
+      if (k === 'a' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setLocalSumoInputField('left', true);
+      }
+      if (k === 'd' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        setLocalSumoInputField('right', true);
+      }
+      if (e.key === 'Shift') setLocalSumoInputField('brace', true);
 
       if (e.repeat) return;
       if (e.code === 'Space' || k === 'j') {
@@ -1138,19 +1299,41 @@ export function SumoArenaModal({
     };
     const onKeyUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (k === 'w' || e.key === 'ArrowUp') inputRef.current.up = false;
-      if (k === 's' || e.key === 'ArrowDown') inputRef.current.down = false;
-      if (k === 'a' || e.key === 'ArrowLeft') inputRef.current.left = false;
-      if (k === 'd' || e.key === 'ArrowRight') inputRef.current.right = false;
-      if (e.key === 'Shift') inputRef.current.brace = false;
+      if (k === 'w' || e.key === 'ArrowUp') setLocalSumoInputField('up', false);
+      if (k === 's' || e.key === 'ArrowDown') setLocalSumoInputField('down', false);
+      if (k === 'a' || e.key === 'ArrowLeft') setLocalSumoInputField('left', false);
+      if (k === 'd' || e.key === 'ArrowRight') setLocalSumoInputField('right', false);
+      if (e.key === 'Shift') setLocalSumoInputField('brace', false);
+    };
+    const onBlur = () => {
+      setLocalSumoInputField('up', false);
+      setLocalSumoInputField('down', false);
+      setLocalSumoInputField('left', false);
+      setLocalSumoInputField('right', false);
+      setLocalSumoInputField('brace', false);
+    };
+    const onVis = () => {
+      if (document.hidden) onBlur();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVis);
+      if (sumoIdleEchoRef.current) {
+        clearTimeout(sumoIdleEchoRef.current);
+        sumoIdleEchoRef.current = null;
+      }
+      if (sumoKeepaliveIvRef.current) {
+        clearInterval(sumoKeepaliveIvRef.current);
+        sumoKeepaliveIvRef.current = null;
+      }
     };
-  }, [executeSumoMove, isOpen, modeState]);
+  }, [executeSumoMove, isOpen, modeState, setLocalSumoInputField]);
 
   // 3D Sumo Dohyo Renderer & 60 FPS Physics Loop
   useEffect(() => {
@@ -1336,20 +1519,17 @@ export function SumoArenaModal({
     let lastNetSendAt = 0;
     let lastBotActionAt = 0;
 
-    const animate = () => {
-      frameId = requestAnimationFrame(animate);
-      const dt = Math.min(0.05, clock.getDelta());
-      const elapsed = clock.elapsedTime;
-      const nowPerf = performance.now();
-
-      // Gentle snowfall
-      const sAttr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
-      for (let i = 0; i < snowCount; i++) {
-        let sy = sAttr.getY(i) - 0.028;
-        if (sy < -0.5) sy = 7.5;
-        sAttr.setY(i, sy);
+    const stepSumoTick = (dt: number, elapsed: number, nowPerf: number, skipWebgl: boolean) => {
+      if (!skipWebgl) {
+        // Gentle snowfall
+        const sAttr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 0; i < snowCount; i++) {
+          let sy = sAttr.getY(i) - 0.028;
+          if (sy < -0.5) sy = 7.5;
+          sAttr.setY(i, sy);
+        }
+        sAttr.needsUpdate = true;
       }
-      sAttr.needsUpdate = true;
 
       const b1 = bodiesRef.current.p1;
       const b2 = bodiesRef.current.p2;
@@ -1407,38 +1587,52 @@ export function SumoArenaModal({
               executeSumoMove('p2', 'tsuppari', true);
             }
           }
-        } else {
-          // Live PvP: smoothly blend opponent position & broadcast our own at 20Hz
-          const rt = remoteTargetRef.current;
-          if (nowPerf - rt.updatedAt < 2500) {
-            opp.x += (rt.x - opp.x) * 0.28;
-            opp.z += (rt.z - opp.z) * 0.28;
-            opp.vx = rt.vx;
-            opp.vz = rt.vz;
-            opp.rotY = rt.rotY;
-            opp.bracing = rt.bracing;
+        } else if (mySideRef.current === 'p1') {
+          // Host (P1): Step Guest (P2) via Watchdog-guarded `sumo_input` & broadcast `sumo_state` at exact 20 Hz (50ms)!
+          const gInp = sumoWatchdogRef.current.read('p2', nowPerf, {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            brace: false,
+          });
+          const gmx = (gInp.right ? 1 : 0) - (gInp.left ? 1 : 0);
+          const gmz = (gInp.down ? 1 : 0) - (gInp.up ? 1 : 0);
+          b2.bracing = gInp.brace;
+          if (gmx !== 0 || gmz !== 0) {
+            const glen = Math.hypot(gmx, gmz);
+            const gSpeed = (b2.bracing ? 7.5 : 13.5) * dt;
+            b2.vx += (gmx / glen) * gSpeed;
+            b2.vz += (gmz / glen) * gSpeed;
           }
+          b2.rotY = Math.atan2(-(b1.z - b2.z), b1.x - b2.x);
+
+          const stepRes = stepSumoRingPhysics(b1, b2, dt, DOHYO_RING_RADIUS);
+          if (stepRes.collided && stepRes.impactSpeed > 2.4) {
+            playSumoSfx('slap');
+            addSpark((b1.x + b2.x) * 0.5, (b1.z + b2.z) * 0.5, '💥 พุงชนพุง!!', '#facc15');
+          }
+
           if (nowPerf - lastNetSendAt >= 50) {
             lastNetSendAt = nowPerf;
-            broadcastPvpPacket('pos_sync', {
-              x: Number(me.x.toFixed(3)),
-              z: Number(me.z.toFixed(3)),
-              vx: Number(me.vx.toFixed(2)),
-              vz: Number(me.vz.toFixed(2)),
-              rotY: Number(me.rotY.toFixed(2)),
-              bracing: me.bracing,
+            sumoSnapSeqRef.current += 1;
+            broadcastPvpPacket('sumo_state', {
+              seq: sumoSnapSeqRef.current,
+              p1x: Number(b1.x.toFixed(3)),
+              p1z: Number(b1.z.toFixed(3)),
+              p1vx: Number(b1.vx.toFixed(2)),
+              p1vz: Number(b1.vz.toFixed(2)),
+              p1r: Number(b1.rotY.toFixed(2)),
+              p1b: b1.bracing,
+              p2x: Number(b2.x.toFixed(3)),
+              p2z: Number(b2.z.toFixed(3)),
+              p2vx: Number(b2.vx.toFixed(2)),
+              p2vz: Number(b2.vz.toFixed(2)),
+              p2r: Number(b2.rotY.toFixed(2)),
+              p2b: b2.bracing,
             });
           }
-        }
 
-        const stepRes = stepSumoRingPhysics(b1, b2, dt, DOHYO_RING_RADIUS);
-        if (stepRes.collided && stepRes.impactSpeed > 2.4) {
-          playSumoSfx('slap');
-          addSpark((b1.x + b2.x) * 0.5, (b1.z + b2.z) * 0.5, '💥 พุงชนพุง!!', '#facc15');
-        }
-
-        // Authoritative Ring-Out check (in bot match or for our own side falling out in PvP)
-        if (isBotMatchRef.current) {
           if (stepRes.p1RingOut && stepRes.p2RingOut) {
             const d1 = Math.hypot(b1.x, b1.z);
             const d2 = Math.hypot(b2.x, b2.z);
@@ -1449,9 +1643,67 @@ export function SumoArenaModal({
             handleRoundRingOut('p2');
           }
         } else {
-          const myDist = Math.hypot(me.x, me.z);
-          if (myDist > DOHYO_RING_RADIUS) {
-            handleRoundRingOut(mySideRef.current === 'p1' ? 'p2' : 'p1');
+          // Guest (P2):
+          // 1) Local Client-Side Prediction already applied to `me` (`b2`), stepped immediately at 60 FPS!
+          const stepRes = stepSumoRingPhysics(b1, b2, dt, DOHYO_RING_RADIUS);
+          if (stepRes.collided && stepRes.impactSpeed > 2.4) {
+            playSumoSfx('slap');
+            addSpark((b1.x + b2.x) * 0.5, (b1.z + b2.z) * 0.5, '💥 พุงชนพุง!!', '#facc15');
+          }
+
+          // 2) Linear Interpolation (Lerp) for opponent `b1` + Smooth Reconciliation for local `b2`!
+          const curr = currSumoSnapRef.current;
+          if (curr) {
+            const prev = prevSumoSnapRef.current || curr;
+            const elapsedSnapMs = Math.max(0, nowPerf - currSumoSnapRecvMsRef.current);
+            const alpha = elapsedSnapMs / 50;
+            if (alpha <= 1.0) {
+              b1.x = prev.p1x + (curr.p1x - prev.p1x) * alpha;
+              b1.z = prev.p1z + (curr.p1z - prev.p1z) * alpha;
+            } else {
+              const extraSec = Math.min(0.05, (elapsedSnapMs - 50) / 1000);
+              b1.x = curr.p1x + curr.p1vx * extraSec;
+              b1.z = curr.p1z + curr.p1vz * extraSec;
+            }
+            b1.vx = curr.p1vx;
+            b1.vz = curr.p1vz;
+            b1.rotY = curr.p1r;
+            b1.bracing = curr.p1b;
+
+            const extraHostSec = Math.min(0.05, elapsedSnapMs / 1000);
+            const authP2x = curr.p2x + curr.p2vx * extraHostSec;
+            const authP2z = curr.p2z + curr.p2vz * extraHostSec;
+            const errDist = Math.hypot(authP2x - b2.x, authP2z - b2.z);
+            if (errDist > 1.35) {
+              b2.x = curr.p2x;
+              b2.z = curr.p2z;
+              b2.vx = curr.p2vx;
+              b2.vz = curr.p2vz;
+            } else if (errDist > 0.08) {
+              const corr = 1 - Math.exp(-12 * dt);
+              b2.x += (authP2x - b2.x) * corr;
+              b2.z += (authP2z - b2.z) * corr;
+              b2.vx += (curr.p2vx - b2.vx) * 0.25;
+              b2.vz += (curr.p2vz - b2.vz) * 0.25;
+            }
+          }
+        }
+
+        // Authoritative Ring-Out check in Solo Bot Match
+        if (isBotMatchRef.current) {
+          const stepRes = stepSumoRingPhysics(b1, b2, dt, DOHYO_RING_RADIUS);
+          if (stepRes.collided && stepRes.impactSpeed > 2.4) {
+            playSumoSfx('slap');
+            addSpark((b1.x + b2.x) * 0.5, (b1.z + b2.z) * 0.5, '💥 พุงชนพุง!!', '#facc15');
+          }
+          if (stepRes.p1RingOut && stepRes.p2RingOut) {
+            const d1 = Math.hypot(b1.x, b1.z);
+            const d2 = Math.hypot(b2.x, b2.z);
+            handleRoundRingOut(d1 > d2 ? 'p2' : 'p1');
+          } else if (stepRes.p2RingOut) {
+            handleRoundRingOut('p1');
+          } else if (stepRes.p1RingOut) {
+            handleRoundRingOut('p2');
           }
         }
       }
@@ -1516,12 +1768,35 @@ export function SumoArenaModal({
         vis.footRingMat.color.setHex(inDanger ? 0xef4444 : isMe ? 0xfacc15 : 0x38bdf8);
       });
 
-      renderer.render(scene, camera);
+      if (!skipWebgl) {
+        renderer.render(scene, camera);
+      }
     };
+
+    const animate = () => {
+      frameId = requestAnimationFrame(animate);
+      if (typeof document !== 'undefined' && document.hidden) {
+        clock.getDelta();
+        return;
+      }
+      const dt = Math.min(0.05, clock.getDelta());
+      stepSumoTick(dt, clock.elapsedTime, performance.now(), false);
+    };
+
+    let lastBgSumoMs = performance.now();
+    const disposeBgSumo = createBackgroundHostTicker((bgNowMs) => {
+      if (!isBotMatchRef.current && mySideRef.current === 'p1' && modeStateRef.current === 'fighting') {
+        const bgDt = Math.min(0.05, Math.max(0.016, (bgNowMs - lastBgSumoMs) / 1000));
+        lastBgSumoMs = bgNowMs;
+        stepSumoTick(bgDt, clock.elapsedTime, bgNowMs, true);
+      }
+    }, 50);
+
     animate();
 
     return () => {
       cancelAnimationFrame(frameId);
+      disposeBgSumo();
       window.removeEventListener('resize', onResize);
       disposeObject3D(scene);
       bgTex.dispose();
@@ -1988,9 +2263,9 @@ export function SumoArenaModal({
                       <div />
                       <button
                         type="button"
-                        onPointerDown={() => (inputRef.current.up = true)}
-                        onPointerUp={() => (inputRef.current.up = false)}
-                        onPointerLeave={() => (inputRef.current.up = false)}
+                        onPointerDown={() => setLocalSumoInputField('up', true)}
+                        onPointerUp={() => setLocalSumoInputField('up', false)}
+                        onPointerLeave={() => setLocalSumoInputField('up', false)}
                         className="h-8 rounded bg-slate-800 active:bg-amber-400 active:text-black text-white font-black text-xs border border-slate-600"
                       >
                         ▲
@@ -1998,27 +2273,27 @@ export function SumoArenaModal({
                       <div />
                       <button
                         type="button"
-                        onPointerDown={() => (inputRef.current.left = true)}
-                        onPointerUp={() => (inputRef.current.left = false)}
-                        onPointerLeave={() => (inputRef.current.left = false)}
+                        onPointerDown={() => setLocalSumoInputField('left', true)}
+                        onPointerUp={() => setLocalSumoInputField('left', false)}
+                        onPointerLeave={() => setLocalSumoInputField('left', false)}
                         className="h-8 rounded bg-slate-800 active:bg-amber-400 active:text-black text-white font-black text-xs border border-slate-600"
                       >
                         ◀
                       </button>
                       <button
                         type="button"
-                        onPointerDown={() => (inputRef.current.down = true)}
-                        onPointerUp={() => (inputRef.current.down = false)}
-                        onPointerLeave={() => (inputRef.current.down = false)}
+                        onPointerDown={() => setLocalSumoInputField('down', true)}
+                        onPointerUp={() => setLocalSumoInputField('down', false)}
+                        onPointerLeave={() => setLocalSumoInputField('down', false)}
                         className="h-8 rounded bg-slate-800 active:bg-amber-400 active:text-black text-white font-black text-xs border border-slate-600"
                       >
                         ▼
                       </button>
                       <button
                         type="button"
-                        onPointerDown={() => (inputRef.current.right = true)}
-                        onPointerUp={() => (inputRef.current.right = false)}
-                        onPointerLeave={() => (inputRef.current.right = false)}
+                        onPointerDown={() => setLocalSumoInputField('right', true)}
+                        onPointerUp={() => setLocalSumoInputField('right', false)}
+                        onPointerLeave={() => setLocalSumoInputField('right', false)}
                         className="h-8 rounded bg-slate-800 active:bg-amber-400 active:text-black text-white font-black text-xs border border-slate-600"
                       >
                         ▶
@@ -2027,9 +2302,9 @@ export function SumoArenaModal({
 
                     <button
                       type="button"
-                      onPointerDown={() => (inputRef.current.brace = true)}
-                      onPointerUp={() => (inputRef.current.brace = false)}
-                      onPointerLeave={() => (inputRef.current.brace = false)}
+                      onPointerDown={() => setLocalSumoInputField('brace', true)}
+                      onPointerUp={() => setLocalSumoInputField('brace', false)}
+                      onPointerLeave={() => setLocalSumoInputField('brace', false)}
                       className="px-2.5 py-3 rounded-xl bg-sky-950 active:bg-sky-400 active:text-slate-950 text-sky-200 border border-sky-400/60 font-extrabold text-[11px]"
                     >
                       🛡️ ย่อตั้งหลัก

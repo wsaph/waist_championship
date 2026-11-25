@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { register } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,6 +12,9 @@ import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = ${JSON.stringify(rootUrl)};
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'next/dynamic') {
+    return nextResolve('next/dynamic.js', context);
+  }
   let candidate = null;
   if (specifier.startsWith('@/')) {
     candidate = new URL(specifier.slice(2), ROOT);
@@ -256,4 +260,129 @@ test('resolvePenaltyLobbyPresence & resolveLobbyPresence: syncs same-team invite
   );
   assert.equal(vbResolved.slots.P1?.clientId, 'vb-1');
   assert.equal(vbResolved.slots.P2?.clientId, 'vb-2');
+});
+
+test('Lobby broadcast loop guard: serializeLobbySnapshot & memoized soccer avatar dependencies', async () => {
+  const { serializeLobbySnapshot } = await import('../games/useIslandGames.ts');
+
+  const snapA = {
+    roomCode: '6666',
+    mode: '3v3',
+    hostUserId: 7,
+    hostName: 'กัปตันสายฟ้า',
+    hostEmoji: '🐱',
+    targetName: undefined,
+    count: 1,
+    max: 6,
+    status: 'waiting',
+    roster: [
+      {
+        slotId: 'B1',
+        clientId: 'fb_1',
+        playerId: 7,
+        name: 'กัปตันสายฟ้า',
+        emoji: '🐱',
+        team: 'left',
+        isBot: false,
+      },
+    ],
+  };
+
+  // Cloning with fresh object/array references must produce the exact same semantic signature
+  const snapB = JSON.parse(JSON.stringify(snapA));
+  assert.equal(serializeLobbySnapshot(snapA), serializeLobbySnapshot(snapB));
+
+  // Changing roster count or score must change the signature immediately
+  const snapJoined = {
+    ...snapB,
+    count: 2,
+    roster: [
+      ...snapB.roster,
+      {
+        slotId: 'B2',
+        clientId: 'fb_2',
+        playerId: 8,
+        name: 'เพื่อนร่วมทีม',
+        emoji: '🐶',
+        team: 'left',
+        isBot: false,
+      },
+    ],
+  };
+  assert.notEqual(serializeLobbySnapshot(snapA), serializeLobbySnapshot(snapJoined));
+
+  // Ensure PenaltyShootoutGame lobby broadcast effect never depends on unstable object refs
+  const soccerSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../games/soccer/SoccerArenaModal.tsx'),
+    'utf8'
+  );
+  assert.ok(soccerSrc.includes('lobbyBroadcastSig'), 'Expected primitive lobbyBroadcastSig in SoccerArenaModal');
+  assert.ok(soccerSrc.includes('myAvatarSig'), 'Expected memoized myAvatarSig in PenaltyShootoutModal');
+});
+
+test('Instant self-presence on room entry: PenaltyRoomController & VolleyballRoomController emit self immediately without waiting for WebSocket', async () => {
+  const { PenaltyRoomController, VolleyballRoomController } = await import(
+    '../games/shared/realtimeSync.ts'
+  );
+
+  let penaltyLobbyReceived = null;
+  const penCtrl = new PenaltyRoomController({
+    roomCode: '6666',
+    initialMatchMode: 'match_3v3',
+    me: {
+      clientId: 'self-fb-1',
+      userId: 101,
+      name: 'กัปตันสายฟ้า',
+      modelId: 'pikachu',
+      avatar: null,
+      ready: false,
+      isCreator: true,
+    },
+    callbacks: {
+      onLobbyChange: (lobby) => {
+        penaltyLobbyReceived = lobby;
+      },
+      onOpponentLeft: () => {},
+      onMatchStart: () => {},
+      onShooterLockedNotice: () => {},
+      onKeeperLockedNotice: () => {},
+      onShooterChoiceForHost: () => {},
+      onKeeperChoiceForHost: () => {},
+      onTurnReveal: () => {},
+      onReturnToLobby: () => {},
+    },
+  });
+  penCtrl.connect();
+  assert.ok(penaltyLobbyReceived, 'PenaltyRoomController.connect() must emit initial lobby synchronously');
+  assert.equal(penaltyLobbyReceived.slots.B1?.name, 'กัปตันสายฟ้า');
+  penCtrl.destroy();
+
+  let vbLobbyReceived = null;
+  const vbCtrl = new VolleyballRoomController({
+    roomCode: '1234',
+    initialMode: '2v2',
+    me: {
+      clientId: 'self-vb-1',
+      name: 'ตบสายฟ้า',
+      skin: 'pikachu',
+      color: '#facc15',
+      ready: false,
+      isCreator: true,
+    },
+    callbacks: {
+      onLobbyChange: (lobby) => {
+        vbLobbyReceived = lobby;
+      },
+      onPlayerDisconnected: () => {},
+      onHostMigrated: () => {},
+      onMatchStart: () => {},
+      onReturnToLobby: () => {},
+      onGuestInput: () => {},
+      onStateSnapshot: () => {},
+    },
+  });
+  vbCtrl.connect();
+  assert.ok(vbLobbyReceived, 'VolleyballRoomController.connect() must emit initial lobby synchronously');
+  assert.equal(vbLobbyReceived.slots.P1?.name, 'ตบสายฟ้า');
+  vbCtrl.destroy();
 });

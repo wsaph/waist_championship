@@ -19,6 +19,13 @@ import {
   type TaekwondoKickPose,
   type TaekwondoMove,
 } from './catalog';
+import {
+  ACTION_GRACE_BUFFER_MS,
+  GUEST_HELD_KEEPALIVE_MS,
+  GUEST_IDLE_ECHO_DELAY_MS,
+  GuestInputWatchdog,
+  createBackgroundHostTicker,
+} from '@/games/shared/realtimeSync';
 
 export interface TkdCharacterAppearance {
   id: number;
@@ -368,6 +375,39 @@ export function TaekwondoPvpArena({
     right: false,
     block: false,
   });
+  const lastSentTkdInputSigRef = useRef<string>('0,0,0');
+  const remoteHoldInputRef = useRef<{ left: boolean; right: boolean; block: boolean }>({
+    left: false,
+    right: false,
+    block: false,
+  });
+  const tkdWatchdogRef = useRef<
+    GuestInputWatchdog<'p2', { left: boolean; right: boolean; block: boolean }>
+  >(new GuestInputWatchdog());
+  const guestJumpBufferedUntilRef = useRef<number>(0);
+  const tkdIdleEchoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tkdKeepaliveIvRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  interface TkdNetSnap {
+    seq: number;
+    p1x: number;
+    p1y: number;
+    p1vx: number;
+    p1vy: number;
+    p1f: 1 | -1;
+    p1b: boolean;
+    p2x: number;
+    p2y: number;
+    p2vx: number;
+    p2vy: number;
+    p2f: 1 | -1;
+    p2b: boolean;
+  }
+  const prevTkdSnapRef = useRef<TkdNetSnap | null>(null);
+  const currTkdSnapRef = useRef<TkdNetSnap | null>(null);
+  const currTkdSnapRecvMsRef = useRef<number>(0);
+  const tkdHostSeqRef = useRef<number>(0);
+  const lastRecvTkdSeqRef = useRef<number>(0);
 
   const kinRef = useRef<{ p1: FighterKinematics; p2: FighterKinematics }>({
     p1: {
@@ -640,24 +680,81 @@ export function TaekwondoPvpArena({
       wobbleAngle: 0,
     };
     holdInputRef.current = { left: false, right: false, block: false };
+    remoteHoldInputRef.current = { left: false, right: false, block: false };
+    lastSentTkdInputSigRef.current = '0,0,0';
+    prevTkdSnapRef.current = null;
+    currTkdSnapRef.current = null;
+    lastRecvTkdSeqRef.current = 0;
     setHpHud({ p1: MAX_HP, p2: MAX_HP });
   }, []);
 
   const sendPvpPacket = useCallback((event: string, payload: Record<string, unknown>) => {
+    const packet = { ...payload, _sender: clientIdRef.current };
     if (channelRef.current) {
-      channelRef.current.send({ type: 'broadcast', event, payload });
+      channelRef.current.send({ type: 'broadcast', event, payload: packet });
     }
     if (bcRef.current) {
       try {
         bcRef.current.postMessage({
           event,
-          payload: { ...payload, _sender: clientIdRef.current },
+          payload: packet,
         });
       } catch {
         // ignore
       }
     }
   }, []);
+
+  // Event-driven Guest input sender: transmits ONLY on keydown/keyup or touch button press/release,
+  // plus 150ms Idle Echo Pulse on full release & 1.2s Keepalive while held!
+  const setLocalTkdHoldInput = useCallback(
+    (field: 'left' | 'right' | 'block', val: boolean) => {
+      if (holdInputRef.current[field] === val) return;
+      holdInputRef.current[field] = val;
+      if (isBotMatchRef.current || mySideRef.current === 'p1' || connStatusRef.current !== 'fighting') {
+        return;
+      }
+      const inp = holdInputRef.current;
+      const sig = `${inp.left ? 1 : 0},${inp.right ? 1 : 0},${inp.block ? 1 : 0}`;
+      if (sig === lastSentTkdInputSigRef.current) return;
+      lastSentTkdInputSigRef.current = sig;
+      sendPvpPacket('tkd_input', { ...inp });
+
+      const isNeutral = !inp.left && !inp.right && !inp.block;
+      if (tkdIdleEchoRef.current) {
+        clearTimeout(tkdIdleEchoRef.current);
+        tkdIdleEchoRef.current = null;
+      }
+      if (isNeutral) {
+        if (tkdKeepaliveIvRef.current) {
+          clearInterval(tkdKeepaliveIvRef.current);
+          tkdKeepaliveIvRef.current = null;
+        }
+        tkdIdleEchoRef.current = setTimeout(() => {
+          tkdIdleEchoRef.current = null;
+          const cur = holdInputRef.current;
+          if (!cur.left && !cur.right && !cur.block) {
+            sendPvpPacket('tkd_input', { ...cur });
+          }
+        }, GUEST_IDLE_ECHO_DELAY_MS);
+      } else if (!tkdKeepaliveIvRef.current) {
+        tkdKeepaliveIvRef.current = setInterval(() => {
+          if (
+            isBotMatchRef.current ||
+            mySideRef.current === 'p1' ||
+            connStatusRef.current !== 'fighting'
+          ) {
+            return;
+          }
+          const cur = holdInputRef.current;
+          if (cur.left || cur.right || cur.block) {
+            sendPvpPacket('tkd_input', { ...cur });
+          }
+        }, GUEST_HELD_KEEPALIVE_MS);
+      }
+    },
+    [sendPvpPacket]
+  );
 
   const leaveRoom = useCallback(() => {
     if (bcRef.current) {
@@ -941,6 +1038,50 @@ export function TaekwondoPvpArena({
           setConnStatus('fighting');
           setBanner('ROUND 1 • FIGHT!');
           setTimeout(() => setBanner(null), 950);
+        } else if (event === 'tkd_input' && mySideRef.current === 'p1') {
+          if (connStatusRef.current !== 'fighting') return;
+          const nextG = {
+            left: Boolean(payload.left),
+            right: Boolean(payload.right),
+            block: Boolean(payload.block),
+          };
+          remoteHoldInputRef.current = nextG;
+          tkdWatchdogRef.current.record('p2', nextG, performance.now());
+        } else if (event === 'tkd_jump' && mySideRef.current === 'p1') {
+          if (connStatusRef.current !== 'fighting') return;
+          const gK = kinRef.current.p2;
+          if (gK.y <= 0.08) {
+            gK.vy = JUMP_VY;
+            gK.blocking = false;
+            guestJumpBufferedUntilRef.current = 0;
+            playSfx('jump');
+          } else {
+            // 120ms Jump Grace Buffer if Guest tapped jump just before landing!
+            guestJumpBufferedUntilRef.current = performance.now() + ACTION_GRACE_BUFFER_MS;
+          }
+        } else if (event === 'tkd_state' && mySideRef.current === 'p2') {
+          if (connStatusRef.current !== 'fighting') return;
+          const seq = Number(payload.seq || 0);
+          if (seq <= lastRecvTkdSeqRef.current) return;
+          lastRecvTkdSeqRef.current = seq;
+          const snap: TkdNetSnap = {
+            seq,
+            p1x: Number(payload.p1x ?? -2.3),
+            p1y: Number(payload.p1y ?? 0),
+            p1vx: Number(payload.p1vx ?? 0),
+            p1vy: Number(payload.p1vy ?? 0),
+            p1f: payload.p1f === -1 ? -1 : 1,
+            p1b: Boolean(payload.p1b),
+            p2x: Number(payload.p2x ?? 2.3),
+            p2y: Number(payload.p2y ?? 0),
+            p2vx: Number(payload.p2vx ?? 0),
+            p2vy: Number(payload.p2vy ?? 0),
+            p2f: payload.p2f === 1 ? 1 : -1,
+            p2b: Boolean(payload.p2b),
+          };
+          prevTkdSnapRef.current = currTkdSnapRef.current || snap;
+          currTkdSnapRef.current = snap;
+          currTkdSnapRecvMsRef.current = performance.now();
         } else if (event === 'kin_sync') {
           if (connStatusRef.current !== 'fighting') return;
           const side: 'p1' | 'p2' = payload.side === 'p1' ? 'p1' : 'p2';
@@ -1057,7 +1198,7 @@ export function TaekwondoPvpArena({
 
       const ch = sb.channel(`waist-tkd-egg-${cleanCode}`, {
         config: {
-          broadcast: { self: false },
+          broadcast: { self: false, ack: false },
           presence: { key: clientIdRef.current },
         },
       });
@@ -1065,16 +1206,9 @@ export function TaekwondoPvpArena({
 
       const syncPresence = () => {
         const state = ch.presenceState<PvpFighterProfile & { joinedAt: number }>();
-        const activeIds = new Set<string>([meProf.clientId]);
         for (const m of Object.values(state).flat()) {
           if (m?.clientId) {
-            activeIds.add(m.clientId);
             peerMap.set(m.clientId, m);
-          }
-        }
-        for (const cid of Array.from(peerMap.keys())) {
-          if (!activeIds.has(cid)) {
-            handlePeerLeft(cid);
           }
         }
         syncPeerMapToState();
@@ -1095,6 +1229,9 @@ export function TaekwondoPvpArena({
         'hello_peer',
         'bye_peer',
         'start_fight',
+        'tkd_input',
+        'tkd_jump',
+        'tkd_state',
         'kin_sync',
         'fighter_attack',
         'hit_confirm',
@@ -1173,15 +1310,9 @@ export function TaekwondoPvpArena({
       me.vy = JUMP_VY;
       me.blocking = false;
       playSfx('jump');
-      sendPvpPacket('kin_sync', {
-        side: mySideRef.current,
-        x: me.x,
-        y: me.y,
-        vx: me.vx,
-        vy: me.vy,
-        facing: me.facing,
-        blocking: false,
-      });
+      if (!isBotMatchRef.current && mySideRef.current === 'p2') {
+        sendPvpPacket('tkd_jump', { at: Date.now() });
+      }
     }
   }, [playSfx, sendPvpPacket]);
 
@@ -1279,10 +1410,9 @@ export function TaekwondoPvpArena({
     ]
   );
 
-  // Round countdown + cooldown ticker
+  // Round 1 Hz countdown (no 120ms idle re-render ticker!)
   useEffect(() => {
     if (connStatus !== 'fighting') return;
-    const tickIv = setInterval(() => setNowTick(Date.now()), 120);
     const secIv = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -1296,40 +1426,75 @@ export function TaekwondoPvpArena({
       });
     }, 1000);
     return () => {
-      clearInterval(tickIv);
       clearInterval(secIv);
     };
   }, [connStatus, finishPvpMatch]);
 
-  // Keyboard controls (A/D move, W/Space jump, S block, J/K/L kicks)
+  // Cooldown ticker ONLY runs when a kick move is actually cooling down!
+  useEffect(() => {
+    if (connStatus !== 'fighting') return;
+    const maxCd = Math.max(cdBasicUntil, cdMidUntil, cdUltUntil);
+    if (maxCd <= Date.now()) return;
+    setNowTick(Date.now());
+    const tickIv = setInterval(() => {
+      const now = Date.now();
+      setNowTick(now);
+      if (now >= maxCd) {
+        clearInterval(tickIv);
+      }
+    }, 120);
+    return () => clearInterval(tickIv);
+  }, [connStatus, cdBasicUntil, cdMidUntil, cdUltUntil]);
+
+  // Keyboard controls (A/D move, W/Space jump, S block, J/K/L kicks — event-driven keydown/keyup!)
   useEffect(() => {
     if (connStatus !== 'fighting') return;
     const onKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (k === 'a' || k === 'arrowleft') holdInputRef.current.left = true;
-      else if (k === 'd' || k === 'arrowright') holdInputRef.current.right = true;
+      if (k === 'a' || k === 'arrowleft') setLocalTkdHoldInput('left', true);
+      else if (k === 'd' || k === 'arrowright') setLocalTkdHoldInput('right', true);
       else if (k === 'w' || k === 'arrowup' || k === ' ') {
         e.preventDefault();
         if (!e.repeat) triggerJump();
       } else if (k === 's' || k === 'arrowdown') {
-        holdInputRef.current.block = true;
+        setLocalTkdHoldInput('block', true);
       } else if (!e.repeat && k === 'j') performPvpKick('basic');
       else if (!e.repeat && k === 'k') performPvpKick('mid');
       else if (!e.repeat && k === 'l') performPvpKick('ult');
     };
     const onKeyUp = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (k === 'a' || k === 'arrowleft') holdInputRef.current.left = false;
-      else if (k === 'd' || k === 'arrowright') holdInputRef.current.right = false;
-      else if (k === 's' || k === 'arrowdown') holdInputRef.current.block = false;
+      if (k === 'a' || k === 'arrowleft') setLocalTkdHoldInput('left', false);
+      else if (k === 'd' || k === 'arrowright') setLocalTkdHoldInput('right', false);
+      else if (k === 's' || k === 'arrowdown') setLocalTkdHoldInput('block', false);
+    };
+    const onBlur = () => {
+      setLocalTkdHoldInput('left', false);
+      setLocalTkdHoldInput('right', false);
+      setLocalTkdHoldInput('block', false);
+    };
+    const onVis = () => {
+      if (document.hidden) onBlur();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVis);
+      if (tkdIdleEchoRef.current) {
+        clearTimeout(tkdIdleEchoRef.current);
+        tkdIdleEchoRef.current = null;
+      }
+      if (tkdKeepaliveIvRef.current) {
+        clearInterval(tkdKeepaliveIvRef.current);
+        tkdKeepaliveIvRef.current = null;
+      }
     };
-  }, [connStatus, performPvpKick, triggerJump]);
+  }, [connStatus, performPvpKick, setLocalTkdHoldInput, triggerJump]);
 
   // Three.js 3D Sunset Torii Gate + Real Player 3D Characters + Bouncy Egg-Fighter Physics!
   useEffect(() => {
@@ -1527,11 +1692,8 @@ export function TaekwondoPvpArena({
     let lastNetSyncMs = 0;
     let botThinkTimer = 0.6;
 
-    const animate = () => {
-      frameId = requestAnimationFrame(animate);
-      const dt = Math.min(0.033, clock.getDelta());
+    const stepTkdTick = (dt: number, nowMs: number, skipWebgl: boolean) => {
       elapsed += dt;
-      const nowMs = performance.now();
 
       const k1 = kinRef.current.p1;
       const k2 = kinRef.current.p2;
@@ -1599,6 +1761,32 @@ export function TaekwondoPvpArena({
           }
         }
 
+        // 2b. Host (P1) steps Guest (P2) via Watchdog-guarded `tkd_input` + 120ms Jump Grace Buffer!
+        if (!isBotMatchRef.current && mySideRef.current === 'p1') {
+          const gInp = tkdWatchdogRef.current.read('p2', nowMs, {
+            left: false,
+            right: false,
+            block: false,
+          });
+          if (nowMs <= guestJumpBufferedUntilRef.current && k2.y <= 0.08) {
+            guestJumpBufferedUntilRef.current = 0;
+            k2.vy = JUMP_VY;
+            k2.blocking = false;
+            playSfx('jump');
+          }
+          k2.blocking = gInp.block && k2.attackTimer <= 0 && k2.hurtTimer <= 0;
+          if (k2.hurtTimer <= 0 && k2.attackTimer <= 0) {
+            const gDir = (gInp.right ? 1 : 0) - (gInp.left ? 1 : 0);
+            if (k2.blocking) {
+              k2.vx *= 0.75;
+            } else if (gDir !== 0) {
+              k2.vx = gDir * MOVE_SPEED;
+            } else {
+              k2.vx *= 0.78;
+            }
+          }
+        }
+
         // 3. Step gravity, floor bounce, egg-collision pushback & wobble physics for both fighters
         for (const k of [k1, k2]) {
           k.x += k.vx * dt;
@@ -1640,13 +1828,6 @@ export function TaekwondoPvpArena({
           k.wobbleAngle += k.wobbleVel * dt;
         }
 
-        // Smoothly Lerp remote opponent toward authoritative target at 60 FPS!
-        if (!isBotMatchRef.current && remoteTargetRef.current.active && oppK.hurtTimer <= 0) {
-          const blend = 1 - Math.exp(-18 * dt);
-          oppK.x += (remoteTargetRef.current.x - oppK.x) * blend;
-          oppK.y = Math.max(0, oppK.y + (remoteTargetRef.current.y - oppK.y) * blend);
-        }
-
         // Prevent horizontal body overlap on ground
         const minSep = 0.98;
         const dx = k2.x - k1.x;
@@ -1657,18 +1838,71 @@ export function TaekwondoPvpArena({
           k2.x = Math.min(STAGE_HALF_WIDTH, k2.x + sign * push);
         }
 
-        // 4. Broadcast local kinematics at ~16Hz when moving/jumping/blocking
-        if (!isBotMatchRef.current && nowMs - lastNetSyncMs >= 62) {
-          lastNetSyncMs = nowMs;
-          sendPvpPacket('kin_sync', {
-            side: mySideRef.current,
-            x: Math.round(myK.x * 100) / 100,
-            y: Math.round(myK.y * 100) / 100,
-            vx: Math.round(myK.vx * 100) / 100,
-            vy: Math.round(myK.vy * 100) / 100,
-            facing: myK.facing,
-            blocking: myK.blocking,
-          });
+        if (!isBotMatchRef.current) {
+          if (mySideRef.current === 'p1') {
+            // Host (P1): Broadcast authoritative arena snapshot at exact 20 Hz (every 50 ms)!
+            if (nowMs - lastNetSyncMs >= 50) {
+              lastNetSyncMs = nowMs;
+              tkdHostSeqRef.current += 1;
+              sendPvpPacket('tkd_state', {
+                seq: tkdHostSeqRef.current,
+                p1x: Math.round(k1.x * 100) / 100,
+                p1y: Math.round(k1.y * 100) / 100,
+                p1vx: Math.round(k1.vx * 100) / 100,
+                p1vy: Math.round(k1.vy * 100) / 100,
+                p1f: k1.facing,
+                p1b: k1.blocking,
+                p2x: Math.round(k2.x * 100) / 100,
+                p2y: Math.round(k2.y * 100) / 100,
+                p2vx: Math.round(k2.vx * 100) / 100,
+                p2vy: Math.round(k2.vy * 100) / 100,
+                p2f: k2.facing,
+                p2b: k2.blocking,
+              });
+            }
+          } else {
+            // Guest (P2): 60 FPS Linear Interpolation for P1 + Smooth Reconciliation for predicted local P2!
+            const curr = currTkdSnapRef.current;
+            if (curr) {
+              const prev = prevTkdSnapRef.current || curr;
+              const elapsedSnapMs = Math.max(0, nowMs - currTkdSnapRecvMsRef.current);
+              const alpha = elapsedSnapMs / 50;
+              if (k1.hurtTimer <= 0) {
+                if (alpha <= 1.0) {
+                  k1.x = prev.p1x + (curr.p1x - prev.p1x) * alpha;
+                  k1.y = Math.max(0, prev.p1y + (curr.p1y - prev.p1y) * alpha);
+                } else {
+                  const extraSec = Math.min(0.05, (elapsedSnapMs - 50) / 1000);
+                  k1.x = Math.max(-STAGE_HALF_WIDTH, Math.min(STAGE_HALF_WIDTH, curr.p1x + curr.p1vx * extraSec));
+                  k1.y = Math.max(0, curr.p1y + curr.p1vy * extraSec);
+                }
+                k1.vx = curr.p1vx;
+                k1.vy = curr.p1vy;
+                k1.facing = curr.p1f;
+                k1.blocking = curr.p1b;
+              }
+
+              if (k2.hurtTimer <= 0) {
+                const extraHostSec = Math.min(0.05, elapsedSnapMs / 1000);
+                const authX = Math.max(
+                  -STAGE_HALF_WIDTH,
+                  Math.min(STAGE_HALF_WIDTH, curr.p2x + curr.p2vx * extraHostSec)
+                );
+                const authY = Math.max(0, curr.p2y + curr.p2vy * extraHostSec);
+                const errDist = Math.hypot(authX - k2.x, authY - k2.y);
+                if (errDist > 1.8) {
+                  k2.x = curr.p2x;
+                  k2.y = Math.max(0, curr.p2y);
+                  k2.vx = curr.p2vx;
+                  k2.vy = curr.p2vy;
+                } else if (errDist > 0.1) {
+                  const corr = 1 - Math.exp(-12 * dt);
+                  k2.x += (authX - k2.x) * corr;
+                  k2.y = Math.max(0, k2.y + (authY - k2.y) * corr);
+                }
+              }
+            }
+          }
         }
       }
 
@@ -1749,15 +1983,37 @@ export function TaekwondoPvpArena({
         }
       };
 
-      syncVisual(visP1, k1, 'p1');
-      syncVisual(visP2, k2, 'p2');
-
-      renderer.render(scene, camera);
+      if (!skipWebgl) {
+        syncVisual(visP1, k1, 'p1');
+        syncVisual(visP2, k2, 'p2');
+        renderer.render(scene, camera);
+      }
     };
+
+    const animate = () => {
+      frameId = requestAnimationFrame(animate);
+      if (typeof document !== 'undefined' && document.hidden) {
+        clock.getDelta();
+        return;
+      }
+      const dt = Math.min(0.033, clock.getDelta());
+      stepTkdTick(dt, performance.now(), false);
+    };
+
+    let lastBgTkdMs = performance.now();
+    const disposeBgTkd = createBackgroundHostTicker((bgNowMs) => {
+      if (!isBotMatchRef.current && mySideRef.current === 'p1' && connStatusRef.current === 'fighting') {
+        const bgDt = Math.min(0.033, Math.max(0.016, (bgNowMs - lastBgTkdMs) / 1000));
+        lastBgTkdMs = bgNowMs;
+        stepTkdTick(bgDt, bgNowMs, true);
+      }
+    }, 50);
+
     animate();
 
     return () => {
       cancelAnimationFrame(frameId);
+      disposeBgTkd();
       window.removeEventListener('resize', onResize);
       visP1.charParts.rootGroup.userData.disposed = true;
       visP2.charParts.rootGroup.userData.disposed = true;
@@ -1864,14 +2120,9 @@ export function TaekwondoPvpArena({
 
       {/* Waiting Room */}
       {(connStatus === 'connecting' || connStatus === 'waiting') && (
-        <div className="rounded-xl bg-zinc-950/90 border-2 border-amber-400/70 p-4 space-y-4">
-          <div className="text-center">
-            <div className="text-xs font-black uppercase tracking-widest text-amber-300">
-              ⛩️ TORII VS LOBBY • ห้อง {roomCode}
-            </div>
-            <div className="text-xs text-zinc-300 mt-0.5">
-              ให้เพื่อนกดเข้าห้อง <b className="text-yellow-300">{roomCode}</b> เพื่อนำตัวละครมาดวลกัน!
-            </div>
+        <div className="rounded-xl bg-zinc-950/90 border-2 border-amber-400/70 p-4 space-y-3.5">
+          <div className="text-center text-xs font-black uppercase tracking-widest text-amber-300">
+            ⛩️ ห้องดวล 1v1 หน้าเสาโทริอิ
           </div>
 
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -1913,9 +2164,8 @@ export function TaekwondoPvpArena({
                   </div>
                 </>
               ) : (
-                <div className="h-20 flex flex-col items-center justify-center text-xs text-zinc-400 animate-pulse">
-                  <span>⏳ รอเพื่อนเข้าห้อง...</span>
-                  <span className="text-[10px] text-zinc-500">รหัส: {roomCode}</span>
+                <div className="h-20 flex items-center justify-center text-xs text-zinc-400 animate-pulse">
+                  ⏳ รอเพื่อนเข้าห้อง...
                 </div>
               )}
             </div>
@@ -2033,15 +2283,9 @@ export function TaekwondoPvpArena({
               <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
                 <button
                   type="button"
-                  onPointerDown={() => {
-                    holdInputRef.current.left = true;
-                  }}
-                  onPointerUp={() => {
-                    holdInputRef.current.left = false;
-                  }}
-                  onPointerLeave={() => {
-                    holdInputRef.current.left = false;
-                  }}
+                  onPointerDown={() => setLocalTkdHoldInput('left', true)}
+                  onPointerUp={() => setLocalTkdHoldInput('left', false)}
+                  onPointerLeave={() => setLocalTkdHoldInput('left', false)}
                   className="py-2 rounded-lg bg-zinc-800 active:bg-zinc-600 text-white border-2 border-zinc-500 font-black text-xs cursor-pointer"
                 >
                   ⬅️ ซ้าย (A)
@@ -2055,30 +2299,18 @@ export function TaekwondoPvpArena({
                 </button>
                 <button
                   type="button"
-                  onPointerDown={() => {
-                    holdInputRef.current.block = true;
-                  }}
-                  onPointerUp={() => {
-                    holdInputRef.current.block = false;
-                  }}
-                  onPointerLeave={() => {
-                    holdInputRef.current.block = false;
-                  }}
+                  onPointerDown={() => setLocalTkdHoldInput('block', true)}
+                  onPointerUp={() => setLocalTkdHoldInput('block', false)}
+                  onPointerLeave={() => setLocalTkdHoldInput('block', false)}
                   className="py-2 rounded-lg bg-sky-900 active:bg-sky-600 text-sky-100 border-2 border-sky-400 font-black text-xs cursor-pointer"
                 >
                   🛡️ การ์ด (S)
                 </button>
                 <button
                   type="button"
-                  onPointerDown={() => {
-                    holdInputRef.current.right = true;
-                  }}
-                  onPointerUp={() => {
-                    holdInputRef.current.right = false;
-                  }}
-                  onPointerLeave={() => {
-                    holdInputRef.current.right = false;
-                  }}
+                  onPointerDown={() => setLocalTkdHoldInput('right', true)}
+                  onPointerUp={() => setLocalTkdHoldInput('right', false)}
+                  onPointerLeave={() => setLocalTkdHoldInput('right', false)}
                   className="py-2 rounded-lg bg-zinc-800 active:bg-zinc-600 text-white border-2 border-zinc-500 font-black text-xs cursor-pointer"
                 >
                   ขวา (D) ➡️

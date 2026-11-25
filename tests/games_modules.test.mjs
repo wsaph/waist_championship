@@ -401,3 +401,211 @@ test('createIslandGameZonesController mounts 4 3D Sports Plaza zones, renders li
   assert.equal(labelsContainer.children.length, 0);
   assert.equal(scene.children.length, 0);
 });
+
+test('Multiplayer sync engines enforce exact 20Hz (50ms) tick rate, 0ms Client-side Prediction, Smooth Reconciliation, and Ball Lerp', async () => {
+  const {
+    HOST_BROADCAST_INTERVAL_MS,
+    FOOTBALL_BROADCAST_INTERVAL_MS,
+    ClientStateInterpolator,
+    FootballStateInterpolator,
+  } = await import('../games/shared/realtimeSync.ts');
+  const { createMatchState } = await import('../games/volleyball/2d/physics2d.ts');
+  const { createInitialMatchState, stepLocalVolleyballPlayer } = await import(
+    '../games/volleyball/engine.ts'
+  );
+  const { createInitialShabuState, stepLocalShabuPlayer } = await import(
+    '../games/shabu/engine.ts'
+  );
+
+  // 1. Both Host broadcast rates are strictly 20 Hz (50ms)
+  assert.equal(HOST_BROADCAST_INTERVAL_MS, 50);
+  assert.equal(FOOTBALL_BROADCAST_INTERVAL_MS, 50);
+
+  // 2. 2D Volleyball: Guest local slot moves immediately via Client-side Prediction before any Host packet!
+  const vb2dState = createMatchState('1v1', {});
+  vb2dState.phase = 'rally';
+  const p3Player = vb2dState.players.find((p) => p.slot === 'P3');
+  const p3StartX = p3Player.x;
+  const interp2d = new ClientStateInterpolator();
+  interp2d.applyInterpolated(vb2dState, 1000, 1 / 60, {
+    slot: 'P3',
+    input: { left: true, right: false, jump: false, down: false, action: false },
+  });
+  assert.ok(
+    p3Player.x < p3StartX,
+    'Guest P3 should move left immediately without waiting for Host snapshot'
+  );
+
+  // 3. 3D Volleyball & Shabu local prediction steppers respect court/table boundaries
+  const vb3d = createInitialMatchState('1v1', { L1: false, L2: false, R1: false, R2: false });
+  const r1Vb3d = vb3d.players.find((p) => p.slotId === 'R1');
+  const r1Vb3dStart = r1Vb3d.x;
+  stepLocalVolleyballPlayer(
+    r1Vb3d,
+    { left: true, right: false, jump: true, action: false },
+    vb3d.court,
+    1 / 60
+  );
+  assert.ok(r1Vb3d.x < r1Vb3dStart);
+  assert.ok(r1Vb3d.vy > 0, 'Predicted jump applies upward velocity immediately');
+
+  const shabu = createInitialShabuState(['P1', 'P2']);
+  const guestChef = shabu.players.find((p) => p.slotId === 'P2');
+  const startChefX = guestChef.x;
+  const dashed = stepLocalShabuPlayer(
+    guestChef,
+    { mx: 1, mz: 0, interact: false, dash: true },
+    1 / 60
+  );
+  assert.equal(dashed, true);
+  assert.ok(guestChef.x > startChefX);
+
+  // 4. 3v3 Football Interpolator: Guest local prediction + ball Linear Interpolation & dead-reckoning bridge
+  const fbInterp = new FootballStateInterpolator();
+  const baseSnap = {
+    seq: 1,
+    ts: 1000,
+    ph: 'playing',
+    tm: 120,
+    sb: 0,
+    sr: 0,
+    w: null,
+    bx: 0,
+    by: 0.42,
+    bz: 0,
+    bvx: 10,
+    bvz: 0,
+    pw: 0,
+    pl: [
+      { id: 'B1', x: -4, z: 0, vx: 4, vz: 0, y: 0, st: 100, ch: 0, sl: 0 },
+      { id: 'R1', x: 4, z: 0, vx: 0, vz: 0, y: Math.PI, st: 100, ch: 0, sl: 0 },
+    ],
+  };
+  fbInterp.pushSnapshot(baseSnap, 1000);
+  fbInterp.pushSnapshot(
+    {
+      ...baseSnap,
+      seq: 2,
+      ts: 1050,
+      bx: 0.5,
+      pl: [
+        { id: 'B1', x: -3.8, z: 0, vx: 4, vz: 0, y: 0, st: 100, ch: 0, sl: 0 },
+        { id: 'R1', x: 4, z: 0, vx: 0, vz: 0, y: Math.PI, st: 100, ch: 0, sl: 0 },
+      ],
+    },
+    1050
+  );
+
+  // Mid-frame (25ms after seq 2 => alpha = 0.5): ball lerps halfway (0.25) while Guest R1 predicts moving -X!
+  const mid = fbInterp.sample(1075, {
+    slot: 'R1',
+    input: {
+      moveX: -1,
+      moveZ: 0,
+      sprintHeld: true,
+      shootHeld: false,
+      passPressed: false,
+      slidePressed: false,
+    },
+    dt: 1 / 60,
+  });
+  assert.ok(Math.abs(mid.ballX - 0.25) < 0.02, `Expected lerped ballX ~0.25, got ${mid.ballX}`);
+  const r1Mid = mid.players.find((p) => p.id === 'R1');
+  assert.ok(r1Mid.x < 4, 'Guest R1 moves immediately via Client-side Prediction');
+
+  // Slight packet jitter (70ms after seq 2 => 20ms past 50ms window): ball smoothly extrapolates forward instead of freezing!
+  const jitter = fbInterp.sample(1120);
+  assert.ok(jitter.ballX > 0.5, 'Ball dead-reckons smoothly during slight packet delay');
+});
+
+test('Realtime Resilience: Host yields immediately when hidden (`isHidden`), preserving player slots, and GuestInputWatchdog prevents stuck keys', async () => {
+  const {
+    GuestInputWatchdog,
+    STALE_GUEST_INPUT_MS,
+    resolveLobbyPresence,
+    resolvePenaltyLobbyPresence,
+  } = await import('../games/shared/realtimeSync.ts');
+
+  // 1. Volleyball Host Election yields to visible peer when creator hides tab, WITHOUT changing assigned slots!
+  const vbMembers = [
+    {
+      clientId: 'host-mobile',
+      name: 'Host',
+      skin: 'bunny',
+      color: '#38BDF8',
+      desiredSlot: 'P1',
+      slotUpdatedAt: 100,
+      ready: true,
+      joinedAt: 100,
+      isCreator: true,
+      isHidden: true, // Host minimized phone!
+    },
+    {
+      clientId: 'guest-active',
+      name: 'Guest',
+      skin: 'fox',
+      color: '#FB7185',
+      desiredSlot: 'P3',
+      slotUpdatedAt: 200,
+      ready: true,
+      joinedAt: 200,
+      isCreator: false,
+      isHidden: false,
+    },
+  ];
+  const vbResolved = resolveLobbyPresence(vbMembers, '1v1');
+  assert.equal(
+    vbResolved.hostClientId,
+    'guest-active',
+    'Visible peer immediately takes over Host duty when creator minimizes app'
+  );
+  assert.equal(vbResolved.slots.P1?.clientId, 'host-mobile', 'Original P1 slot never swaps');
+  assert.equal(vbResolved.slots.P3?.clientId, 'guest-active', 'Original P3 slot never swaps');
+
+  // 2. 3v3 Football Host Election yields to visible peer while preserving B1/R1 slots!
+  const fbMembers = [
+    {
+      clientId: 'cap-b1',
+      name: 'Cap Blue',
+      modelId: 'fox_hero',
+      desiredSlot: 'B1',
+      slotUpdatedAt: 100,
+      ready: true,
+      joinedAt: 100,
+      isCreator: true,
+      isHidden: true,
+    },
+    {
+      clientId: 'cap-r1',
+      name: 'Cap Red',
+      modelId: 'husky_hero',
+      desiredSlot: 'R1',
+      slotUpdatedAt: 150,
+      ready: true,
+      joinedAt: 150,
+      isCreator: false,
+      isHidden: false,
+    },
+  ];
+  const fbResolved = resolvePenaltyLobbyPresence(fbMembers, 'match_3v3');
+  assert.equal(fbResolved.hostClientId, 'cap-r1');
+  assert.equal(fbResolved.slots.B1?.clientId, 'cap-b1');
+  assert.equal(fbResolved.slots.R1?.clientId, 'cap-r1');
+
+  // 3. GuestInputWatchdog keeps active input with keepalives, and auto-releases stuck input after STALE_GUEST_INPUT_MS!
+  const watchdog = new GuestInputWatchdog();
+  const neutral = { left: false, right: false };
+  watchdog.record('P2', { left: false, right: true }, 1000);
+  assert.deepEqual(watchdog.read('P2', 2200, neutral), { left: false, right: true });
+
+  // Keepalive refreshes timestamp at t=2200ms -> still valid at t=4500ms!
+  watchdog.record('P2', { left: false, right: true }, 2200);
+  assert.deepEqual(watchdog.read('P2', 4500, neutral), { left: false, right: true });
+
+  // Lost connection / dropped keyup past 2200 + STALE_GUEST_INPUT_MS -> automatically resets to neutral!
+  assert.deepEqual(
+    watchdog.read('P2', 2200 + STALE_GUEST_INPUT_MS + 50, neutral),
+    neutral,
+    'Stale held input auto-decays to neutral so player never walks into wall forever'
+  );
+});

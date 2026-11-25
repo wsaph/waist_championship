@@ -67,6 +67,7 @@ import {
   PenaltyRoomController,
   generateRoomCode,
   isSupabaseConfigured,
+  resolvePenaltyLobbyPresence,
   serializeFootballSnapshot,
   type FootballLobbyMode,
   type FootballNetSnapshot,
@@ -437,9 +438,11 @@ export function PenaltyShootoutGame({
   const [selectedMode, setSelectedMode] = useState<FootballLobbyMode>('match_3v3');
   const [nickname, setNickname] = useState<string>(defaultNickname || 'กัปตันสายฟ้า');
   const [selectedModelId, setSelectedModelId] = useState<string>(defaultModelId || 'fox_hero');
-  const [useMyIslandChar, setUseMyIslandChar] = useState<boolean>(() => Boolean(myIslandAvatar));
+  const [useMyIslandChar, setUseMyIslandChar] = useState<boolean>(true);
   const [joinCodeInput, setJoinCodeInput] = useState<string>('');
-  const [roomCode, setRoomCode] = useState<string>(autoRoomCode || '');
+  const [roomCode, setRoomCode] = useState<string>(
+    embeddedModal ? '6666' : autoRoomCode || ''
+  );
   const [isCreator, setIsCreator] = useState<boolean>(autoIsCreator);
   const [isPractice, setIsPractice] = useState<boolean>(false);
   const [aiDifficulty, setAiDifficulty] = useState<PenaltyDifficulty>('normal');
@@ -465,19 +468,28 @@ export function PenaltyShootoutGame({
   );
   const roomCtrlRef = useRef<PenaltyRoomController | null>(null);
 
-  const [lobbyState, setLobbyState] = useState<PenaltyResolvedLobby>({
-    matchMode: 'match_3v3',
-    hostClientId: null,
-    slots: {},
-    p1: null,
-    p2: null,
-    onlinePlayers: [],
-    humanCount: 0,
-    maxPlayers: 6,
-    bothPresent: false,
-    allSlotsFilled: false,
-    allHumansReady: false,
-    allReady: false,
+  const [lobbyState, setLobbyState] = useState<PenaltyResolvedLobby>(() => {
+    const now = Date.now();
+    const initName = (defaultNickname || 'กัปตันสายฟ้า').trim() || 'กัปตันสายฟ้า';
+    const initAvatar = myIslandAvatar
+      ? { ...myIslandAvatar, name: initName }
+      : null;
+    return resolvePenaltyLobbyPresence(
+      [
+        {
+          clientId: clientIdRef.current,
+          userId: currentUserId,
+          name: initName,
+          modelId: defaultModelId || 'pikachu',
+          avatar: initAvatar,
+          ready: false,
+          joinedAt: now,
+          slotUpdatedAt: now,
+          isCreator: Boolean(autoIsCreator),
+        },
+      ],
+      'match_3v3'
+    );
   });
 
   const [matchSlots, setMatchSlots] = useState<Record<FootballSlotId, ActiveSlotParticipant>>(
@@ -493,13 +505,36 @@ export function PenaltyShootoutGame({
   const islandPoolRef = useRef<FootballAvatarProfile[]>(islandAvatarsPool);
   islandPoolRef.current = islandAvatarsPool;
 
+  const myIslandAvatarSig = myIslandAvatar
+    ? [
+      myIslandAvatar.playerId,
+      myIslandAvatar.name,
+      myIslandAvatar.species,
+      myIslandAvatar.emoji,
+      myIslandAvatar.colorHex,
+      myIslandAvatar.equipHat,
+      myIslandAvatar.equipFace,
+      myIslandAvatar.equipArmor,
+      myIslandAvatar.equipWings,
+      myIslandAvatar.equipAura,
+      myIslandAvatar.bellyScale,
+      myIslandAvatar.muscleScale,
+      JSON.stringify(myIslandAvatar.propColors || null),
+    ].join('|')
+    : '';
+
   const activeMyAvatar: FootballAvatarProfile | null = useMemo(
     () =>
       useMyIslandChar && myIslandAvatar
         ? { ...myIslandAvatar, name: nickname.trim() || myIslandAvatar.name }
         : null,
-    [useMyIslandChar, myIslandAvatar, nickname]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [useMyIslandChar, myIslandAvatarSig, nickname]
   );
+  const activeMyAvatarRef = useRef<FootballAvatarProfile | null>(activeMyAvatar);
+  activeMyAvatarRef.current = activeMyAvatar;
+  const lobbyStateRef = useRef<PenaltyResolvedLobby>(lobbyState);
+  lobbyStateRef.current = lobbyState;
 
   const [mySide, setMySide] = useState<PenaltySide>('p1'); // 'p1' = Blue Team, 'p2' = Red Team
   const [amIMatchHost, setAmIMatchHost] = useState<boolean>(true);
@@ -1163,35 +1198,39 @@ export function PenaltyShootoutGame({
 
   // Sync invited roomCode & late-hydrating 3D island character into Presence automatically
   useEffect(() => {
+    const targetCode = embeddedModal ? '6666' : autoRoomCode;
     if (
-      autoRoomCode &&
-      autoRoomCode !== roomCode &&
+      targetCode &&
+      targetCode !== roomCode &&
       (screen === 'home' || screen === 'lobby')
     ) {
-      setRoomCode(autoRoomCode);
+      setRoomCode(targetCode);
       if (screen === 'home') {
         setScreen('lobby');
       }
     }
-  }, [autoRoomCode, roomCode, screen]);
+  }, [embeddedModal, autoRoomCode, roomCode, screen]);
+
+  const islandAvatarSig = myIslandAvatar
+    ? `${myIslandAvatar.playerId}:${myIslandAvatar.name}:${myIslandAvatar.emoji}:${myIslandAvatar.colorHex}:${myIslandAvatar.species}:${myIslandAvatar.equipHat}:${myIslandAvatar.equipFace}:${myIslandAvatar.equipArmor}:${myIslandAvatar.equipWings}:${myIslandAvatar.equipAura}:${myIslandAvatar.bellyScale}:${myIslandAvatar.muscleScale}`
+    : '';
 
   useEffect(() => {
-    if (myIslandAvatar && !hadIslandAvatarRef.current) {
+    if (myIslandAvatar) {
       hadIslandAvatarRef.current = true;
       setUseMyIslandChar(true);
-      if (!nickname.trim() || nickname === 'กัปตันสายฟ้า') {
+      const shouldSyncName = !nickname.trim() || nickname === 'กัปตันสายฟ้า';
+      const syncedName = shouldSyncName ? myIslandAvatar.name : nickname.trim();
+      if (shouldSyncName && nickname !== myIslandAvatar.name) {
         setNickname(myIslandAvatar.name);
       }
-      const syncedName =
-        !nickname.trim() || nickname === 'กัปตันสายฟ้า'
-          ? myIslandAvatar.name
-          : nickname.trim();
       void roomCtrlRef.current?.updateMyPresence({
         name: syncedName,
         avatar: { ...myIslandAvatar, name: syncedName },
       });
     }
-  }, [myIslandAvatar, nickname]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [islandAvatarSig]);
 
   // Report live participation to ModalHost so invited guests & teammates are never locked out!
   useEffect(() => {
@@ -1208,25 +1247,37 @@ export function PenaltyShootoutGame({
     onParticipationChangeRef.current?.(participating, clientIdRef.current, isHostNow);
   }, [screen, roomCode, lobbyState.slots, lobbyState.hostClientId, amIMatchHost, isPractice]);
 
+  const lobbyBroadcastSig = `${lobbyState.hostClientId || ''}|${lobbyState.matchMode}|${ALL_FOOTBALL_SLOTS.map(
+    (s) => {
+      const m = lobbyState.slots[s];
+      return m
+        ? `${s}:${m.clientId}:${m.userId || 0}:${m.name}:${m.avatar?.emoji || m.modelId}`
+        : '';
+    }
+  ).join(',')}`;
+  const activeMyAvatarEmoji = activeMyAvatar?.emoji || '';
+
   // Broadcast floating invite & active match lock banner (up to 6 players!) to 3D Island
   useEffect(() => {
     if (!onLobbyBroadcastRef.current) return;
     const activeCode = roomCode || '6666';
+    const currentLobby = lobbyStateRef.current;
 
     if (
       screen === 'lobby' &&
       !isPractice &&
       roomCode &&
-      lobbyState.hostClientId === clientIdRef.current
+      currentLobby.hostClientId === clientIdRef.current
     ) {
       const emitWaiting = () => {
-        const isPen = lobbyState.matchMode === 'penalty';
+        const latestLobby = lobbyStateRef.current;
+        const isPen = latestLobby.matchMode === 'penalty';
         const slotOrder: readonly FootballSlotId[] = isPen
           ? (['B1', 'R1'] as const)
           : ALL_FOOTBALL_SLOTS;
         const waitRoster = slotOrder
           .map((s) => {
-            const m = lobbyState.slots[s];
+            const m = latestLobby.slots[s];
             if (!m) return null;
             return {
               slotId: s,
@@ -1240,7 +1291,8 @@ export function PenaltyShootoutGame({
           })
           .filter((x): x is NonNullable<typeof x> => Boolean(x));
 
-        const myEmoji = activeMyAvatar?.emoji || getPenaltyCharacter(selectedModelId).emoji;
+        const myEmoji =
+          activeMyAvatarRef.current?.emoji || getPenaltyCharacter(selectedModelId).emoji;
         onLobbyBroadcastRef.current?.({
           roomCode: activeCode,
           mode: isPen ? 'penalty' : '3v3',
@@ -1316,9 +1368,9 @@ export function PenaltyShootoutGame({
     scoreSummary.isFinished,
     scoreSummary.p1Goals,
     scoreSummary.p2Goals,
-    lobbyState,
+    lobbyBroadcastSig,
     selectedModelId,
-    activeMyAvatar,
+    activeMyAvatarEmoji,
     currentUserId,
     nickname,
     invitedTargetName,
@@ -1527,7 +1579,9 @@ export function PenaltyShootoutGame({
 
           setFbScoreBlue((prev) => (prev !== snap.sb ? snap.sb : prev));
           setFbScoreRed((prev) => (prev !== snap.sr ? snap.sr : prev));
-          setFbClockSec((prev) => (Math.abs(prev - snap.tm) >= 0.2 ? snap.tm : prev));
+          setFbClockSec((prev) =>
+            Math.ceil(prev) !== Math.ceil(snap.tm) ? snap.tm : prev
+          );
           if (snap.gs) {
             fbGoalsBySlotRef.current = {
               B1: snap.gs.B1 ?? 0,
@@ -1864,7 +1918,7 @@ export function PenaltyShootoutGame({
         }
 
         setFbClockSec((prev) =>
-          Math.abs(prev - match.timeRemaining) >= 0.25 ? match.timeRemaining : prev
+          Math.ceil(prev) !== Math.ceil(match.timeRemaining) ? match.timeRemaining : prev
         );
 
         const renderSnap: RenderPitchSnapshot = {
@@ -1946,7 +2000,11 @@ export function PenaltyShootoutGame({
           });
         }
       } else {
-        const lerped = fbInterpolatorRef.current.sample(nowMs);
+        const lerped = fbInterpolatorRef.current.sample(nowMs, {
+          slot: mySlotIdRef.current,
+          input: localFbInputRef.current,
+          dt,
+        });
         if (lerped) {
           sceneCtrl.pushRenderState(lerped);
         }
@@ -2336,12 +2394,12 @@ export function PenaltyShootoutGame({
           <span
             key={idx}
             className={`w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full border transition ${st === 'goal'
-                ? 'bg-emerald-400 border-white shadow-[0_0_8px_#34d399]'
-                : st === 'miss'
-                  ? 'bg-rose-500 border-rose-200 shadow-[0_0_6px_#f43f5e]'
-                  : isNextDot
-                    ? 'bg-amber-300/40 border-amber-300 animate-pulse scale-110'
-                    : 'bg-slate-800 border-slate-500'
+              ? 'bg-emerald-400 border-white shadow-[0_0_8px_#34d399]'
+              : st === 'miss'
+                ? 'bg-rose-500 border-rose-200 shadow-[0_0_6px_#f43f5e]'
+                : isNextDot
+                  ? 'bg-amber-300/40 border-amber-300 animate-pulse scale-110'
+                  : 'bg-slate-800 border-slate-500'
               }`}
           />
         );
@@ -2369,57 +2427,84 @@ export function PenaltyShootoutGame({
   const renderModeSelectorCards = (
     canEdit: boolean,
     activeModeValue: FootballLobbyMode,
-    onSelect: (m: FootballLobbyMode) => void
-  ) => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-      {(
-        [
-          {
-            id: 'match_3v3' as const,
-            badge: 'ปาร์ตี้สูงสุด 6 คน!',
-            icon: '🏟️',
-            title: 'ฟุตบอลโกลหนู 3v3 (ไม่มีโกล)',
-            desc: 'บังคับตัวใครตัวมัน 3 ต่อ 3 ประตูโกลหนู บล็อกลูกยิงหน้าโกลได้ ช่องว่างเติม AI อัตโนมัติ!',
-          },
-          {
-            id: 'penalty' as const,
-            badge: 'ดวลวัดใจ 1v1',
-            icon: '🥅',
-            title: 'ดวลจุดโทษ 1v1 (Penalty)',
-            desc: 'สลับยิง-เซฟ 5 ลูก + Sudden Death เล็ง 6 โซน หยุดแถบพลังยิงสีเขียว',
-          },
-        ]
-      ).map((m) => {
-        const active = activeModeValue === m.id;
-        return (
-          <button
-            key={m.id}
-            type="button"
-            disabled={!canEdit}
-            onClick={() => canEdit && onSelect(m.id)}
-            className={`p-3 rounded-2xl border-2 text-left transition ${active
+    onSelect: (m: FootballLobbyMode) => void,
+    compact = false
+  ) =>
+    compact ? (
+      <div className="bg-slate-950/85 border border-slate-800 rounded-xl p-1.5 flex gap-1.5">
+        {(
+          [
+            { id: 'match_3v3' as const, label: '🏟️ โกลหนู 3v3 (สูงสุด 6 คน)' },
+            { id: 'penalty' as const, label: '🥅 ดวลจุดโทษ 1v1' },
+          ]
+        ).map((m) => {
+          const active = activeModeValue === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              disabled={!canEdit}
+              onClick={() => canEdit && onSelect(m.id)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-black transition ${active
+                ? 'bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 shadow'
+                : 'text-slate-300 hover:bg-slate-900'
+                } ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {(
+          [
+            {
+              id: 'match_3v3' as const,
+              badge: 'ปาร์ตี้สูงสุด 6 คน!',
+              icon: '🏟️',
+              title: 'ฟุตบอลโกลหนู 3v3 (ไม่มีโกล)',
+              desc: 'บังคับตัวใครตัวมัน 3 ต่อ 3 ประตูโกลหนู บล็อกลูกยิงหน้าโกลได้ ช่องว่างเติม AI อัตโนมัติ!',
+            },
+            {
+              id: 'penalty' as const,
+              badge: 'ดวลวัดใจ 1v1',
+              icon: '🥅',
+              title: 'ดวลจุดโทษ 1v1 (Penalty)',
+              desc: 'สลับยิง-เซฟ 5 ลูก + Sudden Death เล็ง 6 โซน หยุดแถบพลังยิงสีเขียว',
+            },
+          ]
+        ).map((m) => {
+          const active = activeModeValue === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              disabled={!canEdit}
+              onClick={() => canEdit && onSelect(m.id)}
+              className={`p-3 rounded-2xl border-2 text-left transition ${active
                 ? 'bg-emerald-950/90 border-amber-300 shadow-[0_0_16px_rgba(250,204,21,0.32)]'
                 : 'bg-slate-950/70 border-slate-800 hover:border-slate-600'
-              } ${canEdit ? 'cursor-pointer' : 'opacity-90 cursor-default'}`}
-          >
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="text-sm font-black text-amber-300 flex items-center gap-1.5">
-                <span>{m.icon}</span>
-                <span>{m.title}</span>
-              </span>
-              <span
-                className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold shrink-0 ${active ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'
-                  }`}
-              >
-                {m.badge}
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-300 leading-snug">{m.desc}</p>
-          </button>
-        );
-      })}
-    </div>
-  );
+                } ${canEdit ? 'cursor-pointer' : 'opacity-90 cursor-default'}`}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-sm font-black text-amber-300 flex items-center gap-1.5">
+                  <span>{m.icon}</span>
+                  <span>{m.title}</span>
+                </span>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold shrink-0 ${active ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'
+                    }`}
+                >
+                  {m.badge}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-snug">{m.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+    );
 
   const renderSlotCard = (slotId: FootballSlotId, customLabel?: string) => {
     const team = getSlotTeam(slotId);
@@ -2432,12 +2517,12 @@ export function PenaltyShootoutGame({
       <div
         key={slotId}
         className={`rounded-2xl p-2.5 sm:p-3 border-2 transition ${member
-            ? isMe
-              ? 'bg-emerald-950/75 border-amber-300 shadow-[0_0_12px_rgba(250,204,21,0.28)]'
-              : team === 'blue'
-                ? 'bg-sky-950/55 border-sky-400/80'
-                : 'bg-rose-950/55 border-rose-400/80'
-            : 'bg-slate-950/60 border-dashed border-slate-700'
+          ? isMe
+            ? 'bg-emerald-950/75 border-amber-300 shadow-[0_0_12px_rgba(250,204,21,0.28)]'
+            : team === 'blue'
+              ? 'bg-sky-950/55 border-sky-400/80'
+              : 'bg-rose-950/55 border-rose-400/80'
+          : 'bg-slate-950/60 border-dashed border-slate-700'
           }`}
       >
         <div className="flex items-center justify-between gap-1.5 mb-1.5">
@@ -2450,8 +2535,8 @@ export function PenaltyShootoutGame({
           {member && (
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${isHostCard || member.ready
-                  ? 'bg-emerald-400 text-slate-950'
-                  : 'bg-slate-800 text-amber-300'
+                ? 'bg-emerald-400 text-slate-950'
+                : 'bg-slate-800 text-amber-300'
                 }`}
             >
               {isHostCard ? '👑 HOST' : member.ready ? '✅ READY' : 'รอ Ready'}
@@ -2461,25 +2546,18 @@ export function PenaltyShootoutGame({
 
         {member ? (
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 border border-white/20 flex items-center justify-center text-xl shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-slate-900 border border-white/20 flex items-center justify-center text-lg shrink-0">
               {member.avatar?.emoji || ch.emoji}
             </div>
-            <div className="min-w-0">
-              <div className="font-extrabold text-xs sm:text-sm text-white truncate">
-                {member.name}
-                {isMe && ' (คุณ)'}
-              </div>
-              <div className="text-[10px] text-amber-200/85 truncate">
-                {member.avatar ? '✨ ตัวละคร 3D บนเกาะ' : ch.name.split(' (')[0]}
-              </div>
+            <div className="font-extrabold text-xs sm:text-sm text-white truncate">
+              {member.name}
+              {isMe && ' (คุณ)'}
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-2 py-1">
+          <div className="flex items-center justify-between gap-2 py-0.5">
             <span className="text-[11px] font-bold text-slate-400">
-              {lobbyState.matchMode === 'match_3v3'
-                ? '🤖 ว่าง (AI ลงแทนได้)'
-                : '⏳ รอผู้เล่นเข้าช่อง...'}
+              {lobbyState.matchMode === 'match_3v3' ? '🤖 บอท AI' : '⏳ ว่าง'}
             </span>
             {myLobbySlot !== slotId && (
               <button
@@ -2491,11 +2569,11 @@ export function PenaltyShootoutGame({
                   })
                 }
                 className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer shrink-0 ${team === 'blue'
-                    ? 'bg-sky-500/25 hover:bg-sky-400 hover:text-slate-950 border border-sky-400/70 text-sky-200'
-                    : 'bg-rose-500/25 hover:bg-rose-400 hover:text-slate-950 border border-rose-400/70 text-rose-200'
+                  ? 'bg-sky-500/25 hover:bg-sky-400 hover:text-slate-950 border border-sky-400/70 text-sky-200'
+                  : 'bg-rose-500/25 hover:bg-rose-400 hover:text-slate-950 border border-rose-400/70 text-rose-200'
                   }`}
               >
-                ➕ ย้ายมานี่
+                + ย้ายมา
               </button>
             )}
           </div>
@@ -2586,8 +2664,8 @@ export function PenaltyShootoutGame({
                       type="button"
                       onClick={() => setSelectedModelId(ch.id)}
                       className={`p-2 rounded-2xl border-2 text-left transition cursor-pointer flex items-center gap-2 ${active
-                          ? 'bg-emerald-950/90 border-amber-300 shadow-[0_0_12px_rgba(250,204,21,0.35)]'
-                          : 'bg-slate-950/70 border-slate-800 hover:border-slate-600'
+                        ? 'bg-emerald-950/90 border-amber-300 shadow-[0_0_12px_rgba(250,204,21,0.35)]'
+                        : 'bg-slate-950/70 border-slate-800 hover:border-slate-600'
                         }`}
                     >
                       <span className="text-2xl shrink-0">{ch.emoji}</span>
@@ -2635,8 +2713,8 @@ export function PenaltyShootoutGame({
                         type="button"
                         onClick={() => setAiDifficulty(d.id)}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer ${aiDifficulty === d.id
-                            ? 'bg-emerald-400 text-slate-950'
-                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          ? 'bg-emerald-400 text-slate-950'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                           }`}
                       >
                         AI {d.label}
@@ -2721,17 +2799,24 @@ export function PenaltyShootoutGame({
       {/* ==================== 2. ONLINE ROOM LOBBY (6-Slot Party 3v3 & 1v1 Penalty!) ==================== */}
       {screen === 'lobby' && (
         <div className="flex-1 overflow-y-auto flex items-center justify-center p-3 sm:p-5">
-          <div className="w-full max-w-3xl bg-slate-900/95 border-2 border-amber-400/80 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3.5 my-auto">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-extrabold text-emerald-300">
-                  🏟️ ห้องรอปาร์ตี้ฟุตบอลโกลหนู ({lobbyState.humanCount}/{lobbyState.maxPlayers} คน •{' '}
-                  {transportKind === 'supabase' ? 'Supabase Presence' : 'Local Multi-Tab'})
+          <div className="w-full max-w-2xl bg-slate-900/95 border-2 border-amber-400/80 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-3 my-auto">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-400 border-2 border-white flex items-center justify-center text-xl shadow shrink-0">
+                  ⚽
                 </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="font-[family-name:var(--font-kanit)] text-2xl sm:text-3xl font-black text-amber-300 tracking-wider">
-                    ห้อง #{roomCode}
-                  </span>
+                <div className="min-w-0">
+                  <h2 className="font-[family-name:var(--font-kanit)] text-lg sm:text-xl font-black text-amber-300 leading-tight truncate">
+                    {embeddedModal ? 'สนามฟุตบอล 3D' : `ห้องฟุตบอล #${roomCode}`}
+                  </h2>
+                  <div className="text-[11px] font-bold text-emerald-300">
+                    ออนไลน์ {lobbyState.humanCount}/{lobbyState.maxPlayers} คน • ชนะรับ +5 💰
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {!embeddedModal && (
                   <button
                     type="button"
                     onClick={() => {
@@ -2739,31 +2824,18 @@ export function PenaltyShootoutGame({
                       setCopiedCode(true);
                       setTimeout(() => setCopiedCode(false), 1800);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold cursor-pointer"
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold cursor-pointer"
                   >
-                    {copiedCode ? '✅ คัดลอกแล้ว' : '📋 คัดลอกรหัส'}
+                    {copiedCode ? '✅' : '📋 รหัส'}
                   </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {embeddedModal && (
-                  <div className="flex items-center gap-1 bg-slate-950 border border-slate-700 rounded-xl p-1">
-                    {['6666', '6667'].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setRoomCode(preset)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer ${roomCode === preset
-                            ? 'bg-amber-400 text-slate-950'
-                            : 'text-slate-300 hover:text-white'
-                          }`}
-                      >
-                        สนาม #{preset === '6666' ? '1' : '2'}
-                      </button>
-                    ))}
-                  </div>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setScreen('leaderboard')}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400/60 text-xs font-extrabold text-amber-200 hover:bg-amber-400 hover:text-slate-950 cursor-pointer"
+                >
+                  🏆 อันดับ
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2776,41 +2848,32 @@ export function PenaltyShootoutGame({
                       setScreen('home');
                     }
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-extrabold cursor-pointer"
+                  className="w-9 h-9 rounded-xl bg-rose-600 hover:bg-rose-500 border-2 border-amber-300 text-sm font-black cursor-pointer flex items-center justify-center"
                 >
-                  {embeddedModal ? '✕ ปิด' : '← ออกห้อง'}
+                  ✕
                 </button>
               </div>
             </div>
 
-            {/* Lobby Mode Picker */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-extrabold">
-                <span className="text-amber-200">
-                  🎮 โหมดการแข่งขันของห้องนี้ {!amILobbyHost && '(Host เป็นผู้เลือก)'}
-                </span>
-                {lobbyState.matchMode === 'match_3v3' && (
-                  <span className="text-[11px] text-emerald-300">
-                    คลิกปุ่ม &ldquo;➕ ย้ายมานี่&rdquo; เพื่อสลับอยู่ทีมฟ้าหรือทีมแดงได้เลย!
-                  </span>
-                )}
-              </div>
-              {renderModeSelectorCards(amILobbyHost, lobbyState.matchMode, (nextMode) => {
+            {/* Compact Mode Switcher */}
+            {renderModeSelectorCards(
+              amILobbyHost,
+              lobbyState.matchMode,
+              (nextMode) => {
                 setSelectedMode(nextMode);
                 roomCtrlRef.current?.setLobbyMatchMode(nextMode);
-              })}
-            </div>
+              },
+              true
+            )}
 
             {/* 6-Slot Team Grid (3v3 Mode) OR 2-Slot Duel Grid (Penalty Mode) */}
             {lobbyState.matchMode === 'match_3v3' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div className="bg-sky-950/25 border border-sky-500/40 rounded-2xl p-2.5 space-y-2">
                   <div className="flex items-center justify-between px-1">
-                    <span className="text-xs font-black text-sky-300">
-                      🔵 ทีมฟ้า (บุกฝั่งขวา • 3 คน ไม่มีโกล)
-                    </span>
+                    <span className="text-xs font-black text-sky-300">🔵 ทีมฟ้า</span>
                     <span className="text-[10px] font-extrabold text-sky-200/80">
-                      {BLUE_SLOTS.filter((s) => Boolean(lobbyState.slots[s])).length}/3 คน
+                      {BLUE_SLOTS.filter((s) => Boolean(lobbyState.slots[s])).length}/3
                     </span>
                   </div>
                   {BLUE_SLOTS.map((s) => renderSlotCard(s))}
@@ -2818,58 +2881,39 @@ export function PenaltyShootoutGame({
 
                 <div className="bg-rose-950/25 border border-rose-500/40 rounded-2xl p-2.5 space-y-2">
                   <div className="flex items-center justify-between px-1">
-                    <span className="text-xs font-black text-rose-300">
-                      🔴 ทีมแดง (บุกฝั่งซ้าย • 3 คน ไม่มีโกล)
-                    </span>
+                    <span className="text-xs font-black text-rose-300">🔴 ทีมแดง</span>
                     <span className="text-[10px] font-extrabold text-rose-200/80">
-                      {RED_SLOTS.filter((s) => Boolean(lobbyState.slots[s])).length}/3 คน
+                      {RED_SLOTS.filter((s) => Boolean(lobbyState.slots[s])).length}/3
                     </span>
                   </div>
                   {RED_SLOTS.map((s) => renderSlotCard(s))}
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {renderSlotCard('B1', '🔵 ฝั่งเจ้าบ้าน (B1 • ยิงลูกแรกก่อน)')}
-                {renderSlotCard('R1', '🔴 ฝั่งผู้ท้าชิง (R1 • เซฟลูกแรกก่อน)')}
+              <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {renderSlotCard('B1', '🔵 ฝั่งยิงก่อน (B1)')}
+                  {renderSlotCard('R1', '🔴 ฝั่งเซฟก่อน (R1)')}
+                </div>
+                {lobbyState.onlinePlayers.length > 2 && (
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-700 text-[11px] font-bold text-amber-200 truncate">
+                    👀 รอในห้องอีก {lobbyState.onlinePlayers.length - 2} คน:{' '}
+                    {lobbyState.onlinePlayers
+                      .filter(
+                        (p) =>
+                          p.clientId !== lobbyState.slots.B1?.clientId &&
+                          p.clientId !== lobbyState.slots.R1?.clientId
+                      )
+                      .map((p) => p.name)
+                      .join(', ')}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Quick Avatar / .glb Model Switcher inside Lobby */}
-            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-extrabold text-amber-200">
-                  🎭 ตัวละครลงสนามของคุณ:
-                </div>
-                {myIslandAvatar && (
-                  <span className="text-[10.5px] font-bold text-emerald-300">
-                    {useMyIslandChar
-                      ? '✨ ใช้ตัวละคร 3D ประจำตัวบนเกาะ (หมวก/ชุด/ปีกครบ!)'
-                      : 'ใช้โมเดลสัตว์ .glb พื้นฐาน'}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                {myIslandAvatar && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUseMyIslandChar(true);
-                      const nextAv = {
-                        ...myIslandAvatar,
-                        name: nickname.trim() || myIslandAvatar.name,
-                      };
-                      void roomCtrlRef.current?.updateMyPresence({ avatar: nextAv });
-                    }}
-                    className={`px-3 py-1.5 rounded-xl border-2 text-xs font-black shrink-0 cursor-pointer flex items-center gap-1.5 ${useMyIslandChar
-                        ? 'bg-gradient-to-r from-emerald-400 to-amber-300 text-slate-950 border-white shadow'
-                        : 'bg-slate-900 text-emerald-300 border-emerald-500/60 hover:border-emerald-400'
-                      }`}
-                  >
-                    <span>{myIslandAvatar.emoji || '🌟'}</span>
-                    <span>ตัวละครของฉัน ({myIslandAvatar.name})</span>
-                  </button>
-                )}
+            {/* Fallback model picker ONLY for standalone `/penalty` route without an island character */}
+            {!myIslandAvatar && (
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-2.5 flex items-center gap-1.5 overflow-x-auto">
                 {PENALTY_CHARACTERS.map((ch) => {
                   const selected =
                     !useMyIslandChar && (myPresence?.modelId || selectedModelId) === ch.id;
@@ -2885,9 +2929,9 @@ export function PenaltyShootoutGame({
                           avatar: null,
                         });
                       }}
-                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-extrabold shrink-0 cursor-pointer flex items-center gap-1 ${selected
-                          ? 'bg-amber-400 text-slate-950 border-white'
-                          : 'bg-slate-900 text-slate-200 border-slate-700 hover:border-slate-500'
+                      className={`px-2.5 py-1 rounded-xl border text-xs font-extrabold shrink-0 cursor-pointer flex items-center gap-1 ${selected
+                        ? 'bg-amber-400 text-slate-950 border-white'
+                        : 'bg-slate-900 text-slate-200 border-slate-700 hover:border-slate-500'
                         }`}
                     >
                       <span>{ch.emoji}</span>
@@ -2896,31 +2940,31 @@ export function PenaltyShootoutGame({
                   );
                 })}
               </div>
-            </div>
+            )}
 
             {/* Ready / Start Buttons */}
-            <div className="flex flex-col sm:flex-row gap-2.5">
+            <div className="flex flex-col sm:flex-row gap-2">
               {amILobbyHost ? (
                 <button
                   type="button"
                   disabled={!canHostStartNow}
                   onClick={() => broadcastAndLaunchOnline(lobbyState.matchMode)}
-                  className={`flex-1 py-3.5 rounded-2xl font-black text-sm sm:text-base transition ${canHostStartNow
-                      ? 'bg-gradient-to-r from-emerald-400 to-amber-300 text-slate-950 shadow-xl cursor-pointer hover:scale-[1.01]'
-                      : 'bg-slate-800 text-slate-400 cursor-not-allowed'
+                  className={`flex-1 py-3 rounded-2xl font-black text-sm sm:text-base transition ${canHostStartNow
+                    ? 'bg-gradient-to-r from-emerald-400 to-amber-300 text-slate-950 shadow-xl cursor-pointer hover:scale-[1.01]'
+                    : 'bg-slate-800 text-slate-400 cursor-not-allowed'
                     }`}
                 >
                   {lobbyState.matchMode === 'penalty'
                     ? canHostStartNow
-                      ? '🥅 เริ่มศึกดวลจุดโทษ 1v1 เลย!'
+                      ? '🥅 เริ่มดวลจุดโทษ 1v1!'
                       : lobbyState.slots.B1 && lobbyState.slots.R1
-                        ? '⏳ รอผู้ท้าชิงกดปุ่ม Ready...'
-                        : '⏳ รอเพื่อนเข้าช่องอีก 1 คน...'
+                        ? '⏳ รอเพื่อนกด Ready...'
+                        : '⏳ รอเพื่อนอีก 1 คน...'
                     : !lobbyState.allHumansReady
-                      ? `⏳ รอเพื่อนในห้องกด Ready (${readyHumanCount}/${lobbyState.humanCount} คน)...`
+                      ? `⏳ รอกด Ready (${readyHumanCount}/${lobbyState.humanCount})`
                       : lobbyState.humanCount >= 6
-                        ? '⚽ เริ่มศึกโกลหนู 3v3 ครบ 6 คนเลย!'
-                        : `⚽ เริ่มโกลหนู 3v3 เลย! (คนเล่น ${lobbyState.humanCount} + 🤖 เติม AI ${6 - lobbyState.humanCount} ตัว)`}
+                        ? '⚽ เริ่มแข่ง 3v3!'
+                        : `⚽ เริ่มเลย! (${lobbyState.humanCount} คน + 🤖 AI ${6 - lobbyState.humanCount})`}
                 </button>
               ) : (
                 <button
@@ -2930,41 +2974,22 @@ export function PenaltyShootoutGame({
                       ready: !myPresence?.ready,
                     })
                   }
-                  className={`flex-1 py-3.5 rounded-2xl font-black text-sm sm:text-base cursor-pointer transition ${myPresence?.ready
-                      ? 'bg-emerald-400 text-slate-950 shadow-lg'
-                      : 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 shadow-lg'
+                  className={`flex-1 py-3 rounded-2xl font-black text-sm sm:text-base cursor-pointer transition ${myPresence?.ready
+                    ? 'bg-emerald-400 text-slate-950 shadow-lg'
+                    : 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 shadow-lg'
                     }`}
                 >
-                  {myPresence?.ready
-                    ? '✅ พร้อมแล้ว! (กดซ้ำเพื่อยกเลิก)'
-                    : '🔥 กด READY พร้อมลงสนาม!'}
+                  {myPresence?.ready ? '✅ พร้อมแล้ว (กดซ้ำเพื่อยกเลิก)' : '✋ กดพร้อมแข่ง (READY)'}
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => startPracticeMatch(lobbyState.matchMode)}
-                className="px-4 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-emerald-400/50 text-emerald-300 text-xs sm:text-sm font-extrabold cursor-pointer"
-              >
-                🤖 ซ้อมเดี่ยวกับ AI
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between text-xs pt-0.5">
-              <button
-                type="button"
-                onClick={() => setScreen('leaderboard')}
-                className="text-amber-300 hover:underline font-extrabold cursor-pointer"
-              >
-                🏆 ตารางอันดับดาวซัลโว
-              </button>
-              {embeddedModal && onClose && (
+              {lobbyState.humanCount <= 1 && (
                 <button
                   type="button"
-                  onClick={handleCloseExit}
-                  className="text-slate-300 hover:text-white font-bold cursor-pointer"
+                  onClick={() => startPracticeMatch(lobbyState.matchMode)}
+                  className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-emerald-400/50 text-emerald-300 text-xs sm:text-sm font-extrabold cursor-pointer"
                 >
-                  🏖️ กลับไปเดินเล่นบนเกาะ
+                  🤖 ซ้อมกับ AI
                 </button>
               )}
             </div>
@@ -3023,8 +3048,8 @@ export function PenaltyShootoutGame({
                 </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-lg font-mono text-sm sm:text-base border ${fbClockSec <= 30
-                      ? 'bg-rose-600 text-white border-white animate-pulse'
-                      : 'bg-slate-900 text-amber-300 border-amber-400/50'
+                    ? 'bg-rose-600 text-white border-white animate-pulse'
+                    : 'bg-slate-900 text-amber-300 border-amber-400/50'
                     }`}
                 >
                   ⏱ {formatMatchClock(fbClockSec)}
@@ -3043,8 +3068,8 @@ export function PenaltyShootoutGame({
             <div className="pointer-events-auto flex items-center gap-1.5">
               <span
                 className={`hidden md:inline-flex px-2.5 py-1.5 rounded-xl border text-[11px] font-black shadow ${myTeam3v3 === 'blue'
-                    ? 'bg-sky-950/90 text-sky-200 border-sky-400'
-                    : 'bg-rose-950/90 text-rose-200 border-rose-400'
+                  ? 'bg-sky-950/90 text-sky-200 border-sky-400'
+                  : 'bg-rose-950/90 text-rose-200 border-rose-400'
                   }`}
               >
                 ⭐ ช่อง {mySlotId}
@@ -3053,8 +3078,8 @@ export function PenaltyShootoutGame({
                 type="button"
                 onClick={() => setShowVirtualPad((v) => !v)}
                 className={`px-2.5 py-1.5 rounded-xl border text-xs font-extrabold cursor-pointer shadow ${showVirtualPad
-                    ? 'bg-amber-400 text-slate-950 border-white'
-                    : 'bg-slate-950/85 text-slate-200 border-slate-600'
+                  ? 'bg-amber-400 text-slate-950 border-white'
+                  : 'bg-slate-950/85 text-slate-200 border-slate-600'
                   }`}
                 title="เปิด/ปิดจอยจำลองบนจอ (Virtual Gamepad)"
               >
@@ -3075,8 +3100,8 @@ export function PenaltyShootoutGame({
             <div className="fixed top-[28%] left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
               <div
                 className={`px-7 py-4 rounded-3xl border-4 border-white shadow-2xl animate-bounce ${fbGoalSplash.team === 'blue'
-                    ? 'bg-gradient-to-r from-sky-500 via-blue-600 to-cyan-400 text-white'
-                    : 'bg-gradient-to-r from-rose-500 via-red-600 to-amber-400 text-white'
+                  ? 'bg-gradient-to-r from-sky-500 via-blue-600 to-cyan-400 text-white'
+                  : 'bg-gradient-to-r from-rose-500 via-red-600 to-amber-400 text-white'
                   }`}
               >
                 <div className="font-[family-name:var(--font-kanit)] text-3xl sm:text-5xl font-black tracking-wide">
@@ -3324,8 +3349,8 @@ export function PenaltyShootoutGame({
               {amIKeeper && turnPhase === 'selecting' && (
                 <div
                   className={`px-3.5 py-1 rounded-full border-2 text-xs sm:text-sm font-black shadow-lg ${keeperTimeLeft <= 3
-                      ? 'bg-rose-600 border-white text-white animate-bounce'
-                      : 'bg-slate-950/90 border-sky-400 text-sky-200'
+                    ? 'bg-rose-600 border-white text-white animate-bounce'
+                    : 'bg-slate-950/90 border-sky-400 text-sky-200'
                     }`}
                 >
                   ⏱️ เลือกโซนพุ่งปัดใน {keeperTimeLeft.toFixed(1)} วินาที!
@@ -3360,10 +3385,10 @@ export function PenaltyShootoutGame({
                         }
                       }}
                       className={`rounded-xl border-2 flex flex-col items-center justify-center transition touch-none cursor-pointer ${isPicked
-                          ? amIShooter
-                            ? 'bg-emerald-500/45 border-amber-300 shadow-[0_0_16px_rgba(52,211,153,0.75)] scale-[1.02]'
-                            : 'bg-sky-500/50 border-amber-300 shadow-[0_0_16px_rgba(56,189,248,0.75)] scale-[1.02]'
-                          : 'bg-slate-950/30 hover:bg-white/15 border-white/30'
+                        ? amIShooter
+                          ? 'bg-emerald-500/45 border-amber-300 shadow-[0_0_16px_rgba(52,211,153,0.75)] scale-[1.02]'
+                          : 'bg-sky-500/50 border-amber-300 shadow-[0_0_16px_rgba(56,189,248,0.75)] scale-[1.02]'
+                        : 'bg-slate-950/30 hover:bg-white/15 border-white/30'
                         }`}
                     >
                       <span className="text-sm sm:text-lg leading-none">
@@ -3383,10 +3408,10 @@ export function PenaltyShootoutGame({
             <div className="fixed top-[34%] left-1/2 -translate-x-1/2 z-30 pointer-events-none w-[92vw] max-w-md text-center">
               <div
                 className={`px-5 py-3.5 rounded-3xl border-3 shadow-2xl animate-bounce ${impactBanner.tone === 'goal'
-                    ? 'bg-gradient-to-r from-emerald-500 via-lime-400 to-amber-300 border-white text-slate-950'
-                    : impactBanner.tone === 'saved'
-                      ? 'bg-gradient-to-r from-sky-500 to-indigo-600 border-amber-300 text-white'
-                      : 'bg-gradient-to-r from-rose-600 to-orange-600 border-amber-200 text-white'
+                  ? 'bg-gradient-to-r from-emerald-500 via-lime-400 to-amber-300 border-white text-slate-950'
+                  : impactBanner.tone === 'saved'
+                    ? 'bg-gradient-to-r from-sky-500 to-indigo-600 border-amber-300 text-white'
+                    : 'bg-gradient-to-r from-rose-600 to-orange-600 border-amber-200 text-white'
                   }`}
               >
                 <div className="font-[family-name:var(--font-kanit)] text-2xl sm:text-3xl font-black">
@@ -3662,13 +3687,49 @@ export function PenaltyShootoutModal({
   onLobbyBroadcast?: (info: PenaltyLobbyBroadcastInfo) => void;
   onRewardEarned?: (earned: number, totalPoints: number) => void;
 }) {
-  if (!isOpen) return null;
-  const me = players.find((p) => p.id === currentUserId) || players[0];
+  const me = currentUserId != null ? players.find((p) => p.id === currentUserId) : undefined;
   const mappedModel = mapSpeciesOrEmojiToPenaltyChar(me?.breed || me?.species, me?.emoji);
-  const myAvatar = toFootballAvatarProfile(me);
-  const pool = players
-    .map((pl) => toFootballAvatarProfile(pl))
-    .filter((x): x is FootballAvatarProfile => Boolean(x));
+  const myAvatarSig = me
+    ? [
+      me.id,
+      me.name,
+      me.species,
+      me.breed,
+      me.emoji,
+      me.colorHex,
+      me.bandColor,
+      me.equipHat,
+      me.equipFace,
+      me.equipArmor,
+      me.equipWings,
+      me.equipAura,
+      me.bellyScale ?? me.bmiBellyScale ?? 1,
+      me.muscleScale ?? 1,
+      JSON.stringify(me.propColors || null),
+    ].join('|')
+    : '';
+  const poolSig = isOpen
+    ? players
+      .map(
+        (pl) =>
+          `${pl.id}:${pl.name}:${pl.species || ''}:${pl.breed || ''}:${pl.emoji || ''}:${pl.colorHex || ''}`
+      )
+      .join('|')
+    : '';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const myAvatar = useMemo(() => toFootballAvatarProfile(me), [myAvatarSig]);
+  const pool = useMemo(
+    () =>
+      isOpen
+        ? players
+          .map((pl) => toFootballAvatarProfile(pl))
+          .filter((x): x is FootballAvatarProfile => Boolean(x))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isOpen, poolSig]
+  );
+
+  if (!isOpen) return null;
 
   return (
     <PenaltyShootoutGame
