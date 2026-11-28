@@ -98,6 +98,11 @@ const QuestBoardModal = dynamic(
   () => import('@/components/QuestBoardModal').then((m) => m.QuestBoardModal),
   { ssr: false }
 );
+const FortuneTellerModal = dynamic(
+  () => import('@/components/FortuneTellerModal').then((m) => m.FortuneTellerModal),
+  { ssr: false }
+);
+import { createFortuneBoothController } from '@/lib/fortune_booth_3d';
 import { formatCountdownTh, type QuestBoardItem } from '@/lib/quest_board';
 import {
   fetchHokkaidoHybridWeather,
@@ -290,7 +295,9 @@ export default function Arena3DPage() {
   const [confirmRotateKey, setConfirmRotateKey] = useState(false);
   const [copiedSyncField, setCopiedSyncField] = useState<'key' | 'url' | null>(null);
   const [todaySyncedSteps, setTodaySyncedSteps] = useState(0);
-  const [showIosShortcutGuide, setShowIosShortcutGuide] = useState(false);
+  const [stepEntryView, setStepEntryView] = useState<'manual' | 'ios_auto'>('manual');
+  const [showAdvancedStepMode, setShowAdvancedStepMode] = useState(false);
+  const [showKeySecurityBox, setShowKeySecurityBox] = useState(false);
   const [ocrScanning, setOcrScanning] = useState(false);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState('');
   const [ocrResult, setOcrResult] = useState<{
@@ -371,8 +378,10 @@ export default function Arena3DPage() {
   const [isNearCafe, setIsNearCafe] = useState(false);
   const [isNearFoodStall, setIsNearFoodStall] = useState(false);
   const [isNearQuestBoard, setIsNearQuestBoard] = useState(false);
+  const [isNearFortune, setIsNearFortune] = useState(false);
   const [isPetCafeOpen, setIsPetCafeOpen] = useState(false);
   const [isQuestBoardOpen, setIsQuestBoardOpen] = useState(false);
+  const [isFortuneOpen, setIsFortuneOpen] = useState(false);
   const [questBoardFocusId, setQuestBoardFocusId] = useState<number | null>(null);
   const [quests, setQuests] = useState<QuestBoardItem[]>([]);
   const activeQuestTagByUserId = React.useMemo(() => {
@@ -434,6 +443,7 @@ export default function Arena3DPage() {
   const isNearCafeRef = useRef<boolean>(false);
   const isNearFoodStallRef = useRef<boolean>(false);
   const isNearQuestBoardRef = useRef<boolean>(false);
+  const isNearFortuneRef = useRef<boolean>(false);
   const isNearOceanRef = useRef<boolean>(false);
   const oceanDirRef = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 1 });
   const fishingPhaseRef = useRef<'idle' | 'waiting' | 'bite' | 'reeling'>('idle');
@@ -927,6 +937,7 @@ export default function Arena3DPage() {
       games.isAnyGameOpen ||
       isPetCafeOpen ||
       isQuestBoardOpen ||
+      isFortuneOpen ||
       festival.isModalOpen ||
       (authChecked && currentUserId === null)
     );
@@ -945,6 +956,7 @@ export default function Arena3DPage() {
     games.isAnyGameOpen,
     isPetCafeOpen,
     isQuestBoardOpen,
+    isFortuneOpen,
     festival.isModalOpen,
     authChecked,
     currentUserId,
@@ -956,13 +968,15 @@ export default function Arena3DPage() {
       ? games.activeBusyLabel
       : isPetCafeOpen
         ? '☕ อยู่ในคาเฟ่สัตว์เลี้ยง...'
-        : isQuestBoardOpen
-          ? '📋 กำลังดูกระดานภารกิจ...'
-          : festival.busyModalLabel
-            ? festival.busyModalLabel
-            : isJoinOpen
-              ? '👗 กำลังแต่งตัว...'
-              : '';
+        : isFortuneOpen
+          ? '🔮 กำลังดูดวงกับแม่หมอ...'
+          : isQuestBoardOpen
+            ? '📋 กำลังดูกระดานภารกิจ...'
+            : festival.busyModalLabel
+              ? festival.busyModalLabel
+              : isJoinOpen
+                ? '👗 กำลังแต่งตัว...'
+                : '';
     myBusyLabelRef.current = label;
     if (currentUserId && currentUserId > 0) {
       broadcastRealtimeEvent('busy_status', { userId: currentUserId, label });
@@ -970,6 +984,7 @@ export default function Arena3DPage() {
   }, [
     games.activeBusyLabel,
     isPetCafeOpen,
+    isFortuneOpen,
     isQuestBoardOpen,
     festival.busyModalLabel,
     isJoinOpen,
@@ -1121,6 +1136,7 @@ export default function Arena3DPage() {
       games.closeAllGames();
       setIsPetCafeOpen(false);
       setIsQuestBoardOpen(false);
+      setIsFortuneOpen(false);
       festival.closeModal();
       setIsJoinOpen(false);
       setIsLogOpen(false);
@@ -1445,6 +1461,8 @@ export default function Arena3DPage() {
       games.resetAllProximities();
       isNearQuestBoardRef.current = false;
       setIsNearQuestBoard(false);
+      isNearFortuneRef.current = false;
+      setIsNearFortune(false);
       setFishingResult(null);
       cancelFishing();
     }
@@ -3183,6 +3201,26 @@ export default function Arena3DPage() {
     `;
     labelsContainer.appendChild(cafeTagEl);
 
+    // 3D Fortune Teller Booth (ซุ้มโต๊ะแม่หมอพยากรณ์ ตรงจุดเริ่มต้น — คลิกที่โต๊ะหรือเดินเข้าไปใกล้แล้วกดดูดวงฟรีได้ทันที!)
+    const rawFortuneX = -halfLen + 1.2;
+    const rawFortuneZ = -(trackWidth / 2 + 6.2);
+    const fortunePos = new THREE.Vector3(
+      Math.max(islandCenterX - islandW / 2 + 3.8, Math.min(islandCenterX + islandW / 2 - 3.8, rawFortuneX)),
+      0.2,
+      Math.max(-(islandD / 2 - 3.8), Math.min(islandD / 2 - 3.8, rawFortuneZ))
+    );
+    const fortuneBoothController = createFortuneBoothController({
+      scene,
+      labelsContainer,
+      position: fortunePos,
+      rotationY: Math.PI * 0.12,
+      onSelectBooth: () => {
+        cameraLookAtRef.current.set(fortunePos.x, 1.85, fortunePos.z);
+        cameraTargetPosRef.current = new THREE.Vector3(fortunePos.x + 1.8, 4.2, fortunePos.z + 6.4);
+        setIsFortuneOpen(true);
+      },
+    });
+
     // Spacious Hokkaido 2×2 Grand Sports Park behind Finish Line (modular 3D zones via `@/games`)
     const sportsPlazaX = Math.min(islandCenterX + islandW / 2 - 24.5, halfLen + 13.0);
     const sportsPlazaBackX = Math.min(islandCenterX + islandW / 2 - 7.5, halfLen + 29.8);
@@ -4614,6 +4652,13 @@ export default function Arena3DPage() {
             setIsNearQuestBoard(nearBoardNow);
           }
 
+          const distToFortune = c.rootGroup.position.distanceTo(fortunePos);
+          const nearFortuneNow = distToFortune < 5.6;
+          if (nearFortuneNow !== isNearFortuneRef.current) {
+            isNearFortuneRef.current = nearFortuneNow;
+            setIsNearFortune(nearFortuneNow);
+          }
+
           // ตรวจระยะใกล้ขอบทะเล (ริมเกาะ) เพื่อเปิดกิจกรรมตกปลา 🎣
           const edgeMinX = islandCenterX - islandW / 2 + 1.8;
           const edgeMaxX = islandCenterX + islandW / 2 - 1.8;
@@ -5520,6 +5565,13 @@ export default function Arena3DPage() {
         cafeTagEl.style.opacity = '0';
       }
 
+      fortuneBoothController.update({
+        elapsed,
+        camera,
+        viewportWidth: cachedVw,
+        viewportHeight: cachedVh,
+      });
+
       const gameZoneWalkerId = walkingSpectatorIdRef.current;
       const gameZoneWalkerMesh =
         gameZoneWalkerId !== null
@@ -5702,6 +5754,10 @@ export default function Arena3DPage() {
         }
       }
 
+      if (fortuneBoothController.onPointerTap(raycaster)) {
+        return;
+      }
+
       if (festivalSceneController?.onPointerTap?.(raycaster)) {
         return;
       }
@@ -5764,6 +5820,7 @@ export default function Arena3DPage() {
         // ignore
       }
       cancelAnimationFrame(frameId);
+      fortuneBoothController.dispose();
       gameZonesController.disposeAll();
       festivalSceneController?.dispose();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
@@ -6103,6 +6160,8 @@ export default function Arena3DPage() {
       setConfirmRotateKey(false);
       setCopiedSyncField(null);
       setShowSyncKey(false);
+      setShowKeySecurityBox(false);
+      setShowAdvancedStepMode(false);
       return;
     }
     const targetUid = currentUserId;
@@ -7723,270 +7782,341 @@ export default function Arena3DPage() {
                             : 'กำลังสร้างรหัส...';
 
                         return (
-                          <div className="space-y-2.5">
-                            {/* กล่องซิงก์ด่วนจากแอปสุขภาพ (Android / iOS) */}
-                            <div className="bg-slate-950/85 border-2 border-emerald-500/60 rounded-xl p-2.5 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-extrabold text-emerald-300">
-                                  📲 ซิงก์จากแอปสุขภาพ (กันก้าวเบิ้ลอัตโนมัติ)
-                                </span>
-                                <span className="text-[10px] font-bold text-amber-200/90 bg-slate-900 border border-amber-400/40 rounded-full px-2 py-0.5 shrink-0">
-                                  วันนี้ซิงก์แล้ว {effectiveSyncedToday.toLocaleString()} ก้าว
-                                </span>
-                              </div>
-
-                              <input
-                                ref={healthFileInputRef}
-                                type="file"
-                                accept="image/*"
-                                onChange={handleHealthScreenshotChange}
-                                className="hidden"
-                              />
-
-                              {/* วิธีที่ 2: แนบรูปแคปหน้าจอ อ่านตัวเลขก้าวอัตโนมัติด้วย Gemini AI */}
+                          <div className="space-y-3">
+                            {/* แถบสลับโหมดชัดเจน: บันทึกเอง vs ซิงก์อัตโนมัติ (iPhone) */}
+                            <div className="grid grid-cols-2 gap-1.5 bg-slate-950/90 p-1 rounded-xl border border-slate-700">
                               <button
                                 type="button"
-                                disabled={ocrScanning || submitting}
-                                onClick={() => healthFileInputRef.current?.click()}
-                                className="w-full bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 text-slate-950 border-2 border-black shadow-[0_3px_0_#000] active:translate-y-0.5 rounded-xl py-2 px-3 flex items-center justify-center gap-2 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer disabled:opacity-60"
+                                onClick={() => {
+                                  setStepEntryView('manual');
+                                  setModalError('');
+                                }}
+                                className={`rounded-lg py-2 px-2 text-xs font-extrabold transition cursor-pointer ${
+                                  stepEntryView === 'manual'
+                                    ? 'bg-emerald-400 text-slate-950 shadow-[0_2px_0_#000]'
+                                    : 'text-amber-100/75 hover:text-white'
+                                }`}
                               >
-                                <span className="text-base">{ocrScanning ? '🤖' : '📸'}</span>
-                                <span>
-                                  {ocrScanning
-                                    ? 'AI กำลังอ่านยอดก้าวจากรูปแคปหน้าจอ...'
-                                    : 'แนบรูปแคปหน้าจอแอปสุขภาพ (AI อ่านก้าวให้)'}
-                                </span>
+                                ✍️ กรอกเอง / แนบรูป
                               </button>
-                              <p className="text-[10px] text-amber-100/70 text-center leading-tight">
-                                ใช้ได้ทั้ง Android (Health Connect / Samsung / Google Fit / Zepp / Garmin) และ iOS
-                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStepEntryView('ios_auto');
+                                  setModalError('');
+                                }}
+                                className={`rounded-lg py-2 px-2 text-xs font-extrabold transition cursor-pointer ${
+                                  stepEntryView === 'ios_auto'
+                                    ? 'bg-sky-400 text-slate-950 shadow-[0_2px_0_#000]'
+                                    : 'text-sky-200/80 hover:text-white'
+                                }`}
+                              >
+                                🍎 ซิงก์อัตโนมัติ (iOS)
+                              </button>
+                            </div>
 
-                              {ocrResult && (
-                                <div className="bg-emerald-950/70 border border-emerald-400/70 rounded-xl p-2 flex items-center gap-2.5">
-                                  {ocrPreviewUrl && (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={ocrPreviewUrl}
-                                      alt="Health screenshot preview"
-                                      className="w-11 h-14 object-cover rounded-lg border border-emerald-300/60 shrink-0"
-                                    />
-                                  )}
-                                  <div className="min-w-0 flex-1 text-left">
-                                    <div className="text-xs font-extrabold text-emerald-300 truncate">
-                                      🤖 อ่านได้ {ocrResult.steps.toLocaleString()} ก้าว
-                                      {ocrResult.appName ? ` • ${ocrResult.appName}` : ''}
+                            {/* สรุปยอดก้าวที่ซิงก์แล้วของวันนี้ */}
+                            <div className="flex items-center justify-between bg-slate-950/70 border border-slate-800 rounded-xl px-3 py-1.5 text-[11px]">
+                              <span className="text-amber-100/80 font-bold">ยอดก้าวที่บันทึกแล้ววันนี้</span>
+                              <span className="font-extrabold text-emerald-300">
+                                {effectiveSyncedToday.toLocaleString()} ก้าว
+                              </span>
+                            </div>
+
+                            {stepEntryView === 'manual' ? (
+                              /* ==================== TAB 1: MANUAL / SCREENSHOT ==================== */
+                              <div className="space-y-3">
+                                <input
+                                  ref={healthFileInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleHealthScreenshotChange}
+                                  className="hidden"
+                                />
+
+                                {/* ทางเลือก A: แนบรูปแคปหน้าจอ */}
+                                <div className="bg-slate-950/80 border border-emerald-500/45 rounded-xl p-3 space-y-2">
+                                  <div className="text-xs font-extrabold text-emerald-300">
+                                    วิธีที่ 1: แคปหน้าจอแอปสุขภาพมาแนบ (ง่ายสุด ไม่ต้องพิมพ์เอง)
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={ocrScanning || submitting}
+                                    onClick={() => healthFileInputRef.current?.click()}
+                                    className="w-full bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 text-slate-950 border-2 border-black shadow-[0_3px_0_#000] active:translate-y-0.5 rounded-xl py-2.5 px-3 flex items-center justify-center gap-2 font-[family-name:var(--font-kanit)] font-extrabold text-xs sm:text-sm cursor-pointer disabled:opacity-60"
+                                  >
+                                    <span className="text-base">{ocrScanning ? '🤖' : '📸'}</span>
+                                    <span>
+                                      {ocrScanning
+                                        ? 'AI กำลังอ่านยอดก้าวจากรูป...'
+                                        : 'เลือกรูปแคปหน้าจอแอปสุขภาพ'}
+                                    </span>
+                                  </button>
+                                  <p className="text-[10.5px] text-amber-100/65 text-center">
+                                    รองรับทุกแอปทั้ง Android และ iPhone (Samsung Health, Google Fit, Apple Health, Garmin ฯลฯ)
+                                  </p>
+
+                                  {ocrResult && (
+                                    <div className="bg-emerald-950/70 border border-emerald-400/70 rounded-xl p-2.5 flex items-center gap-2.5">
+                                      {ocrPreviewUrl && (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={ocrPreviewUrl}
+                                          alt="Health screenshot preview"
+                                          className="w-11 h-14 object-cover rounded-lg border border-emerald-300/60 shrink-0"
+                                        />
+                                      )}
+                                      <div className="min-w-0 flex-1 text-left">
+                                        <div className="text-xs font-extrabold text-emerald-300 truncate">
+                                          ✅ อ่านได้ {ocrResult.steps.toLocaleString()} ก้าว
+                                          {ocrResult.appName ? ` (${ocrResult.appName})` : ''}
+                                        </div>
+                                        <div className="text-[11px] font-bold text-amber-200 leading-snug">
+                                          {ocrResult.steps > effectiveSyncedToday
+                                            ? `จะบวกเพิ่มให้ +${(
+                                                ocrResult.steps - effectiveSyncedToday
+                                              ).toLocaleString()} ก้าว กดปุ่มบันทึกด้านล่างได้เลย!`
+                                            : `ยอดวันนี้บันทึกครบ ${effectiveSyncedToday.toLocaleString()} ก้าวแล้ว`}
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] font-bold text-amber-200 leading-snug">
-                                      {ocrResult.steps > effectiveSyncedToday
-                                        ? `บวกส่วนต่างเข้าสนาม +${(
-                                          ocrResult.steps - effectiveSyncedToday
-                                        ).toLocaleString()} ก้าว (จากเดิมวันนี้ ${effectiveSyncedToday.toLocaleString()})`
-                                        : `ซิงก์ยอดวันนี้ครบ ${effectiveSyncedToday.toLocaleString()} ก้าวแล้ว (ไม่มีส่วนต่างเพิ่ม)`}
+                                  )}
+                                </div>
+
+                                {/* ทางเลือก B: พิมพ์ตัวเลขเอง */}
+                                <div className="bg-slate-950/80 border border-slate-700 rounded-xl p-3 space-y-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <label className="text-xs font-extrabold text-amber-200">
+                                      {stepInputMode === 'daily_sync'
+                                        ? 'วิธีที่ 2: พิมพ์ยอดก้าวของวันนี้'
+                                        : stepInputMode === 'add'
+                                          ? 'พิมพ์จำนวนก้าวที่ต้องการบวกเพิ่ม (+ก้าว)'
+                                          : 'พิมพ์ยอดก้าวสะสมรวมทั้งซีซั่น'}
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAdvancedStepMode((v) => !v)}
+                                      className="text-[10.5px] font-bold text-sky-300 hover:underline cursor-pointer shrink-0"
+                                    >
+                                      {showAdvancedStepMode ? 'ซ่อนตัวเลือก' : '⚙️ เปลี่ยนวิธีคิดเลข'}
+                                    </button>
+                                  </div>
+
+                                  {showAdvancedStepMode && (
+                                    <div className="grid grid-cols-3 gap-1.5 pb-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setStepInputMode('daily_sync')}
+                                        className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border cursor-pointer transition ${
+                                          stepInputMode === 'daily_sync'
+                                            ? 'bg-amber-300 text-black border-white'
+                                            : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                        }`}
+                                      >
+                                        ยอดวันนี้ (แนะนำ)
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setStepInputMode('add')}
+                                        className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border cursor-pointer transition ${
+                                          stepInputMode === 'add'
+                                            ? 'bg-emerald-400 text-black border-white'
+                                            : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                        }`}
+                                      >
+                                        + บวกเพิ่มเอง
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setStepInputMode('set')}
+                                        className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border cursor-pointer transition ${
+                                          stepInputMode === 'set'
+                                            ? 'bg-sky-400 text-black border-white'
+                                            : 'bg-slate-900 text-amber-100/75 border-slate-700'
+                                        }`}
+                                      >
+                                        แก้ยอดรวมซีซั่น
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    required
+                                    value={stepInput}
+                                    onChange={(e) => {
+                                      const thaiDigits = '๐๑๒๓๔๕๖๗๘๙';
+                                      let val = e.target.value;
+                                      for (let i = 0; i < 10; i++) {
+                                        val = val.replaceAll(thaiDigits[i], String(i));
+                                      }
+                                      val = val.replace(/[^0-9]/g, '');
+                                      setStepInput(val);
+                                      setStepSyncSource(
+                                        ocrResult && val !== '' && Number(val) === ocrResult.steps
+                                          ? 'ocr_screenshot'
+                                          : 'web_daily_sync'
+                                      );
+                                    }}
+                                    placeholder={
+                                      stepInputMode === 'daily_sync'
+                                        ? 'ดูเลขก้าววันนี้จากแอปสุขภาพแล้วพิมพ์เลย เช่น 8500'
+                                        : stepInputMode === 'add'
+                                          ? 'เช่น 3500'
+                                          : 'เช่น 45000'
+                                    }
+                                    className="w-full bg-slate-900 text-emerald-300 placeholder:text-slate-500 border-2 border-emerald-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-base sm:text-lg"
+                                  />
+
+                                  {stepInputMode === 'daily_sync' && (
+                                    <p className="text-[10.5px] text-amber-100/70 text-center">
+                                      {parsedTypedSteps !== null ? (
+                                        liveDelta && liveDelta > 0 ? (
+                                          <span className="text-emerald-300 font-bold">
+                                            ✨ ระบบจะบวกเพิ่มให้เฉพาะส่วนต่าง +{liveDelta.toLocaleString()} ก้าว (ไม่เบิ้ลของเดิม)
+                                          </span>
+                                        ) : (
+                                          <span className="text-amber-200 font-bold">
+                                            ℹ️ ยอดนี้ไม่เกินที่บันทึกไว้แล้ววันนี้ ({effectiveSyncedToday.toLocaleString()} ก้าว)
+                                          </span>
+                                        )
+                                      ) : (
+                                        'กรอกซ้ำวันละหลายรอบได้สบาย ระบบคำนวณเฉพาะก้าวที่เดินเพิ่มให้เอง'
+                                      )}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              /* ==================== TAB 2: AUTO SYNC FOR iOS ==================== */
+                              <div className="bg-slate-950/90 border-2 border-sky-500/50 rounded-xl p-3.5 space-y-3 text-left">
+                                <div>
+                                  <div className="text-xs font-extrabold text-sky-300">
+                                    🍎 ตั้งค่าครั้งเดียว ให้ iPhone ส่งก้าวเข้าเกมเองอัตโนมัติ
+                                  </div>
+                                  <p className="text-[11px] text-amber-100/75 mt-0.5">
+                                    ใช้แอป <b>คำสั่งลัด (Shortcuts)</b> ที่มีติดเครื่อง iPhone ทุกเครื่อง ไม่ต้องโหลดแอปเพิ่ม
+                                  </p>
+                                </div>
+
+                                {/* ขั้นที่ 1: ปุ่มเดียวจบ */}
+                                <div className="bg-slate-900 border border-sky-400/35 rounded-xl p-2.5 space-y-1.5">
+                                  <div className="text-[11px] font-extrabold text-amber-300">
+                                    ขั้นที่ 1: คัดลอกลิงก์ส่วนตัวของคุณ
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={!syncKey || loadingSyncStatus}
+                                    onClick={() => handleCopySyncText(shortcutEndpointUrl, 'url')}
+                                    className="w-full bg-sky-400 hover:bg-sky-300 text-slate-950 border-2 border-black shadow-[0_2px_0_#000] rounded-xl py-2 px-3 text-xs font-extrabold cursor-pointer disabled:opacity-50 transition"
+                                  >
+                                    {loadingSyncStatus
+                                      ? 'กำลังเตรียมลิงก์ของคุณ...'
+                                      : copiedSyncField === 'url'
+                                        ? '✅ คัดลอกลิงก์เรียบร้อย! ไปทำขั้นที่ 2 ต่อเลย'
+                                        : '🔗 กดคัดลอกลิงก์ซิงก์ก้าวส่วนตัว'}
+                                  </button>
+                                </div>
+
+                                {/* ขั้นที่ 2: วิธีตั้งในแอป Shortcuts แบบอ่านง่าย */}
+                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-2.5 space-y-2">
+                                  <div className="text-[11px] font-extrabold text-amber-300">
+                                    ขั้นที่ 2: เปิดแอป “คำสั่งลัด (Shortcuts)” กด + สร้างตามนี้
+                                  </div>
+                                  <div className="space-y-1.5 text-[11px] text-amber-50/90 leading-snug">
+                                    <div className="bg-black/40 rounded-lg px-2.5 py-1.5">
+                                      <span className="font-black text-sky-300">1. ดึงก้าววันนี้:</span> เพิ่มคำสั่ง{' '}
+                                      <b>ค้นหาตัวอย่างข้อมูลสุขภาพ</b> → เลือก <b>จำนวนก้าว</b> และวันที่เริ่ม{' '}
+                                      <b>คือวันนี้</b>
+                                    </div>
+                                    <div className="bg-black/40 rounded-lg px-2.5 py-1.5">
+                                      <span className="font-black text-sky-300">2. รวมยอดก้าว:</span> เพิ่มคำสั่ง{' '}
+                                      <b>คำนวณสถิติ</b> → เปลี่ยนเป็น <b>ผลรวม (Sum)</b>
+                                    </div>
+                                    <div className="bg-black/40 rounded-lg px-2.5 py-1.5 space-y-0.5">
+                                      <div>
+                                        <span className="font-black text-sky-300">3. ส่งเข้าเว็บ:</span> เพิ่มคำสั่ง{' '}
+                                        <b>รับเนื้อหาของ URL</b>
+                                      </div>
+                                      <div className="pl-3 text-[10.5px] text-sky-200/90">
+                                        • ช่อง URL = <b>วางลิงก์ที่คัดลอกจากขั้นที่ 1</b>
+                                        <br />• กดลูกศรขยาย เลือกวิธีการเป็น <b>POST</b>
+                                        <br />• กดเพิ่มข้อมูลแบบ <b>ข้อความ (Text)</b> ช่องซ้ายพิมพ์{' '}
+                                        <code className="bg-slate-800 px-1 rounded text-emerald-300">steps</code>{' '}
+                                        ช่องขวาเลือก <b>ผลรวม (Sum)</b>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
-                              )}
 
-                              {/* วิธีที่ 1: สำหรับ iOS / Apple Health ผ่าน Apple Shortcuts */}
-                              <div className="pt-1 border-t border-slate-800">
-                                <button
-                                  type="button"
-                                  onClick={() => setShowIosShortcutGuide((v) => !v)}
-                                  className="w-full bg-slate-900 hover:bg-slate-800 border border-sky-400/50 rounded-lg py-1.5 px-2.5 flex items-center justify-between text-[11px] font-extrabold text-sky-300 cursor-pointer transition"
-                                >
-                                  <span>🍎 เชื่อม Apple Health อัตโนมัติ (iOS Shortcuts)</span>
-                                  <span>{showIosShortcutGuide ? '▲ ซ่อน' : '▼ ตั้งค่า / ดูรหัส'}</span>
-                                </button>
+                                {/* ขั้นที่ 3: ตั้งเวลา/เปิดแอปให้รันเอง */}
+                                <div className="bg-emerald-950/50 border border-emerald-400/40 rounded-xl p-2.5 text-[11px] text-emerald-100 leading-snug">
+                                  <span className="font-extrabold text-emerald-300">
+                                    💡 ขั้นที่ 3 (ให้ส่งก้าวเองทุกวันไม่ต้องกด):
+                                  </span>{' '}
+                                  เข้าแถบ <b>การทำงานอัตโนมัติ (Automation)</b> ด้านล่างแอปคำสั่งลัด → เลือก{' '}
+                                  <b>แอป (App)</b> → เลือกแอปที่เปิดทุกวัน เช่น <b>LINE</b> → ติ๊ก{' '}
+                                  <b>ทำงานทันที</b> แล้วเลือกคำสั่งลัดที่สร้างไว้ เท่านี้ก้าวจะอัปเดตเข้าเกมเองทุกวัน!
+                                </div>
 
-                                {showIosShortcutGuide && (
-                                  <div className="mt-2 bg-slate-900/95 border border-sky-500/40 rounded-xl p-2.5 space-y-2.5 text-left">
-                                    <div>
-                                      <div className="flex items-center justify-between mb-1">
-                                        <span className="text-[11px] font-extrabold text-amber-300">
-                                          🔑 รหัส Sync Key เฉพาะตัวของคุณ
-                                        </span>
-                                        {loadingSyncStatus && (
-                                          <span className="text-[10px] text-sky-300">กำลังโหลด...</span>
-                                        )}
-                                      </div>
+                                {/* ซ่อนส่วนจัดการรหัสความปลอดภัยไว้ด้านล่าง ไม่ให้รกตา */}
+                                <div className="pt-1 border-t border-slate-800">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowKeySecurityBox((v) => !v)}
+                                    className="text-[10.5px] font-bold text-slate-400 hover:text-amber-200 cursor-pointer"
+                                  >
+                                    {showKeySecurityBox
+                                      ? '▲ ซ่อนการตั้งค่ารหัสความปลอดภัย'
+                                      : '🔐 ดูรหัสคีย์ หรือสุ่มเปลี่ยนรหัสใหม่ (กรณีลิงก์หลุด)'}
+                                  </button>
 
-                                      <div className="bg-black/70 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-emerald-300 break-all select-all">
+                                  {showKeySecurityBox && (
+                                    <div className="mt-2 bg-black/50 border border-slate-700 rounded-xl p-2.5 space-y-2">
+                                      <div className="font-mono text-[10.5px] text-emerald-300 break-all">
                                         {showSyncKey ? syncKey || '...' : maskedKey}
                                       </div>
-
-                                      <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                                      <div className="grid grid-cols-3 gap-1.5">
                                         <button
                                           type="button"
                                           disabled={!syncKey}
                                           onClick={() => setShowSyncKey((v) => !v)}
-                                          className="bg-slate-800 hover:bg-slate-700 text-amber-100 border border-slate-600 rounded-lg py-1 text-[10.5px] font-bold cursor-pointer disabled:opacity-50"
+                                          className="bg-slate-800 hover:bg-slate-700 text-amber-100 border border-slate-600 rounded-lg py-1 text-[10px] font-bold cursor-pointer"
                                         >
-                                          {showSyncKey ? '🙈 ซ่อนรหัส' : '👁️ ดูรหัส'}
+                                          {showSyncKey ? 'ซ่อนรหัส' : 'ดูรหัส'}
                                         </button>
                                         <button
                                           type="button"
                                           disabled={!syncKey}
                                           onClick={() => handleCopySyncText(syncKey, 'key')}
-                                          className="bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/50 rounded-lg py-1 text-[10.5px] font-bold cursor-pointer disabled:opacity-50"
+                                          className="bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 rounded-lg py-1 text-[10px] font-bold cursor-pointer"
                                         >
-                                          {copiedSyncField === 'key' ? '✅ คัดลอกแล้ว' : '📋 คัดลอกคีย์'}
+                                          {copiedSyncField === 'key' ? 'คัดลอกแล้ว' : 'คัดลอกคีย์'}
                                         </button>
                                         <button
                                           type="button"
                                           disabled={!syncKey || rotatingSyncKey}
                                           onClick={handleRotateSyncKey}
-                                          className={`rounded-lg py-1 text-[10.5px] font-bold border cursor-pointer disabled:opacity-50 ${confirmRotateKey
-                                            ? 'bg-rose-600 text-white border-amber-300'
-                                            : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
-                                            }`}
+                                          className={`rounded-lg py-1 text-[10px] font-bold border cursor-pointer ${
+                                            confirmRotateKey
+                                              ? 'bg-rose-600 text-white border-amber-300'
+                                              : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                                          }`}
                                         >
                                           {rotatingSyncKey
                                             ? 'กำลังสุ่ม...'
                                             : confirmRotateKey
-                                              ? '⚠️ กดยืนยันสุ่ม'
-                                              : '🔄 สุ่มใหม่'}
+                                              ? 'ยืนยันสุ่มใหม่'
+                                              : 'สุ่มรหัสใหม่'}
                                         </button>
                                       </div>
-
-                                      <button
-                                        type="button"
-                                        disabled={!syncKey}
-                                        onClick={() => handleCopySyncText(shortcutEndpointUrl, 'url')}
-                                        className="w-full mt-1.5 bg-sky-400 hover:bg-sky-300 text-slate-950 border-2 border-black rounded-lg py-1.5 px-2 text-[11px] font-extrabold cursor-pointer disabled:opacity-50"
-                                      >
-                                        {copiedSyncField === 'url'
-                                          ? '✅ คัดลอก URL พร้อมคีย์แล้ว! นำไปวางใน Shortcuts ได้เลย'
-                                          : '🔗 คัดลอก URL พร้อมคีย์ (วางใน Shortcuts ได้ทันที)'}
-                                      </button>
                                     </div>
-
-                                    <div className="border-t border-slate-800 pt-2 space-y-1 text-[11px] text-amber-100/90 leading-relaxed">
-                                      <div className="font-extrabold text-sky-300">
-                                        📖 วิธีตั้งค่า Apple Shortcuts บน iPhone (ทำครั้งเดียวจบ):
-                                      </div>
-                                      <ol className="list-decimal list-inside space-y-1 text-[10.5px] text-amber-100/85">
-                                        <li>
-                                          เปิดแอป <b>คำสั่งลัด (Shortcuts)</b> กด <b>+</b> สร้างคำสั่งลัดใหม่
-                                        </li>
-                                        <li>
-                                          เพิ่มคำสั่ง <b>ค้นหาตัวอย่างข้อมูลสุขภาพ (Find Health Samples)</b> → เลือกประเภท{' '}
-                                          <b>จำนวนก้าว (Steps)</b> และวันที่เริ่ม <b>คือวันนี้ (is Today)</b>
-                                          <span className="text-amber-300/80">
-                                            {' '}
-                                            (หากใส่ Apple Watch คู่ iPhone แล้วก้าวเบิ้ล ให้กรอง Source เลือกเครื่องเดียว)
-                                          </span>
-                                        </li>
-                                        <li>
-                                          เพิ่มคำสั่ง <b>คำนวณสถิติ (Calculate Statistics)</b> → เลือก{' '}
-                                          <b>ผลรวม (Sum)</b> จากตัวอย่างข้อมูลสุขภาพ
-                                        </li>
-                                        <li>
-                                          เพิ่มคำสั่ง <b>รับเนื้อหาของ URL (Get Contents of URL)</b>:
-                                          <div className="pl-3 mt-0.5 text-sky-200/90 space-y-0.5">
-                                            <div>• ช่อง URL: กดวางลิงก์จากปุ่ม <b>คัดลอก URL พร้อมคีย์</b> ด้านบน</div>
-                                            <div>• วิธีการ (Method): <b>POST</b> • เนื้อหาคำขอ: <b>JSON</b></div>
-                                            <div>
-                                              • กดเพิ่มช่องข้อมูลใหม่ เลือกชนิด <b>ข้อความ (Text)</b> ตั้งชื่อว่า{' '}
-                                              <code className="bg-black px-1 rounded text-emerald-300">steps</code>{' '}
-                                              แล้วจิ้มเลือกตัวแปร <b>ผลรวม (Sum)</b> จากข้อ 3
-                                            </div>
-                                          </div>
-                                        </li>
-                                        <li>
-                                          <i>(แนะนำ)</i> เพิ่ม <b>แสดงการแจ้งเตือน (Show Notification)</b> เลือกค่า{' '}
-                                          <code className="bg-black px-1 rounded text-amber-300">message</code> จากผลลัพธ์ URL
-                                          แล้วกดแชร์เพิ่มลงหน้าจอโฮม หรือตั้ง Automation รันเองทุกเย็นได้เลย! (กดซ้ำกี่รอบในวันเดียวก็ไม่เบิ้ล)
-                                        </li>
-                                      </ol>
-                                    </div>
-                                  </div>
-                                )}
+                                  )}
+                                </div>
                               </div>
-                            </div>
-
-                            {/* โหมดการกรอกตัวเลขก้าว */}
-                            <div className="grid grid-cols-3 gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setStepInputMode('daily_sync')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'daily_sync'
-                                  ? 'bg-amber-300 text-black border-white'
-                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                  }`}
-                              >
-                                🔄 ยอดวันนี้ (กันเบิ้ล)
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setStepInputMode('add')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'add'
-                                  ? 'bg-emerald-400 text-black border-white'
-                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                  }`}
-                              >
-                                ➕ บวกเพิ่มเอง
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setStepInputMode('set')}
-                                className={`rounded-lg py-1.5 px-1 text-[10.5px] font-extrabold border-2 cursor-pointer transition ${stepInputMode === 'set'
-                                  ? 'bg-sky-400 text-black border-white'
-                                  : 'bg-slate-900 text-amber-100/75 border-slate-700'
-                                  }`}
-                              >
-                                📝 รวมทั้งซีซั่น
-                              </button>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-amber-200 mb-1">
-                                {stepInputMode === 'daily_sync'
-                                  ? 'ยอดก้าวเดินรวมของวันนี้จากแอปสุขภาพ (ระบบหักส่วนที่ซิงก์ไปแล้วให้อัตโนมัติ)'
-                                  : stepInputMode === 'add'
-                                    ? 'จำนวนก้าวที่เดินเพิ่มในครั้งนี้ (+ก้าว)'
-                                    : 'ยอดก้าวเดินสะสมรวมทั้งซีซั่น (ก้าว)'}
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                required
-                                value={stepInput}
-                                onChange={(e) => {
-                                  const thaiDigits = '๐๑๒๓๔๕๖๗๘๙';
-                                  let val = e.target.value;
-                                  for (let i = 0; i < 10; i++) {
-                                    val = val.replaceAll(thaiDigits[i], String(i));
-                                  }
-                                  val = val.replace(/[^0-9]/g, '');
-                                  setStepInput(val);
-                                  setStepSyncSource(
-                                    ocrResult && val !== '' && Number(val) === ocrResult.steps
-                                      ? 'ocr_screenshot'
-                                      : 'web_daily_sync'
-                                  );
-                                }}
-                                placeholder={
-                                  stepInputMode === 'daily_sync'
-                                    ? 'เช่น 8500 (ยอดก้าวของวันนี้)'
-                                    : stepInputMode === 'add'
-                                      ? 'เช่น 3500'
-                                      : 'เช่น 45000'
-                                }
-                                className="w-full bg-slate-900 text-emerald-300 placeholder:text-slate-500 border-2 border-emerald-400 rounded-xl px-3 py-2 font-[family-name:var(--font-kanit)] font-extrabold text-center text-lg"
-                              />
-
-                              {stepInputMode === 'daily_sync' && parsedTypedSteps !== null && (
-                                <p
-                                  className={`mt-1 text-[11px] font-bold text-center ${liveDelta && liveDelta > 0 ? 'text-emerald-300' : 'text-amber-200/80'
-                                    }`}
-                                >
-                                  {liveDelta && liveDelta > 0
-                                    ? `✨ จะบวกเข้าสนามเฉพาะส่วนต่าง +${liveDelta.toLocaleString()} ก้าว (ซิงก์วันนี้ไปแล้ว ${effectiveSyncedToday.toLocaleString()} ก้าว)`
-                                    : `ℹ️ ยอดนี้ซิงก์ไปแล้วในวันนี้ (${effectiveSyncedToday.toLocaleString()} ก้าว) ระบบจะไม่บวกก้าวซ้ำ`}
-                                </p>
-                              )}
-                            </div>
+                            )}
                           </div>
                         );
                       })()
@@ -8016,26 +8146,28 @@ export default function Arena3DPage() {
                       </div>
                     )}
 
-                    <button
-                      type="submit"
-                      disabled={submitting || ocrScanning}
-                      className="w-full rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1 disabled:opacity-60"
-                    >
-                      {submitting
-                        ? 'กำลังอัปเดต...'
-                        : ocrScanning
-                          ? 'กำลังอ่านรูปด้วย AI...'
-                          : logTab === 'steps'
-                            ? stepInputMode === 'daily_sync' &&
-                              stepInput.trim() !== '' &&
-                              !Number.isNaN(Number(stepInput)) &&
-                              Math.round(Number(stepInput)) > todaySyncedSteps
-                              ? `👟 ซิงก์ก้าววันนี้ (+${(
-                                Math.round(Number(stepInput)) - todaySyncedSteps
-                              ).toLocaleString()} ก้าว) เข้าสนาม!`
-                              : '👟 บันทึกก้าวเดิน & วิ่งเข้าเส้นชัย!'
-                            : '🚀 ส่งผลภารกิจรอง & รับโบนัส!'}
-                    </button>
+                    {!(logTab === 'steps' && stepEntryView === 'ios_auto') && (
+                      <button
+                        type="submit"
+                        disabled={submitting || ocrScanning}
+                        className="w-full rpg-btn-green font-[family-name:var(--font-kanit)] font-extrabold text-base py-3 rounded-xl cursor-pointer mt-1 disabled:opacity-60"
+                      >
+                        {submitting
+                          ? 'กำลังอัปเดต...'
+                          : ocrScanning
+                            ? 'กำลังอ่านรูปด้วย AI...'
+                            : logTab === 'steps'
+                              ? stepInputMode === 'daily_sync' &&
+                                stepInput.trim() !== '' &&
+                                !Number.isNaN(Number(stepInput)) &&
+                                Math.round(Number(stepInput)) > todaySyncedSteps
+                                ? `👟 บันทึกก้าววันนี้ (+${(
+                                    Math.round(Number(stepInput)) - todaySyncedSteps
+                                  ).toLocaleString()} ก้าว)`
+                                : '👟 บันทึกก้าวเดิน!'
+                              : '🚀 ส่งผลภารกิจรอง & รับโบนัส!'}
+                      </button>
+                    )}
                   </form>
                 </>
               );
@@ -8855,6 +8987,16 @@ export default function Arena3DPage() {
                 </button>
               )}
 
+              {!isPairMenuOpen && isNearFortune && (
+                <button
+                  type="button"
+                  onClick={() => setIsFortuneOpen(true)}
+                  className="neo-btn bg-gradient-to-r from-purple-700 via-fuchsia-600 to-amber-400 text-white border-2 border-amber-200 font-[family-name:var(--font-kanit)] font-extrabold text-[11.5px] sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full cursor-pointer shadow-[0_3px_0_#2e1065] whitespace-nowrap"
+                >
+                  🔮 ดูดวงแม่หมอ<span className="hidden sm:inline">จันทรา (ฟรี!)</span>
+                </button>
+              )}
+
               {!isPairMenuOpen && isNearQuestBoard && (
                 <button
                   type="button"
@@ -9158,6 +9300,14 @@ export default function Arena3DPage() {
           isOpen={isPetCafeOpen}
           onClose={() => setIsPetCafeOpen(false)}
           qualityMode={qualityMode}
+          playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
+        />
+      )}
+
+      {isFortuneOpen && (
+        <FortuneTellerModal
+          isOpen={isFortuneOpen}
+          onClose={() => setIsFortuneOpen(false)}
           playerName={players.find((pl) => pl.id === currentUserId)?.name || 'ผู้กล้า'}
         />
       )}
